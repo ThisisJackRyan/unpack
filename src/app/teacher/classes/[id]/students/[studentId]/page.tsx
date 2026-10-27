@@ -1,0 +1,106 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { cache } from "react";
+import { NeedsResetBadge, StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
+import { backLink, card } from "@/components/ui";
+import { cellKey, NOT_STARTED_CELL, triesLabel, type ClassStatus } from "@/lib/class-status";
+import { loadClassStatus } from "@/lib/class-status-db";
+import { STUDENT_GENERATION_CALL_LIMIT } from "@/lib/student-questions-core";
+import { getOrCreateTeacher } from "@/lib/teacher";
+import { loadClass } from "../../loaders";
+import { resetTriesAction } from "../actions";
+import { ProgressAnnouncer } from "../announcer";
+import { ResetTriesButton } from "../reset-tries";
+
+type Props = { params: Promise<{ id: string; studentId: string }> };
+
+// Cached per request so generateMetadata and the page share one query.
+const load = cache(async (id: string, studentId: string): Promise<{ status: ClassStatus; name: string; classId: string; className: string }> => {
+  const found = await loadClass(id);
+  const teacher = await getOrCreateTeacher();
+  const status = await loadClassStatus(found.id, teacher.id);
+  const student = status.students.find((s) => s.id === studentId);
+  if (!student) notFound();
+  return { status, name: student.name, classId: found.id, className: found.name };
+});
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id, studentId } = await params;
+  const { name } = await load(id, studentId);
+  return { title: `${name}: Class progress` };
+}
+
+// One student's progress on each published reading, the same statuses as
+// the class progress table. Where they Need a reset (every try at getting
+// their own questions used, none came back), it says so in plain words,
+// with "Let them try again". Only the owning teacher gets here (loadClass
+// 404s others, and a student not in this class 404s); the reset checks
+// ownership again in its own statement.
+export default async function StudentProgressPage({ params }: Props) {
+  const { id, studentId } = await params;
+  const { status, name, classId, className } = await load(id, studentId);
+  const onReset = resetTriesAction.bind(null, classId);
+
+  return (
+    <div className="flex flex-col gap-8">
+      <Link href={`/teacher/classes/${classId}/students`} className={`${backLink} self-start`}>
+        <span aria-hidden="true">←</span> <span className="break-words">Back to class progress</span>
+      </Link>
+
+      <div className="flex flex-col gap-1">
+        <h1 id="student-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight break-words text-zinc-950 focus:outline-none">
+          {name}
+        </h1>
+        <p className="text-lg break-words text-zinc-600">{className}</p>
+      </div>
+
+      <ProgressAnnouncer headingId="student-heading" />
+
+      {status.readings.length === 0 ? (
+        <p className={`${card} px-6 py-12 text-center text-lg text-zinc-600`}>
+          No published readings yet. Publish one, and progress shows up here.
+        </p>
+      ) : (
+        <ul className={`${card} divide-y divide-zinc-200`}>
+          {status.readings.map((r) => {
+            const cell = status.cells[cellKey(studentId, r.id)] ?? NOT_STARTED_CELL;
+            return (
+              <li key={r.id} className="flex flex-col gap-3 px-5 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                  <h2 className="min-w-0 text-base font-semibold break-words text-zinc-950">{r.title}</h2>
+                  {cell.needsReset ? (
+                    <NeedsResetBadge size="sm" />
+                  ) : (
+                    <span className="flex items-center gap-3">
+                      {cell.status !== "not_started" && (
+                        <span className="text-sm text-zinc-600 tabular-nums">{triesLabel(cell)}</span>
+                      )}
+                      <StudentReadingStatusBadge status={cell.status} size="sm" />
+                    </span>
+                  )}
+                </div>
+                {cell.needsReset && (
+                  <div className="flex flex-col items-start gap-3 rounded-lg bg-amber-50 px-4 py-3">
+                    <p className="text-base text-zinc-800">
+                      {name}’s questions didn’t load after {STUDENT_GENERATION_CALL_LIMIT} tries, so they can’t try again
+                      on their own. Let them try again to give them {STUDENT_GENERATION_CALL_LIMIT} more.
+                    </p>
+                    <ResetTriesButton
+                      action={onReset}
+                      studentId={studentId}
+                      readingId={r.id}
+                      name={name}
+                      readingTitle={r.title}
+                      size="base"
+                    />
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}

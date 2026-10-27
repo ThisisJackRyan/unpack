@@ -1,39 +1,12 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { startTransition, useActionState, useId, useRef, type FormEvent } from "react";
 import { dangerButton, dangerGhostButton, secondaryButton } from "@/components/ui";
 import { studentDeletedMessage } from "@/lib/student-delete";
+import { announceProgress } from "./announcer";
 import type { DeleteStudentState } from "./state";
 
 type Action = (state: DeleteStudentState, formData: FormData) => Promise<DeleteStudentState>;
-
-// Fired when a student is deleted, for DeleteAnnouncer: the row (and its
-// dialog) is gone after the refresh, so the message lives above the list.
-const DELETED_EVENT = "unpack:student-deleted";
-
-// The page's live region for deletes. Stays mounted while rows come and
-// go, and moves focus to the heading so it isn't lost with the row.
-export function DeleteAnnouncer({ headingId }: { headingId: string }) {
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    function onDeleted(e: Event) {
-      setMessage((e as CustomEvent<string>).detail);
-      document.getElementById(headingId)?.focus();
-    }
-    window.addEventListener(DELETED_EVENT, onDeleted);
-    return () => window.removeEventListener(DELETED_EVENT, onDeleted);
-  }, [headingId]);
-
-  return (
-    <p
-      aria-live="polite"
-      className="rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-3 text-base font-medium text-indigo-950 empty:hidden"
-    >
-      {message}
-    </p>
-  );
-}
 
 // The row's "Delete" button and its confirm dialog: a native modal
 // <dialog> (focus stays inside, Esc closes), a red "Delete {name}" and a
@@ -45,7 +18,7 @@ export function DeleteStudentButton({ action, studentId, name }: { action: Actio
     const next = await action(prev, formData);
     if (next.deleted) {
       dialog.current?.close();
-      window.dispatchEvent(new CustomEvent(DELETED_EVENT, { detail: studentDeletedMessage(name) }));
+      announceProgress(studentDeletedMessage(name));
     }
     return next;
   }, {});

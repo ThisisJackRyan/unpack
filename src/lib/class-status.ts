@@ -124,6 +124,10 @@ export function classStatus(results: Record<string, unknown>[][]): ClassStatus {
 
 export const NOT_STARTED_CELL: ClassStatusCell = classStatusCell({});
 
+// Under the Needs a reset pill. Says what happened without "tries", which
+// on these pages means answer tries.
+export const NEEDS_RESET_HELP = "Their questions didn’t load.";
+
 // "2 of 3 tries"
 export function triesLabel(cell: ClassStatusCell): string {
   return `${cell.tries} of ${cell.triesAllowed} ${cell.triesAllowed === 1 ? "try" : "tries"}`;

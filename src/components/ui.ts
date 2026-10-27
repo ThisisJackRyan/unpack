@@ -8,6 +8,9 @@ export const primaryButton = `inline-flex min-h-12 items-center justify-center g
 
 export const secondaryButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-5 text-base font-semibold text-zinc-900 transition-colors hover:bg-zinc-50 ${focusRing}`;
 
+// The smaller neutral button for a table row (still a 44px tap target).
+export const secondarySmallButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-900 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`;
+
 export const backLink = `inline-flex min-h-12 items-center gap-1 rounded-lg text-base font-medium text-zinc-600 hover:text-zinc-900 ${focusRing}`;
 
 export const card = "rounded-xl border border-zinc-200 bg-white";

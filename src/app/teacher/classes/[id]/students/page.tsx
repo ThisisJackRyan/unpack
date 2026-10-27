@@ -1,23 +1,30 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
+import { NeedsResetBadge, StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
 import { backLink, card, focusRing } from "@/components/ui";
 import {
   cellKey,
   NOT_STARTED_CELL,
   statusCounts,
+  NEEDS_RESET_HELP,
   triesLabel,
   type ClassStatus,
   type ClassStatusCell,
+  type ClassStatusReading,
+  type ClassStatusStudent,
 } from "@/lib/class-status";
 import { loadClassStatus } from "@/lib/class-status-db";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadClass } from "../loaders";
-import { deleteStudentAction } from "./actions";
-import { DeleteAnnouncer, DeleteStudentButton } from "./delete-student";
-import type { DeleteStudentState } from "./state";
+import { deleteStudentAction, resetTriesAction } from "./actions";
+import { ProgressAnnouncer } from "./announcer";
+import { DeleteStudentButton } from "./delete-student";
+import { ResetTriesButton } from "./reset-tries";
+import type { DeleteStudentState, ResetTriesState } from "./state";
 
 type DeleteAction = (state: DeleteStudentState, formData: FormData) => Promise<DeleteStudentState>;
+type ResetAction = (state: ResetTriesState, formData: FormData) => Promise<ResetTriesState>;
+type Actions = { classId: string; onDelete: DeleteAction; onReset: ResetAction };
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -28,19 +35,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 // Each student on each published reading: Not started, In progress,
-// Passed, Challenged, or Challenge denied, with tries used. A table on
+// Passed, Challenged, or Challenge denied, with tries used, or Needs a
+// reset (with "Let them try again") when a student used every try at
+// getting their own questions for a reading. A table on
 // wide screens (students down, readings across), one card per student on
 // narrow ones. Only the owning teacher gets here (loadClass 404s others).
 // Each student has a Delete (with a confirm dialog) that removes them and
 // all of their work; the delete checks ownership again in its own
-// statement.
+// statement. Each name links to that student's own page.
 export default async function ClassProgressPage({ params }: Props) {
   const { id } = await params;
   const found = await loadClass(id);
   const teacher = await getOrCreateTeacher();
   const status = await loadClassStatus(found.id, teacher.id);
   const challengesHref = `/teacher/classes/${found.id}/challenges`;
-  const onDelete = deleteStudentAction.bind(null, found.id);
+  const actions: Actions = {
+    classId: found.id,
+    onDelete: deleteStudentAction.bind(null, found.id),
+    onReset: resetTriesAction.bind(null, found.id),
+  };
 
   return (
     <div className="flex flex-col gap-8">
@@ -64,7 +77,7 @@ export default async function ClassProgressPage({ params }: Props) {
         </p>
       </div>
 
-      <DeleteAnnouncer headingId="progress-heading" />
+      <ProgressAnnouncer headingId="progress-heading" />
 
       {status.students.length === 0 ? (
         <p className={`${card} px-6 py-12 text-center text-lg text-zinc-600`}>
@@ -75,12 +88,12 @@ export default async function ClassProgressPage({ params }: Props) {
           <p className={`${card} px-6 py-12 text-center text-lg text-zinc-600`}>
             No published readings yet. Publish one, and progress shows up here.
           </p>
-          <StudentList status={status} onDelete={onDelete} />
+          <StudentList status={status} actions={actions} />
         </>
       ) : (
         <>
-          <ProgressTable status={status} onDelete={onDelete} />
-          <ProgressCards status={status} onDelete={onDelete} />
+          <ProgressTable status={status} actions={actions} />
+          <ProgressCards status={status} actions={actions} />
         </>
       )}
     </div>
@@ -91,7 +104,24 @@ function cellOf(status: ClassStatus, studentId: string, readingId: string): Clas
   return status.cells[cellKey(studentId, readingId)] ?? NOT_STARTED_CELL;
 }
 
-function Cell({ cell }: { cell: ClassStatusCell }) {
+type CellTarget = { student: ClassStatusStudent; reading: ClassStatusReading; actions: Actions };
+
+function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
+  if (cell.needsReset) {
+    return (
+      <span className="flex flex-col items-start gap-1.5">
+        <NeedsResetBadge size="sm" />
+        <span className="text-sm text-zinc-600">{NEEDS_RESET_HELP}</span>
+        <ResetTriesButton
+          action={target.actions.onReset}
+          studentId={target.student.id}
+          readingId={target.reading.id}
+          name={target.student.name}
+          readingTitle={target.reading.title}
+        />
+      </span>
+    );
+  }
   return (
     <span className="flex flex-col items-start gap-1">
       <StudentReadingStatusBadge status={cell.status} size="sm" />
@@ -102,13 +132,24 @@ function Cell({ cell }: { cell: ClassStatusCell }) {
   );
 }
 
+function StudentLink({ classId, student, className }: { classId: string; student: ClassStatusStudent; className: string }) {
+  return (
+    <Link
+      href={`/teacher/classes/${classId}/students/${student.id}`}
+      className={`rounded break-words underline-offset-2 hover:underline ${focusRing} ${className}`}
+    >
+      {student.name}
+    </Link>
+  );
+}
+
 // "4 of 12 passed", under each reading's title.
 function passedSummary(status: ClassStatus, readingId: string): string {
   return `${statusCounts(status, readingId).passed} of ${status.students.length} passed`;
 }
 
 // Before any reading is published: just the names, each with Delete.
-function StudentList({ status, onDelete }: { status: ClassStatus; onDelete: DeleteAction }) {
+function StudentList({ status, actions }: { status: ClassStatus; actions: Actions }) {
   return (
     <section aria-labelledby="students-heading" className="flex flex-col gap-3">
       <h2 id="students-heading" className="text-xl font-semibold text-zinc-950">
@@ -117,8 +158,8 @@ function StudentList({ status, onDelete }: { status: ClassStatus; onDelete: Dele
       <ul className={`${card} divide-y divide-zinc-200`}>
         {status.students.map((s) => (
           <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-2">
-            <span className="text-base font-semibold break-words text-zinc-950">{s.name}</span>
-            <DeleteStudentButton action={onDelete} studentId={s.id} name={s.name} />
+            <StudentLink classId={actions.classId} student={s} className="text-base font-semibold text-zinc-950" />
+            <DeleteStudentButton action={actions.onDelete} studentId={s.id} name={s.name} />
           </li>
         ))}
       </ul>
@@ -126,7 +167,7 @@ function StudentList({ status, onDelete }: { status: ClassStatus; onDelete: Dele
   );
 }
 
-function ProgressTable({ status, onDelete }: { status: ClassStatus; onDelete: DeleteAction }) {
+function ProgressTable({ status, actions }: { status: ClassStatus; actions: Actions }) {
   return (
     <div className={`${card} hidden overflow-x-auto md:block`}>
       <table className="w-full border-collapse text-left">
@@ -151,15 +192,15 @@ function ProgressTable({ status, onDelete }: { status: ClassStatus; onDelete: De
           {status.students.map((s) => (
             <tr key={s.id}>
               <th scope="row" className="sticky left-0 bg-white px-5 py-3 text-base font-semibold whitespace-nowrap text-zinc-950">
-                {s.name}
+                <StudentLink classId={actions.classId} student={s} className="" />
               </th>
               {status.readings.map((r) => (
                 <td key={r.id} className="px-4 py-3 align-top">
-                  <Cell cell={cellOf(status, s.id, r.id)} />
+                  <Cell cell={cellOf(status, s.id, r.id)} target={{ student: s, reading: r, actions }} />
                 </td>
               ))}
               <td className="px-4 py-2 text-right align-top">
-                <DeleteStudentButton action={onDelete} studentId={s.id} name={s.name} />
+                <DeleteStudentButton action={actions.onDelete} studentId={s.id} name={s.name} />
               </td>
             </tr>
           ))}
@@ -169,20 +210,22 @@ function ProgressTable({ status, onDelete }: { status: ClassStatus; onDelete: De
   );
 }
 
-function ProgressCards({ status, onDelete }: { status: ClassStatus; onDelete: DeleteAction }) {
+function ProgressCards({ status, actions }: { status: ClassStatus; actions: Actions }) {
   return (
     <ul className="flex flex-col gap-3 md:hidden">
       {status.students.map((s) => (
         <li key={s.id} className={`${card} flex flex-col gap-3 px-5 py-4`}>
           <div className="flex items-center justify-between gap-4">
-            <h2 className="text-lg font-semibold break-words text-zinc-950">{s.name}</h2>
-            <DeleteStudentButton action={onDelete} studentId={s.id} name={s.name} />
+            <h2 className="text-lg font-semibold text-zinc-950">
+              <StudentLink classId={actions.classId} student={s} className="" />
+            </h2>
+            <DeleteStudentButton action={actions.onDelete} studentId={s.id} name={s.name} />
           </div>
           <ul className="flex flex-col divide-y divide-zinc-100">
             {status.readings.map((r) => (
               <li key={r.id} className="flex items-start justify-between gap-4 py-2.5">
                 <span className="min-w-0 text-base break-words text-zinc-800">{r.title}</span>
-                <Cell cell={cellOf(status, s.id, r.id)} />
+                <Cell cell={cellOf(status, s.id, r.id)} target={{ student: s, reading: r, actions }} />
               </li>
             ))}
           </ul>
