@@ -9,6 +9,8 @@ import { getOrCreateTeacher } from "@/lib/teacher";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { backLink, card, focusRing, primaryButton } from "@/components/ui";
 import { CopyButton } from "./copy-button";
+import { newJoinCodeAction, setJoinCodeActiveAction } from "./join-code/actions";
+import { JoinCodeSettings } from "./join-code/join-code-settings";
 import { loadClass } from "./loaders";
 
 type Props = { params: Promise<{ id: string }> };
@@ -66,7 +68,7 @@ export default async function ClassDetailPage({ params }: Props) {
 
       <section
         aria-labelledby="join-code-heading"
-        className={`${card} flex flex-col items-center gap-6 px-6 py-10 text-center sm:py-14`}
+        className={`${card} flex flex-col items-center gap-6 px-6 pt-10 pb-4 text-center sm:pt-14`}
       >
         <div className="flex items-center gap-3">
           <h2
@@ -87,15 +89,33 @@ export default async function ClassDetailPage({ params }: Props) {
             </span>
           )}
         </div>
-        <p className="pl-[0.2em] font-mono text-6xl font-bold tracking-[0.2em] text-zinc-950 sm:text-8xl">
+        <p
+          className={`pl-[0.2em] font-mono text-6xl font-bold tracking-[0.2em] sm:text-8xl ${
+            found.codeActive ? "text-zinc-950" : "text-zinc-400"
+          }`}
+        >
           {found.joinCode}
         </p>
         <CopyButton value={found.joinCode} label="join code" />
         <p className="text-lg text-zinc-700">
-          Students go to{" "}
-          <span className="font-semibold text-zinc-950">{joinUrl}</span> and
-          enter this code.
+          {found.codeActive ? (
+            <>
+              Students go to{" "}
+              <span className="font-semibold text-zinc-950">{joinUrl}</span> and
+              enter this code.
+            </>
+          ) : (
+            "The code is off, so no one new can join. Turn it on below."
+          )}
         </p>
+        <div className="w-full max-w-xl">
+          <JoinCodeSettings
+            code={found.joinCode}
+            codeActive={found.codeActive}
+            setActiveAction={setJoinCodeActiveAction.bind(null, found.id)}
+            newCodeAction={newJoinCodeAction.bind(null, found.id)}
+          />
+        </div>
       </section>
 
       <section aria-labelledby="readings-heading" className="flex flex-col gap-4">
