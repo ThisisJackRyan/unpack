@@ -34,8 +34,8 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
 
   // Server setup first, before any network call or database work: with a
   // Turnstile key missing, or JOIN_IP_HASH_SECRET missing or unusable in
-  // production, no join can work, so the student is told joining is
-  // turned off and one "join_blocked_config" error names the missing
+  // production, no join can work, so the student is told joining isn't
+  // working right now and one "join_blocked_config" error names the missing
   // variable(s), never a value (see join-config.ts).
   const blocked = joinConfigBlock();
   if (blocked) {

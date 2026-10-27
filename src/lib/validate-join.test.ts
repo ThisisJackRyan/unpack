@@ -181,7 +181,7 @@ describe("formatInitials", () => {
 
 describe("join blocked by server setup", () => {
   it("has its own message, distinct from the generic failure", () => {
-    assert.equal(JOIN_DISABLED_MESSAGE, "Joining is turned off right now. Ask your teacher.");
+    assert.equal(JOIN_DISABLED_MESSAGE, "Joining isn\u2019t working right now. Please try again in a little while.");
     assert.notEqual(JOIN_DISABLED_MESSAGE, JOIN_FAILED_MESSAGE);
     assert.doesNotMatch(JOIN_DISABLED_MESSAGE, /'|\u2014/);
   });

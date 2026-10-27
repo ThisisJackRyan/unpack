@@ -115,7 +115,7 @@ export const JOIN_IP_HASH_SECRET_MIN_LENGTH = 32;
 // the public dev secret is a problem; outside production nothing is (the
 // dev secret fills in). Names the variable, never its value. The join
 // action checks this before any database work (join-config.ts) and tells
-// the student joining is turned off.
+// the student joining isn't working right now.
 export function joinIpHashSecretProblem(env: Env = process.env): { missing: string[]; message: string } | null {
   if (!isProduction(env)) return null;
   const secret = env.JOIN_IP_HASH_SECRET;

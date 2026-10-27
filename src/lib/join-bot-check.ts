@@ -17,7 +17,7 @@ import { JOIN_DISABLED_MESSAGE, logJoinBlockedConfig, type JoinBlockedConfig } f
 // - Both NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY set: on.
 //   The join form shows the widget and every join needs a good token.
 // - In production, either key missing (or both): "misconfigured". Every
-//   join is refused with JOIN_DISABLED_MESSAGE ("Joining is turned off
+//   join is refused with JOIN_DISABLED_MESSAGE ("Joining isn’t working
 //   right now", as when JOIN_IP_HASH_SECRET is missing) and one
 //   console.error tagged "join_blocked_config" names the missing
 //   variable(s), never a value. The join action checks this up front
@@ -182,8 +182,7 @@ export type JoinBotCheckDeps = {
 };
 
 // What the student sees. Misconfigured gets JOIN_DISABLED_MESSAGE, as a
-// missing JOIN_IP_HASH_SECRET does: it's not the student's doing, and
-// trying again won't help.
+// missing JOIN_IP_HASH_SECRET does: it's not the student's doing.
 export function botCheckMessage(reason: JoinBotCheckFailure): string {
   if (reason === "missing_token") return BOT_CHECK_MISSING_MESSAGE;
   if (reason === "misconfigured") return JOIN_DISABLED_MESSAGE;
