@@ -1,14 +1,18 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { getEffortCheckModel, getQuestionModel, isQuestionWritingConfigured } from "./ai/client";
-import { checkEffort, effortErrorLogFields } from "./ai/effort-check";
-import { writeQuestionSet } from "./ai/questions";
+import { effortErrorLogFields } from "./ai/effort-check";
 import { isUuid } from "./classes";
 import type { GradeLevel } from "./grade-levels";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import type { ReadingProgress } from "./reading-progress";
-import { postgresSelfAttemptStore, selfProgress, selfProgressStatements } from "./self-answers-core";
+import {
+  postgresSelfAttemptStore,
+  selfEffortChecker,
+  selfProgress,
+  selfProgressStatements,
+} from "./self-answers-core";
 import {
   allowanceFor,
   allowanceFromRow,
@@ -25,6 +29,7 @@ import { historyItems, historyStatement, parseSelfResult, type HistoryItem, type
 import {
   getOrCreateSelfQuestionsWith,
   postgresSelfQuestionStore,
+  selfQuestionWriter,
   type SelfQuestionWriter,
   type SelfQuestionsResult,
 } from "./self-questions-core";
@@ -98,13 +103,9 @@ from self_readings where id = $2::uuid and account_id = $1::uuid`,
   };
 }
 
-// The real writer: the configured model, at the reading's level and count.
-const modelWriter: SelfQuestionWriter = (context) =>
-  writeQuestionSet(getQuestionModel(), {
-    bodyText: context.bodyText,
-    gradeLevel: context.gradeLevel,
-    count: context.questionCount,
-  });
+// The real writer: the configured model, at the reading's level and count,
+// with the solo prompt.
+const modelWriter = selfQuestionWriter(getQuestionModel);
 
 export type SelfOptions = {
   // For scripts/check-self-learner.ts: fakes, so the check never calls
@@ -129,7 +130,7 @@ export async function getOrCreateSelfQuestions(
   });
 }
 
-const modelChecker: EffortChecker = (input) => checkEffort(getEffortCheckModel(), input);
+const modelChecker = selfEffortChecker(getEffortCheckModel);
 
 export async function submitSelfAnswers(
   accountId: string,

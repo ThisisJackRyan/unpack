@@ -26,8 +26,8 @@
 //    the next open (Try again) can claim again. Every claim counted toward
 //    the account's limit, so retries are bounded.
 
-import type { QuestionErrorKind } from "./ai/questions";
-import { questionErrorKind, questionErrorLogFields } from "./ai/questions";
+import type { QuestionErrorKind, QuestionModel } from "./ai/questions";
+import { questionErrorKind, questionErrorLogFields, writeQuestionSet } from "./ai/questions";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import {
@@ -57,6 +57,18 @@ export type SelfQuestionStore = {
 };
 
 export type SelfQuestionWriter = (context: SelfReadingContext) => Promise<string[]>;
+
+// The model writer: the reading's level and count, with the solo system
+// prompt (the reader chose the reading; no teacher or students). getModel
+// runs per write, so the app reads its config only when it writes.
+export function selfQuestionWriter(getModel: () => QuestionModel): SelfQuestionWriter {
+  return (context) =>
+    writeQuestionSet(
+      getModel(),
+      { bodyText: context.bodyText, gradeLevel: context.gradeLevel, count: context.questionCount },
+      { audience: "solo" },
+    );
+}
 
 export type SelfQuestionDeps = {
   store: SelfQuestionStore;

@@ -116,7 +116,7 @@ Until the Clerk account is deleted. Self-learners can't delete single readings i
 
 ## Services that receive student data
 
-- **Anthropic (Claude API)** receives the reading text, the questions, and the student's (or self-learner's) answers (for the effort check), and the reading text (to write questions). **No names, no ids, no session or class data** are sent. Anthropic handles API data per Anthropic's API terms (its commercial terms and data retention policy); we don't state a retention period here. Check the current wording before launch.
+- **Anthropic (Claude API)** receives the reading text, the questions, and the student's (or self-learner's) answers (for the effort check), and the reading text (to write questions). **No names, no ids, no session or class data** are sent. A self-learner's requests use solo instructions (no teacher or student wording) but send the same kinds of data. Anthropic handles API data per Anthropic's API terms (its commercial terms and data retention policy); we don't state a retention period here. Check the current wording before launch.
 - **Cloudflare Turnstile** (only when the bot check is turned on): the widget runs in the student's browser on the join page, so Cloudflare receives what any browser request carries (the IP address, browser and device signals) to decide whether it's a person, per Cloudflare's Turnstile terms and privacy policy. Our server sends Cloudflare only the widget's token and our secret, **not** the IP address and not the name.
 - **Vercel** (hosting) sees requests, including IP addresses, in its request logs, per Vercel's terms. Our own error logs carry only error names, codes, and ids (no names, answers, or notes).
 - **Neon** (database) stores everything above.

@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import Anthropic from "@anthropic-ai/sdk";
 import type { EffortCheckInput, EffortVerdict } from "./ai/effort-check";
+import { EFFORT_SYSTEM_PROMPT, EFFORT_TOOL_NAME, SOLO_EFFORT_SYSTEM_PROMPT } from "./ai/effort-prompts";
+import type { QuestionModel } from "./ai/questions";
 import type { AttemptView, ReadingProgress } from "./reading-progress";
 import {
   postgresSelfAttemptStore,
   SELF_EFFORT_LOCK_SPACE,
   selfClaimCheckStatements,
   selfCommitStatements,
+  selfEffortChecker,
   selfProgress,
   selfProgressStatements,
   selfReleaseCheckStatements,
@@ -278,5 +282,38 @@ describe("self store statements", () => {
     await store.release(ACCOUNT, READING, "c1");
     assert.equal(await store.commit(input), null);
     assert.deepEqual(batches.map((b) => b.length), [3, 3, 4]);
+  });
+});
+
+describe("selfEffortChecker", () => {
+  it("checks with the solo system prompt", async () => {
+    const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
+    const model: QuestionModel = {
+      model: "claude-sonnet-5-5",
+      create: async (params) => {
+        calls.push(params);
+        return {
+          content: [
+            {
+              type: "tool_use",
+              id: "t",
+              name: EFFORT_TOOL_NAME,
+              input: { results: [{ answer: 1, pass: false, nudge: "Look at what the fox did first." }] },
+            },
+          ],
+          stop_reason: "tool_use",
+        } as unknown as Anthropic.Message;
+      },
+    };
+    const check = selfEffortChecker(() => model);
+    const verdicts = await check({
+      bodyText: "A fox ran into the snow.",
+      gradeLevel: "9",
+      items: [{ questionId: "q1", question: "Why did the fox run?", answer: "idk" }],
+    });
+    assert.deepEqual(verdicts, [{ questionId: "q1", pass: false, nudge: "Look at what the fox did first." }]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].system, SOLO_EFFORT_SYSTEM_PROMPT);
+    assert.notEqual(calls[0].system, EFFORT_SYSTEM_PROMPT);
   });
 });

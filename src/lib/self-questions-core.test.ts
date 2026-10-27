@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { QuestionWriterError } from "./ai/questions";
+import Anthropic from "@anthropic-ai/sdk";
+import { QUESTIONS_SYSTEM_PROMPT, QUESTIONS_TOOL_NAME, SOLO_QUESTIONS_SYSTEM_PROMPT } from "./ai/prompts";
+import { QuestionWriterError, type QuestionModel } from "./ai/questions";
 import type { Statement } from "./link-rate-limit";
 import { QUESTION_GENERATION_LIMIT, QUESTION_GENERATION_WINDOW_MINUTES } from "./question-rate-limit";
 import {
@@ -10,6 +12,7 @@ import {
   selfClaimStatements,
   selfCommitStatement,
   selfQuestionsView,
+  selfQuestionWriter,
   selfReleaseStatement,
   type SelfQuestionStore,
 } from "./self-questions-core";
@@ -191,5 +194,37 @@ describe("self question statements", () => {
     });
     assert.equal(await store.commit(ACCOUNT, READING, "t1", PROMPTS), false);
     assert.equal(batches.length, 1);
+  });
+});
+
+describe("selfQuestionWriter", () => {
+  it("writes with the solo system prompt, at the reading's level and count", async () => {
+    const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
+    let gets = 0;
+    const model: QuestionModel = {
+      model: "claude-sonnet-5-5",
+      create: async (params) => {
+        calls.push(params);
+        return {
+          content: [{ type: "tool_use", id: "t", name: QUESTIONS_TOOL_NAME, input: { questions: ["Why?", "What next?"] } }],
+          stop_reason: "tool_use",
+        } as unknown as Anthropic.Message;
+      },
+    };
+    const write = selfQuestionWriter(() => {
+      gets++;
+      return model;
+    });
+    assert.equal(gets, 0);
+    const prompts = await write({ bodyText: "A fox ran into the snow.", gradeLevel: "9", questionCount: 2 });
+    assert.deepEqual(prompts, ["Why?", "What next?"]);
+    assert.equal(gets, 1);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].system, SOLO_QUESTIONS_SYSTEM_PROMPT);
+    assert.notEqual(calls[0].system, QUESTIONS_SYSTEM_PROMPT);
+    const user = String(calls[0].messages[0].content);
+    assert.match(user, /Grade level: grade 9\./);
+    assert.match(user, /Write exactly 2 questions/);
+    assert.match(user, /A fox ran into the snow\./);
   });
 });

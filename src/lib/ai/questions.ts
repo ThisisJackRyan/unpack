@@ -8,11 +8,12 @@ import { z } from "zod";
 import type { GradeLevel } from "../grade-levels";
 import {
   QUESTION_MAX_LENGTH,
-  QUESTIONS_SYSTEM_PROMPT,
   QUESTIONS_TOOL_NAME,
   questionSetPrompt,
+  questionsSystemPrompt,
   replacementPrompt,
   retryNote,
+  type PromptAudience,
 } from "./prompts";
 import {
   QUESTION_EFFORT,
@@ -212,11 +213,12 @@ export function parseQuestionsResponse(
 export function buildQuestionRequest(
   model: string,
   userPrompt: string,
+  audience: PromptAudience = "class",
 ): Anthropic.MessageCreateParamsNonStreaming {
   return {
     model,
     max_tokens: QUESTION_MAX_TOKENS,
-    system: QUESTIONS_SYSTEM_PROMPT,
+    system: questionsSystemPrompt(audience),
     tools: [QUESTIONS_TOOL],
     tool_choice: { type: "auto", disable_parallel_tool_use: true },
     output_config: { effort: QUESTION_EFFORT },
@@ -227,6 +229,8 @@ export function buildQuestionRequest(
 export type WriteOptions = {
   // Tests pass a short deadline; the app uses QUESTION_WRITE_DEADLINE_MS.
   deadlineMs?: number;
+  // "solo" for a self-learner's reading; class readings leave it out.
+  audience?: PromptAudience;
 };
 
 // Settles with the call, or rejects as soon as the signal fires, so the
@@ -261,7 +265,7 @@ async function writeValidated(
     signal.throwIfAborted();
     const text = problem ? prompt + retryNote(problem) : prompt;
     const response = await untilAborted(
-      model.create(buildQuestionRequest(model.model, text), { signal }),
+      model.create(buildQuestionRequest(model.model, text, options.audience), { signal }),
       signal,
     );
     const parsed = parseQuestionsResponse(response, count, avoid);

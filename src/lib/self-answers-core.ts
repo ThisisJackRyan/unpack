@@ -15,6 +15,8 @@
 //   shows the last try's nudges and a way to the next reading.
 // Pure: SQL text and result mapping. The runner is self-readings.ts.
 
+import { checkEffort } from "./ai/effort-check";
+import type { QuestionModel } from "./ai/questions";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import type { AnswerStage, AttemptView, ReadingProgress } from "./reading-progress";
 import { answerStage, readingProgress } from "./reading-progress";
@@ -28,11 +30,18 @@ import {
   OUT_OF_TRIES_MESSAGE,
   submitLookup,
   type AttemptStore,
+  type EffortChecker,
   type SaveInput,
   type SubmitResult,
 } from "./submit-answers-core";
 import { selfQuestionsStatement } from "./self-questions-core";
 import { ANSWERS_STALE_MESSAGE, EFFORT_CHECK_LIMIT, MAX_TRIES } from "./validate-answers";
+
+// The model checker: the solo effort prompt (the reader chose the reading;
+// no teacher or students). getModel runs per check.
+export function selfEffortChecker(getModel: () => QuestionModel): EffortChecker {
+  return (input) => checkEffort(getModel(), input, { audience: "solo" });
+}
 
 // Advisory lock namespace for a self-learner's reading (join-rate-limit.ts
 // uses 1 and 2, reading-limits.ts 3). Keyed by the reading id alone: a

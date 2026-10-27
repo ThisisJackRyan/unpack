@@ -12,12 +12,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { GradeLevel } from "../grade-levels";
 import {
-  EFFORT_SYSTEM_PROMPT,
   EFFORT_TOOL_NAME,
   effortCheckPrompt,
   effortRetryNote,
+  effortSystemPrompt,
   NUDGE_MAX_LENGTH,
 } from "./effort-prompts";
+import type { PromptAudience } from "./prompts";
 import {
   questionErrorKind,
   questionErrorLogFields,
@@ -213,11 +214,12 @@ export function parseEffortResponse(
 export function buildEffortRequest(
   model: string,
   userPrompt: string,
+  audience: PromptAudience = "class",
 ): Anthropic.MessageCreateParamsNonStreaming {
   return {
     model,
     max_tokens: EFFORT_CHECK_MAX_TOKENS,
-    system: EFFORT_SYSTEM_PROMPT,
+    system: effortSystemPrompt(audience),
     tools: [EFFORT_TOOL],
     tool_choice: { type: "auto", disable_parallel_tool_use: true },
     output_config: { effort: EFFORT_CHECK_EFFORT },
@@ -228,6 +230,8 @@ export function buildEffortRequest(
 export type EffortCheckOptions = {
   // Tests pass a short deadline; the app uses EFFORT_CHECK_DEADLINE_MS.
   deadlineMs?: number;
+  // "solo" for a self-learner's reading; class readings leave it out.
+  audience?: PromptAudience;
 };
 
 // Every answer in one call, and once more if the output is invalid. One
@@ -251,7 +255,7 @@ export async function checkEffort(
     signal.throwIfAborted();
     const text = problem ? prompt + effortRetryNote(problem) : prompt;
     const response = await untilAborted(
-      model.create(buildEffortRequest(model.model, text), { signal }),
+      model.create(buildEffortRequest(model.model, text, options.audience), { signal }),
       signal,
     );
     const parsed = parseEffortResponse(response, count);
