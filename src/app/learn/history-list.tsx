@@ -5,8 +5,9 @@ import { OpenBook } from "@/components/illustrations";
 import { card, focusRing, primaryButtonLarge } from "@/components/ui";
 import { EMPTY_STATE_COPY, type EmptyStateScreen, type HistoryItem } from "@/lib/self-history";
 
-// The self-learner's readings, newest first: title, a meta line (date and
-// level, only the parts present), and result. Each opens its reading page.
+// The self-learner's readings, newest first: title, a meta line (date, level,
+// and "2 of 3 done" while in progress; only the parts present), and
+// result. Each opens its reading page.
 export function HistoryList({ items }: { items: HistoryItem[] }) {
   return (
     <ul className="flex flex-col gap-3">
@@ -18,7 +19,7 @@ export function HistoryList({ items }: { items: HistoryItem[] }) {
           >
             <span className="flex min-w-0 flex-col gap-1">
               <span className="text-xl font-bold break-words text-ink-950">{item.title}</span>
-              <MetaLine as="span" className="text-lg text-ink-700" parts={[item.dateLabel, item.gradeLabel]} />
+              <MetaLine as="span" className="text-lg text-ink-700" parts={[item.dateLabel, item.gradeLabel, item.doneLabel]} />
             </span>
             <SelfResultBadge result={item.result} />
           </Link>

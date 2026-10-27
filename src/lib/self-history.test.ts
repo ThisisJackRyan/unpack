@@ -8,7 +8,9 @@ const ID = "00000000-0000-4000-8000-000000000001";
 describe("historyStatement", () => {
   it("reads only the account's self-learner readings, newest first", () => {
     const s = historyStatement(ID);
-    assert.match(s.text, /from self_readings\nwhere account_id = \$1::uuid\norder by created_at desc, id desc/);
+    assert.match(s.text, /from self_readings r\nwhere r\.account_id = \$1::uuid\norder by r\.created_at desc, r\.id desc/);
+    // Passed answers on the reading's latest try only.
+    assert.match(s.text, /from self_answers an\s+where an\.ai_pass and an\.attempt_id = \(\s+select a\.id from self_attempts a where a\.reading_id = r\.id order by a\.try_number desc limit 1/);
     assert.equal(/classes|students|from readings/.test(s.text), false);
     assert.deepEqual(s.params, [ID]);
   });
@@ -39,6 +41,20 @@ describe("historyItems", () => {
     assert.equal(item.gradeLabel, "");
     assert.deepEqual(metaParts([item.dateLabel, item.gradeLabel]), ["Oct 19, 2026"]);
     assert.equal(metaSpokenText([item.dateLabel, item.gradeLabel]), "Oct 19, 2026");
+  });
+
+  it("adds X of Y done to in-progress rows only", () => {
+    const items = historyItems(
+      [
+        { id: "a", title: "A", grade_level: "5", status: "in_progress", created_at: "2026-10-19T12:00:00Z", question_count: 3, passed_answers: 2 },
+        { id: "b", title: "B", grade_level: "5", status: "in_progress", created_at: "2026-10-19T12:00:00Z", question_count: 4 },
+        { id: "c", title: "C", grade_level: "5", status: "passed", created_at: "2026-10-19T12:00:00Z", question_count: 3, passed_answers: 3 },
+        { id: "d", title: "D", grade_level: "5", status: "moved_on", created_at: "2026-10-19T12:00:00Z", question_count: 3, passed_answers: 1 },
+      ],
+      "UTC",
+    );
+    assert.deepEqual(items.map((i) => i.doneLabel), ["2 of 3 done", "0 of 4 done", "", ""]);
+    assert.equal(metaSpokenText([items[0].dateLabel, items[0].gradeLabel, items[0].doneLabel]), "Oct 19, 2026, Grade 5, 2 of 3 done");
   });
 
   it("treats an unknown status as in progress, and an empty list as empty", () => {

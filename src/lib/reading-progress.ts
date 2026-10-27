@@ -219,6 +219,10 @@ export function readingListStatement(classId: string, studentId: string): Statem
     where a.reading_id = r.id and a.student_id = $2::uuid and a.result = 'pass'
   ) as passed,
   (select count(*)::int from attempts a where a.reading_id = r.id and a.student_id = $2::uuid) as tries,
+  (select count(*)::int from answers an
+    where an.ai_pass and an.attempt_id = (
+      select a.id from attempts a where a.reading_id = r.id and a.student_id = $2::uuid order by a.try_number desc limit 1
+    )) as passed_answers,
   lc.status as challenge, lc.extra_try,
   (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid and ${countedCheckSql("e")}) as checks,
   ${checksAllowedSql("$2::uuid", "r.id")} as checks_allowed
@@ -235,6 +239,8 @@ export type StudentReadingListItem = {
   title: string;
   questionCount: number;
   status: StudentReadingStatus;
+  // Answers that passed on the latest try (see done-count.ts).
+  passedAnswers: number;
 };
 
 export function readingListItems(rows: Record<string, unknown>[]): StudentReadingListItem[] {
@@ -242,6 +248,7 @@ export function readingListItems(rows: Record<string, unknown>[]): StudentReadin
     id: String(row.id),
     title: String(row.title),
     questionCount: Number(row.question_count),
+    passedAnswers: Number(row.passed_answers ?? 0),
     status: studentReadingStatus({
       passed: row.passed === true,
       tries: Number(row.tries ?? 0),

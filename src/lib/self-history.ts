@@ -1,7 +1,8 @@
 // A self-learner's history: every reading they started, newest first, with
-// its result. Pure (SQL text and mapping); scoped to the account in the
+// its result (and, in progress, how many answers passed on the latest try). Pure (SQL text and mapping); scoped to the account in the
 // statement, so it never reads class or student rows.
 
+import { doneLabel } from "./done-count";
 import { gradeLevelLabel, isGradeLevel } from "./grade-levels";
 import type { Statement } from "./link-rate-limit";
 
@@ -42,14 +43,20 @@ export type HistoryItem = {
   dateLabel: string;
   result: SelfReadingResult;
   resultLabel: string;
+  // "2 of 3 done" while in progress (see done-count.ts), else "".
+  doneLabel: string;
 };
 
 export function historyStatement(accountId: string): Statement {
   return {
-    text: `select id, title, grade_level, status, created_at
-from self_readings
-where account_id = $1::uuid
-order by created_at desc, id desc`,
+    text: `select r.id, r.title, r.grade_level, r.status, r.created_at, r.question_count,
+  (select count(*)::int from self_answers an
+    where an.ai_pass and an.attempt_id = (
+      select a.id from self_attempts a where a.reading_id = r.id order by a.try_number desc limit 1
+    )) as passed_answers
+from self_readings r
+where r.account_id = $1::uuid
+order by r.created_at desc, r.id desc`,
     params: [accountId],
   };
 }
@@ -71,6 +78,7 @@ export function historyItems(rows: Record<string, unknown>[], timeZone: string):
       dateLabel: format.format(created),
       result,
       resultLabel: SELF_RESULT_LABELS[result],
+      doneLabel: result === "in_progress" ? doneLabel(Number(row.passed_answers ?? 0), Number(row.question_count ?? 0)) : "",
     };
   });
 }

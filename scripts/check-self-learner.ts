@@ -412,6 +412,26 @@ async function checkSoloFlow() {
     history[0]?.result === "passed" && history[1]?.result === "moved_on",
     `history lists them newest first with results: ${history.map((h) => h.result).join(", ")}`,
   );
+  check(
+    history[0]?.doneLabel === "" && history[1]?.doneLabel === "",
+    `passed and moved-on rows have no done hint (${JSON.stringify(history.slice(0, 2).map((h) => h.doneLabel))})`,
+  );
+
+  // In progress: "X of Y done" counts the passed answers on the latest try.
+  const halfway = await rawReading(bId, "Half way");
+  const halfQuestions = await readyQuestions(bId, halfway);
+  const fresh = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
+  check(fresh?.doneLabel === "0 of 3 done", `before any try: ${fresh?.doneLabel}`);
+  const mixed = async (input: EffortCheckInput): Promise<EffortVerdict[]> =>
+    input.items.map((i, n) => ({ questionId: i.questionId, pass: n < 2, nudge: n < 2 ? "" : "Name one detail from the text." }));
+  const firstTry = await submitSelfAnswers(bId, halfway, answersFor(halfQuestions), { check: mixed });
+  check(firstTry.status === "checked" && !firstTry.passed, `mixed try 1 saved, not passed: ${firstTry.status}`);
+  const afterOne = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
+  check(afterOne?.result === "in_progress" && afterOne.doneLabel === "2 of 3 done", `after 2 of 3 passed: ${afterOne?.doneLabel}`);
+  const secondTry = await submitSelfAnswers(bId, halfway, answersFor(halfQuestions), { check: checker(false) });
+  check(secondTry.status === "checked" && !secondTry.passed, `try 2 fails every answer: ${secondTry.status}`);
+  const afterTwo = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
+  check(afterTwo?.doneLabel === "0 of 3 done", `the latest try counts, not the best one: ${afterTwo?.doneLabel}`);
 }
 
 // A check with no model reply (an outage, not set up, out of credits) is

@@ -3,6 +3,8 @@ import Link from "next/link";
 import { StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
 import { OpenBook, ReadingBuddy } from "@/components/illustrations";
 import { card, focusRing, textLink } from "@/components/ui";
+import { MetaLine } from "@/components/meta-line";
+import { doneLabel } from "@/lib/done-count";
 import { questionCountLabel } from "@/lib/question-modes";
 import type { StudentReadingListItem } from "@/lib/reading-progress";
 import { listReadingsWithStatus } from "@/lib/reading-progress-db";
@@ -72,7 +74,14 @@ function ReadingCard({ reading }: { reading: StudentReadingListItem }) {
           <span className="text-xl font-bold break-words text-ink-950">{reading.title}</span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <StudentReadingStatusBadge status={reading.status} />
-            <span className="text-lg text-ink-700">{questionCountLabel(reading.questionCount)}</span>
+            <MetaLine
+              as="span"
+              className="text-lg text-ink-700"
+              parts={[
+                questionCountLabel(reading.questionCount),
+                reading.status === "in_progress" && doneLabel(reading.passedAnswers, reading.questionCount),
+              ]}
+            />
           </span>
         </span>
         <span

@@ -274,6 +274,12 @@ describe("readingListItems", () => {
     assert.match(s.text, /from effort_checks e where e\.reading_id = r\.id and e\.student_id = \$2::uuid and e\.outcome is distinct from 'given_back'\) as checks/);
     assert.match(s.text, /left join lateral \(select lc\.status[\s\S]*where lc\.student_id = \$2::uuid and lc\.reading_id = r\.id/);
     assert.deepEqual(s.params, ["c1", "s1"]);
+    // Passed answers on the student's latest try on that reading.
+    assert.match(s.text, /from answers an\s+where an\.ai_pass and an\.attempt_id = \(\s+select a\.id from attempts a where a\.reading_id = r\.id and a\.student_id = \$2::uuid order by a\.try_number desc limit 1\s+\)\) as passed_answers/);
+    assert.deepEqual(
+      readingListItems([{ id: "r", title: "A", question_count: 3, passed: false, tries: 1, challenge: null, passed_answers: 2 }]).map((i) => [i.status, i.passedAnswers]),
+      [["in_progress", 2]],
+    );
     const items = readingListItems([
       { id: "r1", title: "A", question_count: 3, passed: false, tries: 0, challenge: null },
       { id: "r2", title: "B", question_count: 2, passed: true, tries: 2, challenge: null },
@@ -296,6 +302,6 @@ describe("readingListItems", () => {
       "passed",
       "passed",
     ]);
-    assert.deepEqual(items[0], { id: "r1", title: "A", questionCount: 3, status: "not_started" });
+    assert.deepEqual(items[0], { id: "r1", title: "A", questionCount: 3, status: "not_started", passedAnswers: 0 });
   });
 });

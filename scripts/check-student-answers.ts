@@ -45,6 +45,7 @@ import { sendChallenge, type ChallengeResult } from "@/lib/challenges";
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
 import { answerStage } from "@/lib/reading-progress";
+import { doneLabel } from "@/lib/done-count";
 import { listReadingsWithStatus, loadReadingProgress } from "@/lib/reading-progress-db";
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
 import {
@@ -218,6 +219,12 @@ async function checkNormalFlow() {
   const first = await submit(student, "fail");
   check(first.status === "checked" && !first.passed && first.tryNumber === 1, `try 1: ${JSON.stringify(first.status === "checked" ? { passed: first.passed, try: first.tryNumber } : first)}`);
   check((await statusOf(student)) === "in_progress", "status after a failed try: in_progress");
+  // The class list's "X of Y done": the fake fails only the last answer.
+  const row = (await listReadingsWithStatus(classId, student, execute)).find((r) => r.id === readingId);
+  check(
+    row?.passedAnswers === 2 && doneLabel(row.passedAnswers, row.questionCount) === "2 of 3 done",
+    `class list after try 1: ${row ? doneLabel(row.passedAnswers, row.questionCount) : "missing"}`,
+  );
   const progress = await loadReadingProgress(student, readingId, execute);
   const stage = answerStage(progress);
   const nudge = progress.attempts[0]?.answers[questionIds[2]]?.nudge;
