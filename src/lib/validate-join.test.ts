@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   CLASS_NOT_FOUND_MESSAGE,
+  FIRST_NAME_INVALID_MESSAGE,
   FIRST_NAME_MAX_LENGTH,
   formatInitials,
   validateJoin,
@@ -25,8 +26,14 @@ describe("validateJoin", () => {
     });
   });
 
-  it("accepts letters from any alphabet, hyphens, and apostrophes", () => {
+  it("accepts letters from any alphabet, hyphens, apostrophes, and ʻokina", () => {
     for (const firstName of [
+      "ʻIolani",
+      "Keʻalaʻula",
+      "ʻAkoni",
+      "'Iolani",
+      "‘Iolani",
+      "Mary-Kate O’Neil",
       "Zoë",
       "José",
       "Jean-Luc",
@@ -64,12 +71,34 @@ describe("validateJoin", () => {
     });
   });
 
-  it("refuses digits, symbols, and names that start or end with punctuation", () => {
-    for (const firstName of ["Maya2", "M@ya", "-Maya", "'", "Maya!", "<b>", "\u0301", "Mia-", "Mia'", "Mia’", "'Mia", "Mia `Ann", "ʼMia", "ʻMia", "Miaʼ", "Miaʻ", "ʼ", "ʻ", "Mia ʼ"]) {
-      assert.deepEqual(errors({ firstName }), {
-        firstName: "Use letters only. Spaces, hyphens, and apostrophes are OK.",
-      }, firstName);
+  it("refuses digits, symbols, a leading hyphen, a trailing mark, and marks alone", () => {
+    for (const firstName of [
+      "Maya2",
+      "M@ya",
+      "-Maya",
+      "'",
+      "Maya!",
+      "<b>",
+      "\u0301",
+      "Mia-",
+      "Mia'",
+      "Mia’",
+      "Mia `Ann",
+      "Miaʼ",
+      "Miaʻ",
+      "ʼ",
+      "ʻ",
+      "ʻʻ",
+      "-",
+      "Mia ʼ",
+      "ʻʻIolani",
+      "'-Mia",
+      "ʻ Iolani",
+      "`Mia",
+    ]) {
+      assert.deepEqual(errors({ firstName }), { firstName: FIRST_NAME_INVALID_MESSAGE }, firstName);
     }
+    assert.equal(FIRST_NAME_INVALID_MESSAGE, "Use letters only. Spaces, hyphens, apostrophes, and ʻokina are OK.");
   });
 
   it("takes 1 or 2 letters of the last name, nothing more", () => {

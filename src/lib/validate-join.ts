@@ -12,21 +12,36 @@ export { FIRST_NAME_MAX_LENGTH, LAST_INITIALS_MAX_LENGTH };
 // without a database lookup.
 const JOIN_CODE_MAX_LENGTH = 12;
 
+export const FIRST_NAME_INVALID_MESSAGE =
+  "Use letters only. Spaces, hyphens, apostrophes, and ʻokina are OK.";
+
 export const CLASS_NOT_FOUND_MESSAGE =
   "We couldn’t find that class code. Check it with your teacher.";
 
-// Letters (any alphabet, with accents) plus spaces, hyphens, and
-// apostrophes, e.g. "Mary Ann", "Jean-Luc", "D’Andre". Apostrophes may be
-// straight ('), curly (’ or ‘, which phones type), or the modifier letter
-// (ʼ); studentNameKey treats them all alike. The name must start and end
-// with a letter (accents may follow it), so a lone accent, "Mia-", or
-// "Mia'" is refused. The modifier letters ʼ (U+02BC) and ʻ (U+02BB) count
-// as letters (\p{L}) but look like apostrophes, so they may not be the
-// first or last character either: "ʼMia" and "Miaʼ" are refused like
-// "'Mia" and "Mia'". (A name that starts with a Hawaiian ʻokina is refused
-// too; the student can type it without the mark.)
-const FIRST_NAME_RE =
-  /^(?![\u02BB\u02BC])\p{L}\p{M}*(?:[\p{L}\p{M} '’‘ʼ-]*(?![\u02BB\u02BC])\p{L}\p{M}*)?$/u;
+// Letters (any alphabet, with accents) plus spaces, hyphens, apostrophes,
+// and the Hawaiian ʻokina, e.g. "Mary Ann", "Jean-Luc", "D’Andre",
+// "Keʻala", "ʻIolani". Apostrophes may be straight ('), curly (’ or ‘,
+// which phones type), or the modifier letter (ʼ); the ʻokina is U+02BB.
+// studentNameKey drops all of them, so they can't make a look-alike
+// second student.
+//
+// The rules:
+// - It starts with a letter, or with ONE ʻokina or apostrophe followed by
+//   a letter: "ʻIolani", and also "'Iolani" or "‘Iolani", since many
+//   keyboards have no ʻokina key and a phone turns a leading ' into ‘.
+// - It ends with a letter (accents may follow it). No real first name
+//   ends with a hyphen, an apostrophe, or an ʻokina, and "Mia-" or "Mia'"
+//   is usually a typo.
+// - It never starts with a hyphen or a space, and a name made only of
+//   marks or punctuation ("ʻ", "'", "-", a lone accent) is refused.
+// The modifier letters ʻ and ʼ count as letters in Unicode (\p{L}), so
+// LETTER excludes them: they may stand only where an apostrophe may.
+const APOSTROPHES = "'\u2019\u2018\u02BC\u02BB";
+const LETTER = `(?![${APOSTROPHES}])\\p{L}\\p{M}*`;
+const FIRST_NAME_RE = new RegExp(
+  `^[${APOSTROPHES}]?${LETTER}(?:[\\p{L}\\p{M} ${APOSTROPHES}-]*${LETTER})?$`,
+  "u",
+);
 const INITIALS_RE = /^[\p{L}\p{M}]+$/u;
 
 export type JoinErrors = {
@@ -84,7 +99,7 @@ export function validateJoin(input: {
   } else if (length(firstName) > FIRST_NAME_MAX_LENGTH) {
     errors.firstName = `Keep your first name to ${FIRST_NAME_MAX_LENGTH} letters or less.`;
   } else if (!FIRST_NAME_RE.test(firstName)) {
-    errors.firstName = "Use letters only. Spaces, hyphens, and apostrophes are OK.";
+    errors.firstName = FIRST_NAME_INVALID_MESSAGE;
   }
 
   if (!lastInitials) {
