@@ -113,13 +113,14 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
           )}
         </div>
         <p
+          id="join-code-value"
           className={`pl-[0.2em] font-mono text-6xl font-bold tracking-[0.2em] sm:text-8xl ${
             found.codeActive ? "text-ink-950" : "text-ink-400"
           }`}
         >
           {found.joinCode}
         </p>
-        <CopyButton value={found.joinCode} label="join code" />
+        <CopyButton value={found.joinCode} label="join code" selectId="join-code-value" />
         <p className="text-lg text-ink-700">
           {found.codeActive ? (
             <>
