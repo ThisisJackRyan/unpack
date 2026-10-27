@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { AGE_CONFIRMED_VALUE, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
-import type { RoleFormState } from "./role-form-state";
+import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, type RoleFormState } from "./role-form-state";
 import { primaryButton, secondaryButton } from "./ui";
 
 const errorText = "text-base text-red-700";
@@ -41,15 +41,20 @@ export function RolePicker({
   const [state, formAction, pending] = useActionState(action, {});
   const [role, setRole] = useState<string | null>(state.role ?? initialRole);
   const [asking, setAsking] = useState(state.switchConfirm === "ask");
+  // Ticking the age box clears its error, so the hint comes back.
+  const [ageErrorCleared, setAgeErrorCleared] = useState(false);
   // After an error the form is reset to its defaults: follow the kept choice.
   const [shown, setShown] = useState(state);
   if (shown !== state) {
     setShown(state);
     if (state.role) setRole(state.role);
     setAsking(state.switchConfirm === "ask");
+    setAgeErrorCleared(false);
   }
   const errors = state.errors ?? {};
   const askAge = !ageConfirmed;
+  const ageError = ageErrorCleared ? undefined : errors.age;
+  const age = ageNote(ageError);
   const confirmed = state.switchConfirm === "confirmed";
   const needsConfirm = confirmSwitch && role === "self_learner" && !confirmed;
   const warning = needsConfirm && asking;
@@ -132,18 +137,25 @@ export function RolePicker({
               name="ageConfirmed"
               type="checkbox"
               value={AGE_CONFIRMED_VALUE}
-              aria-invalid={errors.age ? true : undefined}
-              aria-describedby={errors.age ? "age-hint age-error" : "age-hint"}
+              onChange={(e) => {
+                if (e.currentTarget.checked) setAgeErrorCleared(true);
+              }}
+              aria-invalid={ageError ? true : undefined}
+              aria-describedby={age.describedBy}
               className="h-6 w-6 shrink-0 cursor-pointer rounded accent-indigo-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
             />
             <span className="text-lg font-semibold text-zinc-950">I’m 13 or older</span>
           </label>
-          <p id="age-hint" className="text-base text-zinc-600">
-            You need to be 13 or older to read on your own. Younger readers can join a class with a code from their
-            teacher.
-          </p>
-          <p id="age-error" aria-live="polite" className={`${errorText} empty:hidden`}>
-            {errors.age}
+          {/* One note at a time: the error replaces the hint while active.
+              The error line stays mounted (empty) so it is announced. */}
+          {age.show === "hint" && (
+            <p id={AGE_HINT_ID} className="text-base text-zinc-600">
+              You need to be 13 or older to read on your own. Younger readers can join a class with a code from their
+              teacher.
+            </p>
+          )}
+          <p id={AGE_ERROR_ID} aria-live="polite" className={`${errorText} empty:hidden`}>
+            {ageError}
           </p>
         </div>
       )}
