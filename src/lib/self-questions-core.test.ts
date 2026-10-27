@@ -198,7 +198,7 @@ describe("self question statements", () => {
 });
 
 describe("selfQuestionWriter", () => {
-  it("writes with the solo system prompt, at the reading's level and count", async () => {
+  it("writes with the solo prompts, at the reading's level and count", async () => {
     const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
     let gets = 0;
     const model: QuestionModel = {
@@ -226,5 +226,8 @@ describe("selfQuestionWriter", () => {
     assert.match(user, /Grade level: grade 9\./);
     assert.match(user, /Write exactly 2 questions/);
     assert.match(user, /A fox ran into the snow\./);
+    assert.match(user, /Write for a high school reading level\./);
+    assert.match(user, /the reader's own opinion/);
+    assert.doesNotMatch(user, /teacher|student|class/i);
   });
 });

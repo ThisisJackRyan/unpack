@@ -286,7 +286,7 @@ describe("self store statements", () => {
 });
 
 describe("selfEffortChecker", () => {
-  it("checks with the solo system prompt", async () => {
+  it("checks with the solo prompts", async () => {
     const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
     const model: QuestionModel = {
       model: "claude-sonnet-5-5",
@@ -315,5 +315,9 @@ describe("selfEffortChecker", () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].system, SOLO_EFFORT_SYSTEM_PROMPT);
     assert.notEqual(calls[0].system, EFFORT_SYSTEM_PROMPT);
+    const user = String(calls[0].messages[0].content);
+    assert.match(user, /<reader_answer>idk<\/reader_answer>/);
+    assert.match(user, /Write nudges for a high school reading level: brief and direct\./);
+    assert.doesNotMatch(user, /teacher|student|class/i);
   });
 });

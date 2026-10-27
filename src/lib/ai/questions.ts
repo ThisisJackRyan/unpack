@@ -286,7 +286,7 @@ export function writeQuestionSet(
   input: QuestionSetInput,
   options: WriteOptions = {},
 ): Promise<string[]> {
-  return writeValidated(model, questionSetPrompt(input), input.count, [], options);
+  return writeValidated(model, questionSetPrompt(input, options.audience), input.count, [], options);
 }
 
 export type ReplacementInput = {
@@ -316,7 +316,7 @@ export async function writeReplacementQuestion(
     count: input.count,
     replacing,
     others,
-  });
+  }, options.audience);
   const [question] = await writeValidated(model, prompt, 1, input.current, options);
   return question;
 }

@@ -50,8 +50,11 @@ export function gradeDescription(grade: GradeLevel): string {
   return `grade ${grade}`;
 }
 
-function gradeStyle(grade: GradeLevel): string {
+// The solo wording drops the read-aloud teacher line and says "a high school
+// reading level"; the guidance is otherwise the same.
+function gradeStyle(grade: GradeLevel, audience: PromptAudience): string {
   if (grade === "K" || grade === "1") {
+    if (audience === "solo") return "Use very short sentences and everyday words.";
     return "Use very short sentences and everyday words. A teacher may read the questions aloud.";
   }
   if (grade === "adult") {
@@ -64,7 +67,8 @@ function gradeStyle(grade: GradeLevel): string {
   if (n <= 8) {
     return "Use clear, direct wording. Key words from the text are fine; explain nothing that the text already explains.";
   }
-  return "Write for high school students. Use the text's own vocabulary and ask about reasons, evidence, and choices.";
+  const who = audience === "solo" ? "a high school reading level" : "high school students";
+  return `Write for ${who}. Use the text's own vocabulary and ask about reasons, evidence, and choices.`;
 }
 
 // Students answer in a class the teacher reads, so no question may draw out
@@ -117,14 +121,15 @@ export function questionsSystemPrompt(audience: PromptAudience = "class"): strin
   return audience === "solo" ? SOLO_QUESTIONS_SYSTEM_PROMPT : QUESTIONS_SYSTEM_PROMPT;
 }
 
-function roleInstruction(role: QuestionRole): string {
+function roleInstruction(role: QuestionRole, audience: PromptAudience): string {
+  const who = audience === "solo" ? "the reader" : "the student";
   if (role === "detail") {
     return "a detail question about a specific part of the text";
   }
   if (role === "own_take") {
-    return 'a "what do you think" question that asks for the student\'s own opinion, prediction, or a connection to ideas, events, or other texts (never to their own private life), and still points to something specific in the text';
+    return `a "what do you think" question that asks for ${who}'s own opinion, prediction, or a connection to ideas, events, or other texts (never to their own private life), and still points to something specific in the text`;
   }
-  return 'one question that points to a specific detail in the text and then asks what the student thinks about it (their opinion of the text\'s ideas, not their private life)';
+  return `one question that points to a specific detail in the text and then asks what ${who} thinks about it (their opinion of the text's ideas, not their private life)`;
 }
 
 function readingBlock(text: string): string {
@@ -137,15 +142,15 @@ export type QuestionSetPromptInput = {
   count: number;
 };
 
-export function questionSetPrompt(input: QuestionSetPromptInput): string {
+export function questionSetPrompt(input: QuestionSetPromptInput, audience: PromptAudience = "class"): string {
   const { count, gradeLevel } = input;
   const order =
     count === 1
-      ? `Write exactly 1 question: ${roleInstruction("detail_and_own_take")}.`
+      ? `Write exactly 1 question: ${roleInstruction("detail_and_own_take", audience)}.`
       : `Write exactly ${count} questions, in this order:
 - Questions 1 to ${count - 1}: ${count - 1 === 1 ? "a detail question" : "detail questions"}, each about a specific part of the text.
-- Question ${count}: ${roleInstruction("own_take")}.`;
-  return `Grade level: ${gradeDescription(gradeLevel)}. ${gradeStyle(gradeLevel)}
+- Question ${count}: ${roleInstruction("own_take", audience)}.`;
+  return `Grade level: ${gradeDescription(gradeLevel)}. ${gradeStyle(gradeLevel, audience)}
 
 ${order}
 
@@ -162,7 +167,7 @@ export type ReplacementPromptInput = {
   others: string[];
 };
 
-export function replacementPrompt(input: ReplacementPromptInput): string {
+export function replacementPrompt(input: ReplacementPromptInput, audience: PromptAudience = "class"): string {
   const { gradeLevel, position, count } = input;
   const role = questionRole(position, count);
   const others = input.others.length
@@ -170,9 +175,9 @@ export function replacementPrompt(input: ReplacementPromptInput): string {
         .map((q, i) => `${i + 1}. ${defuseTags(q)}`)
         .join("\n")}\n</other_questions>`
     : "";
-  return `Grade level: ${gradeDescription(gradeLevel)}. ${gradeStyle(gradeLevel)}
+  return `Grade level: ${gradeDescription(gradeLevel)}. ${gradeStyle(gradeLevel, audience)}
 
-Write exactly 1 new question to replace question ${position} of ${count}. It must be ${roleInstruction(role)}. Make it different from the question it replaces: "${defuseTags(input.replacing)}"${others}
+Write exactly 1 new question to replace question ${position} of ${count}. It must be ${roleInstruction(role, audience)}. Make it different from the question it replaces: "${defuseTags(input.replacing)}"${others}
 
 ${readingBlock(input.bodyText)}`;
 }

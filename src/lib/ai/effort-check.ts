@@ -248,7 +248,7 @@ export async function checkEffort(
     bodyText: input.bodyText,
     gradeLevel: input.gradeLevel,
     items: input.items.map((item, i) => ({ number: i + 1, question: item.question, answer: item.answer })),
-  });
+  }, options.audience);
   const signal = AbortSignal.timeout(options.deadlineMs ?? EFFORT_CHECK_DEADLINE_MS);
   let problem: string | undefined;
   for (let attempt = 0; attempt < EFFORT_CHECK_ATTEMPTS; attempt++) {
