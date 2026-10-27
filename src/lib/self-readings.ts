@@ -1,0 +1,165 @@
+import "server-only";
+import { randomUUID } from "node:crypto";
+import { getEffortCheckModel, getQuestionModel, isQuestionWritingConfigured } from "./ai/client";
+import { checkEffort, effortErrorLogFields } from "./ai/effort-check";
+import { writeQuestionSet } from "./ai/questions";
+import { isUuid } from "./classes";
+import type { GradeLevel } from "./grade-levels";
+import type { StatementExecutor } from "./link-rate-limit";
+import { neonExecutor } from "./neon-executor";
+import type { ReadingProgress } from "./reading-progress";
+import { postgresSelfAttemptStore, selfProgress, selfProgressStatements } from "./self-answers-core";
+import {
+  allowanceFor,
+  allowanceFromRow,
+  allowanceStatement,
+  createOutcome,
+  createSelfReadingStatements,
+  selfLearnerPlan,
+  type AllowanceState,
+  type CreateOutcome,
+  type ReadingAllowance,
+  type SelfReadingDraft,
+} from "./self-allowance";
+import { historyItems, historyStatement, parseSelfResult, type HistoryItem, type SelfReadingResult } from "./self-history";
+import {
+  getOrCreateSelfQuestionsWith,
+  postgresSelfQuestionStore,
+  type SelfQuestionWriter,
+  type SelfQuestionsResult,
+} from "./self-questions-core";
+import { submitAnswersWith, type EffortChecker, type SubmitResult } from "./submit-answers-core";
+import type { AnswerEntry } from "./validate-answers";
+
+// Server-only: the self-learner flow against Postgres. Every function takes
+// the signed-in account's id (from requireSelfLearner) and scopes every
+// statement to it: only self_* rows, never classes, readings, or students.
+// Another account's reading is not_found.
+
+export function currentAllowance(): ReadingAllowance {
+  return allowanceFor(selfLearnerPlan());
+}
+
+export async function getAllowance(
+  accountId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<AllowanceState> {
+  const allowance = currentAllowance();
+  const [rows = []] = await execute([allowanceStatement(accountId, allowance)]);
+  return allowanceFromRow(rows[0], allowance);
+}
+
+// Inserts the reading if the account is a self-learner under its allowance
+// (see self-allowance.ts for the race handling).
+export async function createSelfReading(
+  accountId: string,
+  draft: SelfReadingDraft,
+  execute: StatementExecutor = neonExecutor,
+): Promise<CreateOutcome> {
+  const allowance = currentAllowance();
+  return createOutcome(await execute(createSelfReadingStatements(accountId, draft, allowance)), allowance);
+}
+
+export type SelfReadingView = {
+  id: string;
+  title: string;
+  sourceUrl: string | null;
+  bodyText: string;
+  gradeLevel: GradeLevel;
+  questionCount: number;
+  status: SelfReadingResult;
+  createdAt: Date;
+};
+
+export async function getSelfReading(
+  accountId: string,
+  readingId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<SelfReadingView | undefined> {
+  if (!isUuid(readingId)) return undefined;
+  const [rows = []] = await execute([
+    {
+      text: `select id, title, source_url, body_text, grade_level, question_count, status, created_at
+from self_readings where id = $2::uuid and account_id = $1::uuid`,
+      params: [accountId, readingId],
+    },
+  ]);
+  const row = rows[0];
+  if (!row) return undefined;
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    sourceUrl: row.source_url == null ? null : String(row.source_url),
+    bodyText: String(row.body_text),
+    gradeLevel: row.grade_level as GradeLevel,
+    questionCount: Number(row.question_count),
+    status: parseSelfResult(row.status),
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
+  };
+}
+
+// The real writer: the configured model, at the reading's level and count.
+const modelWriter: SelfQuestionWriter = (context) =>
+  writeQuestionSet(getQuestionModel(), {
+    bodyText: context.bodyText,
+    gradeLevel: context.gradeLevel,
+    count: context.questionCount,
+  });
+
+export type SelfOptions = {
+  // For scripts/check-self-learner.ts: fakes, so the check never calls
+  // Anthropic. The app passes nothing.
+  write?: SelfQuestionWriter;
+  check?: EffortChecker;
+  execute?: StatementExecutor;
+};
+
+export async function getOrCreateSelfQuestions(
+  accountId: string,
+  readingId: string,
+  options: SelfOptions = {},
+): Promise<SelfQuestionsResult> {
+  if (!isUuid(readingId)) return { status: "not_found" };
+  return getOrCreateSelfQuestionsWith(accountId, readingId, {
+    store: postgresSelfQuestionStore(options.execute ?? neonExecutor),
+    write: options.write ?? modelWriter,
+    newToken: randomUUID,
+    configured: options.write ? true : isQuestionWritingConfigured(),
+    onError: (fields) => console.error("getOrCreateSelfQuestions: write failed", { ...fields, readingId }),
+  });
+}
+
+const modelChecker: EffortChecker = (input) => checkEffort(getEffortCheckModel(), input);
+
+export async function submitSelfAnswers(
+  accountId: string,
+  readingId: string,
+  entries: AnswerEntry[],
+  options: SelfOptions = {},
+): Promise<SubmitResult> {
+  if (!isUuid(readingId)) return { status: "not_found" };
+  return submitAnswersWith(accountId, readingId, entries, {
+    store: postgresSelfAttemptStore(options.execute ?? neonExecutor),
+    check: options.check ?? modelChecker,
+    newId: randomUUID,
+    onError: (error) =>
+      console.error("submitSelfAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
+  });
+}
+
+export async function loadSelfProgress(
+  accountId: string,
+  readingId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<ReadingProgress> {
+  return selfProgress(await execute(selfProgressStatements(accountId, readingId)));
+}
+
+export async function listSelfHistory(
+  accountId: string,
+  timeZone: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<HistoryItem[]> {
+  const [rows = []] = await execute([historyStatement(accountId)]);
+  return historyItems(rows, timeZone);
+}

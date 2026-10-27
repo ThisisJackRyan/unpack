@@ -12,6 +12,8 @@ function teacher(plan: Teacher["plan"]): Teacher {
     email: "test@example.invalid",
     plan,
     createdAt: new Date(0),
+    role: "teacher",
+    ageConfirmedAt: null,
   };
 }
 
