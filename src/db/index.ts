@@ -8,7 +8,7 @@ let client: NeonQueryFunction<false, false> | undefined;
 let instance: Database | undefined;
 
 // Raw Neon http client, for the rare query drizzle can't express (such as
-// a single statement run at a stricter isolation level). Created on first
+// a locking multi-statement transaction). Created on first
 // use so importing this module never requires DATABASE_URL (for example
 // during `next build`).
 export function getSql(): NeonQueryFunction<false, false> {

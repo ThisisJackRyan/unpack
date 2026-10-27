@@ -31,7 +31,7 @@ export class JoinCodeExhaustedError extends Error {
 
 // Postgres unique violation (23505) on classes.join_code. Drizzle wraps the
 // driver error, so walk the cause chain.
-function isJoinCodeConflict(error: unknown): boolean {
+export function isJoinCodeConflict(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; current && depth < 5; depth++) {
     const { code, constraint, cause } = current as {
@@ -45,15 +45,23 @@ function isJoinCodeConflict(error: unknown): boolean {
   return false;
 }
 
+// Optional hooks for scripts/check-class-limit.ts; the app passes none.
+export type JoinCodeOptions = {
+  generate?: () => string;
+  onConflict?: (error: unknown) => void;
+};
+
 // Runs `insert` with a fresh code, retrying on a join code collision.
 export async function withUniqueJoinCode<T>(
   insert: (joinCode: string) => Promise<T>,
+  { generate = generateJoinCode, onConflict }: JoinCodeOptions = {},
 ): Promise<T> {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      return await insert(generateJoinCode());
+      return await insert(generate());
     } catch (error) {
       if (!isJoinCodeConflict(error)) throw error;
+      onConflict?.(error);
     }
   }
   throw new JoinCodeExhaustedError();
