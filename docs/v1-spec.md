@@ -34,7 +34,8 @@
 | classes | id, teacher_id, name, grade_level, join_code (unique), code_active, created_at |
 | readings | id, class_id, title, source_url, body_text, grade_level (overrides the class; optional), question_count, question_mode (shared/per_student), status (draft/published), created_at |
 | questions | id, reading_id, student_id (null when shared), position, prompt, created_at |
-| students | id, class_id, first_name, last_initials, session_token, created_at. first_name + last_initials is unique within each class. |
+| students | id, class_id, first_name, last_initials, name_key (unique per class, normalized), session_token_hash (SHA-256 of the cookie token, unique), created_at |
+| join_attempts | id, key_kind (ip/code), key_hash, created_at. Per-IP keys are HMAC-SHA256, per-code keys SHA-256; pruned after the 10-minute window. |
 | attempts | id, student_id, reading_id, try_number (1–3), result (pass/fail), created_at |
 | answers | id, attempt_id, question_id, text, ai_pass (bool), ai_feedback |
 | challenges | id, student_id, reading_id, note, status (open/approved/denied), resolved_at |
@@ -45,14 +46,21 @@ Student status for a reading is derived from attempts and challenges: Passed if 
 - An attempt passes only when **every** answer passes the effort check.
 - Try 4 is blocked; only the challenge option appears.
 - Shared mode: questions are cached per reading. Per-student mode: each student's set is generated once and cached, and it isn't regenerated on retries.
-- Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions. Once published, only the title can be edited; the text, grade, question count, mode, and questions stay locked.
+- Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions.
+- Once published, only the title can be edited; the text, grade, question count, mode, and questions stay locked. This applies to both modes.
 - Per-student mode: each reading allows at most 150 student question sets. Past that, a new student sees "Ask your teacher for help with this one." A student who already has a set keeps it.
 - Changing a class's grade clears the shared questions of its draft readings that use the class grade (no reading override). Published readings and drafts with an override are untouched.
 - Question generation is limited to 30 per teacher per 10 minutes (generate, regenerate, and previews). Students' own sets in per-student mode don't count toward it.
 - Free plan: creating a 2nd class is blocked.
 - Readings: the text must be 200 to 20,000 characters after cleanup (line endings, control characters, extra blank lines). A longer article is refused, never cut. Titles are up to 120 characters, links up to 2,048.
 - Link fetching: limited to 20 per teacher per 10 minutes (pasted text isn't limited). We only fetch http/https links to public hosts, with 8 seconds and 2 MB per fetch, and only HTML pages.
-- Joining a class is rate limited per IP and per code, with a bot check.
+- Joining: a student enters the class code, their first name (up to 30 letters; spaces, hyphens, and apostrophes are OK), and the first 1 or 2 letters of their last name. Nothing else is collected.
+- A name already taken in the class (ignoring case and extra spaces) is refused with "Someone already has that name. Add another letter." It is never resumed: progress does not carry over by name.
+- Joining needs the class code to be on. An unknown code and a code that's off get the same message. Students who already joined keep access when the code is turned off.
+- Joining is rate limited to 60 tries per IP and 100 per code, each per 10 minutes. Every try counts, including a wrong code or a taken name. A bot check is planned (a placeholder for now).
+- These limits are first estimates. A school behind one shared IP can hit 60 tries per IP if several classes join at once, and because the per-code key is the typed code, someone making about 100 junk tries on a real code can block joins to it for 10 minutes. Revisit them with the bot check in the abuse PR.
+- IP addresses are stored only as a keyed hash (HMAC-SHA256 with a server secret), only for the join rate limit. Rows are deleted by the next join after the 10-minute window (so after a quiet period they can stay longer), and Neon's restore history keeps deleted rows for its restore window.
+- A student's session is an httpOnly cookie that lasts 180 days. Only a hash of its token is stored. Joining a different class on the same device replaces the session.
 - Student data is visible only to the owning teacher, and we store only first names plus last initials.
 
 ## AI calls

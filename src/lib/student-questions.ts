@@ -22,7 +22,7 @@ import {
 
 // Server-only: a student's per-student question set, generated on first
 // open and cached (see student-questions-core.ts for the claim protocol).
-// Not called by any page yet; the student join and reading pages will.
+// Called by the student reading page (src/lib/student-readings.ts).
 
 export type {
   StudentQuestion,

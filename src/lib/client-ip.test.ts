@@ -1,0 +1,140 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { describe, it } from "node:test";
+import {
+  clientIpFromHeaders,
+  DEV_JOIN_IP_HASH_SECRET,
+  hashJoinCode,
+  hashJoinIp,
+  ipRateLimitKey,
+  joinIpHashSecret,
+  UNKNOWN_IP,
+} from "./client-ip";
+
+function getter(headers: Record<string, string>) {
+  return (name: string) => headers[name] ?? null;
+}
+
+const SECRET = "test-secret-".padEnd(40, "x");
+
+describe("clientIpFromHeaders", () => {
+  it("prefers x-vercel-forwarded-for, then x-real-ip, then x-forwarded-for", () => {
+    assert.equal(
+      clientIpFromHeaders(
+        getter({
+          "x-vercel-forwarded-for": " 203.0.113.7 , 10.0.0.1",
+          "x-real-ip": "10.0.0.9",
+          "x-forwarded-for": "10.0.0.8",
+        }),
+      ),
+      "203.0.113.7",
+    );
+    assert.equal(
+      clientIpFromHeaders(getter({ "x-real-ip": "203.0.113.9", "x-forwarded-for": "10.0.0.8" })),
+      "203.0.113.9",
+    );
+    assert.equal(clientIpFromHeaders(getter({ "x-forwarded-for": " 203.0.113.7 , 10.0.0.1" })), "203.0.113.7");
+  });
+
+  it("skips empty headers and falls back to a fixed key", () => {
+    assert.equal(
+      clientIpFromHeaders(getter({ "x-vercel-forwarded-for": " ", "x-forwarded-for": "203.0.113.7" })),
+      "203.0.113.7",
+    );
+    assert.equal(clientIpFromHeaders(getter({ "x-forwarded-for": " , " })), UNKNOWN_IP);
+    assert.equal(clientIpFromHeaders(getter({})), "unknown");
+  });
+
+  it("buckets IPv6 to its /64", () => {
+    assert.equal(clientIpFromHeaders(getter({ "x-real-ip": "2001:DB8::1" })), "2001:db8:0:0::/64");
+  });
+});
+
+describe("ipRateLimitKey", () => {
+  it("keeps IPv4 as it is, without a port", () => {
+    assert.equal(ipRateLimitKey("203.0.113.7"), "203.0.113.7");
+    assert.equal(ipRateLimitKey("203.0.113.7:51234"), "203.0.113.7");
+  });
+
+  it("puts every address in one IPv6 /64 on one key", () => {
+    const key = "2001:db8:1:2::/64";
+    for (const ip of [
+      "2001:db8:1:2::1",
+      "2001:0db8:0001:0002:aaaa:bbbb:cccc:dddd",
+      "2001:DB8:1:2:ffff::",
+      "[2001:db8:1:2::9]:443",
+      "[2001:db8:1:2::9]",
+      "2001:db8:1:2::1%eth0",
+    ]) {
+      assert.equal(ipRateLimitKey(ip), key, ip);
+    }
+    assert.notEqual(ipRateLimitKey("2001:db8:1:3::1"), key);
+    assert.equal(ipRateLimitKey("::1"), "0:0:0:0::/64");
+    assert.equal(ipRateLimitKey("fe80::1%eth0"), "fe80:0:0:0::/64");
+  });
+
+  it("reads IPv4-mapped IPv6 as the IPv4 address", () => {
+    assert.equal(ipRateLimitKey("::ffff:203.0.113.7"), "203.0.113.7");
+    assert.equal(ipRateLimitKey("::FFFF:cb00:7107"), "203.0.113.7");
+    assert.equal(ipRateLimitKey("0:0:0:0:0:ffff:203.0.113.7"), "203.0.113.7");
+  });
+
+  it("keeps text that isn't an IP, lowercased", () => {
+    assert.equal(ipRateLimitKey("Not-An-IP"), "not-an-ip");
+    assert.equal(ipRateLimitKey("1:2:3"), "1:2:3");
+    assert.equal(ipRateLimitKey("::ffff:999.0.0.1"), "::ffff:999.0.0.1");
+  });
+});
+
+describe("joinIpHashSecret", () => {
+  it("uses JOIN_IP_HASH_SECRET when set", () => {
+    assert.equal(joinIpHashSecret({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: SECRET }), SECRET);
+    assert.equal(joinIpHashSecret({ NODE_ENV: "development", JOIN_IP_HASH_SECRET: SECRET }), SECRET);
+  });
+
+  it("throws in production without a secret, or with a short one", () => {
+    assert.throws(() => joinIpHashSecret({ NODE_ENV: "production" }), /JOIN_IP_HASH_SECRET is missing/);
+    assert.throws(() => joinIpHashSecret({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: "" }));
+    assert.throws(
+      () => joinIpHashSecret({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: "short-secret-value" }),
+      (error: Error) => !error.message.includes("short-secret-value"),
+    );
+    assert.throws(() => joinIpHashSecret({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: "x".repeat(31) }));
+    assert.equal(joinIpHashSecret({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: "x".repeat(32) }), "x".repeat(32));
+  });
+
+  it("falls back to the dev secret outside production", () => {
+    assert.equal(joinIpHashSecret({ NODE_ENV: "development" }), DEV_JOIN_IP_HASH_SECRET);
+    assert.equal(joinIpHashSecret({ NODE_ENV: "test" }), DEV_JOIN_IP_HASH_SECRET);
+    assert.equal(joinIpHashSecret({}), DEV_JOIN_IP_HASH_SECRET);
+  });
+});
+
+describe("join key hashes", () => {
+  const ip = "203.0.113.7";
+
+  it("hash the IP with HMAC-SHA256, not plain SHA-256", () => {
+    const plain = createHash("sha256").update(`join-ip:${ip}`).digest("hex");
+    assert.notEqual(hashJoinIp(ip, SECRET), plain);
+    assert.match(hashJoinIp(ip, SECRET), /^[0-9a-f]{64}$/);
+  });
+
+  it("are deterministic, depend on the secret, and never contain the raw value", () => {
+    assert.equal(hashJoinIp(ip, SECRET), hashJoinIp(ip, SECRET));
+    assert.notEqual(hashJoinIp(ip, SECRET), hashJoinIp(ip, `${SECRET}y`));
+    assert.ok(!hashJoinIp(ip, SECRET).includes(ip));
+    assert.notEqual(hashJoinIp(ip, SECRET), hashJoinIp("203.0.113.8", SECRET));
+  });
+
+  it("default to the secret from the environment", () => {
+    assert.equal(hashJoinIp(ip), hashJoinIp(ip, joinIpHashSecret()));
+  });
+
+  it("keep the code key plain SHA-256", () => {
+    assert.equal(hashJoinCode("ABC234"), createHash("sha256").update("join-code:ABC234").digest("hex"));
+  });
+
+  it("keep IP and code keys apart even for the same text", () => {
+    assert.notEqual(hashJoinIp("ABC234"), hashJoinCode("ABC234"));
+  });
+});

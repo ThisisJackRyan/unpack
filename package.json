@@ -13,7 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "test": "node --import ./scripts/ts-paths.mjs --test \"src/**/*.test.ts\"",
     "db:check-class-limit": "node --import ./scripts/ts-paths.mjs scripts/check-class-limit.ts",
-    "db:check-student-questions": "node --import ./scripts/ts-paths.mjs scripts/check-student-questions.ts"
+    "db:check-student-questions": "node --import ./scripts/ts-paths.mjs scripts/check-student-questions.ts",
+    "db:check-student-join": "node --import ./scripts/ts-paths.mjs scripts/check-student-join.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

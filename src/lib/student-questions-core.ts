@@ -58,7 +58,7 @@ export const CLAIM_STALE_SECONDS = Math.ceil(QUESTION_WRITE_DEADLINE_MS / 1000) 
 // code can't run up model calls without limit.
 export const STUDENT_SETS_PER_READING_LIMIT = 150;
 
-// For the student reading page (not built yet) to show on "limit_reached".
+// What the student reading page shows on "limit_reached".
 export const STUDENT_SETS_LIMITED_MESSAGE = "Ask your teacher for help with this one.";
 
 // How long a "pending" caller should wait before asking again.
