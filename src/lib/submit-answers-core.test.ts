@@ -47,6 +47,8 @@ type Attempt = { tryNumber: number; passed: boolean; answers: { questionId: stri
 // interleave.
 function fakeStore(options: { eligible?: boolean; questions?: typeof QUESTIONS } = {}) {
   const checks: Check[] = [];
+  // A teacher's one more try moves these (see grantExtraTry below).
+  const limits = { tries: MAX_TRIES, checks: EFFORT_CHECK_LIMIT };
   const attempts: Attempt[] = [];
   let now = 0;
   const live = () => checks.some((c) => !c.finished && now - c.createdAt < EFFORT_CLAIM_STALE_SECONDS);
@@ -62,6 +64,7 @@ function fakeStore(options: { eligible?: boolean; questions?: typeof QUESTIONS }
           gradeLevel: "3",
           questions: options.questions ?? QUESTIONS,
           tries: attempts.length,
+          triesAllowed: limits.tries,
           passed: passed(),
         },
       };
@@ -70,9 +73,9 @@ function fakeStore(options: { eligible?: boolean; questions?: typeof QUESTIONS }
       await tick();
       if (options.eligible === false) return "not_found";
       if (passed()) return "already_passed";
-      if (attempts.length >= MAX_TRIES) return "out_of_tries";
+      if (attempts.length >= limits.tries) return "out_of_tries";
       if (live()) return "busy";
-      if (checks.length >= EFFORT_CHECK_LIMIT) return "too_many_checks";
+      if (checks.length >= limits.checks) return "too_many_checks";
       checks.push({ id: claimId, createdAt: now, finished: false, outcome: null });
       return "claimed";
     },
@@ -85,14 +88,16 @@ function fakeStore(options: { eligible?: boolean; questions?: typeof QUESTIONS }
       await tick();
       const c = checks.find((x) => x.id === input.claimId);
       if (!c || c.finished || now - c.createdAt >= EFFORT_CLAIM_STALE_SECONDS) return null;
-      if (attempts.length >= MAX_TRIES || passed()) return null;
+      if (attempts.length >= limits.tries || passed()) return null;
       Object.assign(c, { finished: true, outcome: input.passed ? "pass" : "fail" });
       const tryNumber = attempts.length + 1;
       attempts.push({ tryNumber, passed: input.passed, answers: input.verdicts });
       return tryNumber;
     },
   };
-  return { store, checks, attempts, advance: (s: number) => void (now += s) };
+  // Deny with one more try (see reading-limits.ts): exactly 1 try left.
+  const grantExtraTry = () => Object.assign(limits, { tries: attempts.length + 1, checks: checks.length + 2 });
+  return { store, checks, attempts, grantExtraTry, advance: (s: number) => void (now += s) };
 }
 
 // Fake effort checker: passes everything unless told otherwise, takes a
@@ -191,6 +196,31 @@ describe("submitAnswersWith", () => {
     assert.deepEqual(await submit(store, checker.check), { status: "out_of_tries" });
     assert.equal(checker.calls(), MAX_TRIES);
     assert.equal(attempts.length, MAX_TRIES);
+  });
+
+  it("after one more try from the teacher, checks exactly one more try, then refuses", async () => {
+    const { store, attempts, grantExtraTry } = fakeStore();
+    const checker = fakeChecker(failSecond);
+    for (let i = 1; i <= MAX_TRIES; i++) await submit(store, checker.check);
+    grantExtraTry();
+    const extra = await submit(store, checker.check);
+    assert.equal(extra.status === "checked" && extra.tryNumber, MAX_TRIES + 1);
+    assert.deepEqual(await submit(store, checker.check), { status: "out_of_tries" });
+    assert.equal(attempts.length, MAX_TRIES + 1);
+    assert.equal(checker.calls(), MAX_TRIES + 1);
+  });
+
+  it("one more try at the check limit: a model failure keeps the try, the 2nd failure ends it", async () => {
+    const { store, attempts, checks, grantExtraTry } = fakeStore();
+    const broken = fakeChecker(() => new Error("model down"));
+    for (let i = 0; i < EFFORT_CHECK_LIMIT; i++) await submit(store, broken.check);
+    assert.deepEqual(await submit(store, broken.check), { status: "too_many_checks" });
+    grantExtraTry();
+    assert.deepEqual(await submit(store, broken.check), { status: "check_failed" });
+    assert.deepEqual(await submit(store, broken.check), { status: "check_failed" });
+    assert.deepEqual(await submit(store, broken.check), { status: "too_many_checks" });
+    assert.equal(checks.length, EFFORT_CHECK_LIMIT + 2);
+    assert.equal(attempts.length, 0);
   });
 
   it("refuses anything after a pass", async () => {
@@ -418,15 +448,28 @@ describe("claim statements", () => {
     assert.deepEqual(statements[0].params, [3, `${STUDENT}:${READING}`]);
   });
 
-  it("insert only when eligible, not passed, under 3 tries, no live claim, under the limit", () => {
+  it("insert only when eligible, not passed, under the try limit, no live claim, under the check limit", () => {
     const insert = statements[1];
     assert.match(insert.text, /insert into effort_checks \(id, student_id, reading_id\)/);
     assert.match(insert.text, /r\.status = 'published'/);
     assert.match(insert.text, /not exists \(\s*select 1 from attempts[\s\S]*result = 'pass'/);
-    assert.match(insert.text, /from attempts where student_id = \$1::uuid and reading_id = \$2::uuid\) < \$4::int/);
-    assert.match(insert.text, /and not exists \(\s*select 1 from effort_checks[\s\S]*finished_at is null and created_at > now\(\) - make_interval\(secs => \$5::int\)/);
-    assert.match(insert.text, /from effort_checks where student_id = \$1::uuid and reading_id = \$2::uuid\) < \$6::int/);
-    assert.deepEqual(insert.params, [STUDENT, READING, "c1", MAX_TRIES, EFFORT_CLAIM_STALE_SECONDS, EFFORT_CHECK_LIMIT]);
+    // The limits: the latest teacher grant, else MAX_TRIES and
+    // EFFORT_CHECK_LIMIT.
+    assert.match(
+      insert.text,
+      new RegExp(`from attempts where student_id = \\$1::uuid and reading_id = \\$2::uuid\\) < coalesce\\(\\(select g\\.tries_allowed from challenges g[\\s\\S]*?order by g\\.round desc limit 1\\), ${MAX_TRIES}\\)`),
+    );
+    assert.match(insert.text, /and not exists \(\s*select 1 from effort_checks[\s\S]*finished_at is null and created_at > now\(\) - make_interval\(secs => \$4::int\)/);
+    assert.match(
+      insert.text,
+      new RegExp(`from effort_checks where student_id = \\$1::uuid and reading_id = \\$2::uuid\\) < coalesce\\(\\(select g\\.checks_allowed from challenges g[\\s\\S]*?limit 1\\), ${EFFORT_CHECK_LIMIT}\\)`),
+    );
+    assert.deepEqual(insert.params, [STUDENT, READING, "c1", EFFORT_CLAIM_STALE_SECONDS]);
+  });
+
+  it("lowercase the lock key, so an uppercase id from the URL shares the lock", () => {
+    const upper = claimStatements("S1", "AB-CD", "c1")[0];
+    assert.deepEqual(upper.params, [3, "s1:ab-cd"]);
   });
 
   it("use every parameter they pass", () => {
@@ -451,7 +494,7 @@ const SAVE = {
 
 describe("claimOutcome", () => {
   const diag = (row: Record<string, unknown>) => [[{}], [], [row]];
-  const base = { eligible: true, passed: false, tries: 0, live: false, checks: 0 };
+  const base = { eligible: true, passed: false, tries: 0, live: false, checks: 0, tries_allowed: 3, checks_allowed: 6 };
 
   it("reads a claim, then each reason in order", () => {
     assert.equal(claimOutcome([[{}], [{ id: "c1" }], [base]]), "claimed");
@@ -462,6 +505,15 @@ describe("claimOutcome", () => {
     assert.equal(claimOutcome(diag({ ...base, checks: 6 })), "too_many_checks");
     assert.equal(claimOutcome(diag(base)), "busy");
     assert.equal(claimOutcome([]), "not_found");
+  });
+
+  it("uses the student's own limits after one more try", () => {
+    const granted = { ...base, tries: 3, checks: 6, tries_allowed: 4, checks_allowed: 8 };
+    assert.equal(claimOutcome(diag(granted)), "busy");
+    assert.equal(claimOutcome(diag({ ...granted, tries: 4 })), "out_of_tries");
+    assert.equal(claimOutcome(diag({ ...granted, checks: 8 })), "too_many_checks");
+    // Missing limits fall back to the defaults.
+    assert.equal(claimOutcome(diag({ eligible: true, passed: false, tries: 3, live: false, checks: 3 })), "out_of_tries");
   });
 });
 
@@ -476,10 +528,10 @@ describe("commit statements", () => {
     const s = statements[1];
     assert.match(s.text, /with claim as \(\s*update effort_checks set finished_at = now\(\), outcome = \$5::text/);
     assert.match(s.text, /finished_at is null and created_at > now\(\) - make_interval\(secs => \$6::int\)/);
-    assert.match(s.text, /reading_id = \$2::uuid\) < \$7::int/);
+    assert.match(s.text, /reading_id = \$2::uuid\) < coalesce\(\(select g\.tries_allowed from challenges g/);
     assert.match(s.text, /insert into attempts \(id, student_id, reading_id, try_number, result\)/);
     assert.match(s.text, /reading_id = \$2::uuid\) \+ 1, \$5::text::attempt_result\s+from claim/);
-    assert.deepEqual(s.params, [STUDENT, READING, "c1", "a1", "fail", EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES]);
+    assert.deepEqual(s.params, [STUDENT, READING, "c1", "a1", "fail", EFFORT_CLAIM_STALE_SECONDS]);
     assert.equal(commitStatements({ ...SAVE, passed: true })[1].params[4], "pass");
   });
 
@@ -500,6 +552,15 @@ describe("commit statements", () => {
     ]);
   });
 
+  it("close an open challenge, only when the try just saved passed", () => {
+    const s = statements[3];
+    assert.match(s.text, /^update challenges set status = 'closed', resolved_at = now\(\)/);
+    assert.match(s.text, /where student_id = \$1::uuid and reading_id = \$2::uuid and status = 'open'/);
+    assert.match(s.text, /where id = \$3::uuid and student_id = \$1::uuid and reading_id = \$2::uuid and result = 'pass'/);
+    assert.deepEqual(s.params, [STUDENT, READING, "a1"]);
+    assert.equal(statements.length, 4);
+  });
+
   it("read the saved try number, or null when the claim was lost", () => {
     assert.equal(committedTry([[{}], [{ try_number: 2 }], [{}, {}]]), 2);
     assert.equal(committedTry([[{}], [], []]), null);
@@ -511,12 +572,14 @@ describe("submitLookup", () => {
     const lookup = submitLookup([
       [{ body_text: "text", grade_level: "5", question_mode: "shared" }],
       [{ id: "q1", position: 1, prompt: "Why?" }],
-      [{ tries: 2, passed: false }],
+      [{ tries: 2, passed: false, tries_allowed: 3 }],
     ]);
     assert.deepEqual(lookup, {
       status: "ok",
-      context: { bodyText: "text", gradeLevel: "5", questions: [{ id: "q1", position: 1, prompt: "Why?" }], tries: 2, passed: false },
+      context: { bodyText: "text", gradeLevel: "5", questions: [{ id: "q1", position: 1, prompt: "Why?" }], tries: 2, triesAllowed: 3, passed: false },
     });
+    const granted = submitLookup([[{ body_text: "t", grade_level: "5" }], [], [{ tries: 3, passed: false, tries_allowed: 4 }]]);
+    assert.equal(granted.status === "ok" && granted.context.triesAllowed, 4);
     assert.deepEqual(submitLookup([[], [], []]), { status: "not_found" });
   });
 
@@ -542,14 +605,14 @@ describe("postgresAttemptStore", () => {
     const { execute, calls } = fakeExecutor([
       [[{ body_text: "t", grade_level: "4" }], QUESTIONS, [{ tries: 0, passed: false }]],
       [[{}], [{ id: "c1" }], [{}]],
-      [[{}], [{ try_number: 1 }], [{}, {}]],
+      [[{}], [{ try_number: 1 }], [{}, {}], []],
     ]);
     const store = postgresAttemptStore(execute);
     const lookup = await store.loadContext(STUDENT, READING);
     assert.equal(lookup.status, "ok");
     assert.equal(await store.claim(STUDENT, READING, "c1"), "claimed");
     assert.equal(await store.commit(SAVE), 1);
-    assert.deepEqual(calls.map((c) => c.length), [3, 3, 3]);
+    assert.deepEqual(calls.map((c) => c.length), [3, 3, 4]);
   });
 
   it("propagates executor errors (fail closed)", async () => {

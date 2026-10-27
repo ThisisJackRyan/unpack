@@ -8,6 +8,8 @@
 // script the form, and every check is a paid model call. The rules: at
 // most MAX_TRIES attempts, nothing after a pass, one check running at a
 // time, and at most EFFORT_CHECK_LIMIT checks ever per student per reading.
+// A teacher's "one more try" raises both limits for that student (see
+// reading-limits.ts); every rule below uses the student's own limits.
 // A model call can't run inside a database transaction, so:
 //
 // 1. Load the reading (published, in the student's class), the student's
@@ -17,18 +19,18 @@
 // 2. Claim, in ONE transaction under a transaction-scoped advisory lock on
 //    (student, reading), the join-rate-limit pattern: insert an
 //    effort_checks row only if the student has no passing attempt, fewer
-//    than MAX_TRIES attempts, no live claim (unfinished and younger than
-//    EFFORT_CLAIM_STALE_SECONDS), and fewer than EFFORT_CHECK_LIMIT
-//    effort_checks rows. The lock makes those counts and the insert one
+//    attempts and effort_checks rows than their limits, and no live claim
+//    (unfinished and younger than EFFORT_CLAIM_STALE_SECONDS). The lock makes those counts and the insert one
 //    step, so 20 parallel submits get exactly one claim; the rest are told
 //    "busy" (or the reason they can't go on).
 // 3. Call the model with no transaction open.
 // 4. Commit, in ONE transaction under the same lock: finish the claim and
 //    insert the attempt (try_number = tries so far + 1) and its answers,
 //    only while the claim is still live and the student still has fewer
-//    than MAX_TRIES attempts and no pass. The unique (student, reading,
-//    try_number) constraint and the try_number check (1 to 3) are the
-//    backstop.
+//    attempts than their limit and no pass. The unique (student, reading,
+//    try_number) constraint is the backstop. A passing attempt also closes
+//    an open challenge in the same transaction (status closed), so the
+//    teacher's queue never asks about a student who has since passed.
 // 5. On a model error or timeout, finish the claim with no attempt: the try
 //    isn't used up, but the effort_checks row still counts toward
 //    EFFORT_CHECK_LIMIT, so a broken model can't be retried forever. Once
@@ -54,11 +56,11 @@ import type { EffortCheckInput, EffortVerdict } from "./ai/effort-check";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { hasPgCode, isUniqueViolation } from "./pg-errors";
+import { checksAllowedSql, effortLockStatement, limitsFromRow, triesAllowedSql } from "./reading-limits";
 import type { StudentQuestion } from "./student-questions-core";
 import {
   ANSWERS_STALE_MESSAGE,
   EFFORT_CHECK_LIMIT,
-  MAX_TRIES,
   validateAnswers,
   type AnswerEntry,
   type AnswerErrors,
@@ -74,11 +76,8 @@ export { EFFORT_CHECK_LIMIT };
 // slow starts, so a live check is never treated as stale: 90s.
 export const EFFORT_CLAIM_STALE_SECONDS = Math.ceil(EFFORT_CHECK_DEADLINE_MS / 1000) + 30;
 
-// Advisory lock namespace (join-rate-limit.ts uses 1 and 2).
-const EFFORT_LOCK_SPACE = 3;
-
 export const ALREADY_PASSED_MESSAGE = "You already passed this one. Nice work!";
-export const OUT_OF_TRIES_MESSAGE = `You’ve used all ${MAX_TRIES} tries on this one.`;
+export const OUT_OF_TRIES_MESSAGE = "You’ve used all your tries on this one.";
 export const CHECK_BUSY_MESSAGE = "We’re still checking your answers. Wait a moment, then try again.";
 // The page moves to the note to the teacher (answerStage's check_limit).
 export const TOO_MANY_CHECKS_MESSAGE = "We couldn’t check your answers. Send a note to your teacher.";
@@ -91,6 +90,8 @@ export type SubmitContext = {
   gradeLevel: GradeLevel;
   questions: StudentQuestion[];
   tries: number;
+  // MAX_TRIES, or more after a teacher's "one more try".
+  triesAllowed: number;
   passed: boolean;
 };
 
@@ -170,7 +171,7 @@ export async function submitAnswersWith(
   if (lookup.status !== "ok") return { status: "not_found" };
   const { context } = lookup;
   if (context.passed) return { status: "already_passed" };
-  if (context.tries >= MAX_TRIES) return { status: "out_of_tries" };
+  if (context.tries >= context.triesAllowed) return { status: "out_of_tries" };
   if (context.questions.length === 0) return { status: "not_found" };
 
   const validation = validateAnswers(
@@ -238,7 +239,7 @@ export async function submitAnswersWith(
 
 // The reading (published, in the student's class), with its effective
 // grade; the student's questions (the shared set, or their own set in
-// per-student mode); and their tries so far.
+// per-student mode); their tries so far; and their try limit.
 export function submitContextStatements(studentId: string, readingId: string): Statement[] {
   return [
     {
@@ -261,7 +262,8 @@ order by q.position`,
       params: [studentId, readingId],
     },
     {
-      text: `select count(*)::int as tries, coalesce(bool_or(result = 'pass'), false) as passed
+      text: `select count(*)::int as tries, coalesce(bool_or(result = 'pass'), false) as passed,
+  ${TRIES_ALLOWED} as tries_allowed
 from attempts where student_id = $1::uuid and reading_id = $2::uuid`,
       params: [studentId, readingId],
     },
@@ -283,15 +285,9 @@ export function submitLookup(results: Record<string, unknown>[][]): SubmitLookup
         prompt: String(q.prompt),
       })),
       tries: Number(progress?.tries ?? 0),
+      triesAllowed: limitsFromRow(progress).tries,
       passed: progress?.passed === true,
     },
-  };
-}
-
-function lockStatement(studentId: string, readingId: string): Statement {
-  return {
-    text: "select pg_advisory_xact_lock($1::int, hashtext($2::text))",
-    params: [EFFORT_LOCK_SPACE, `${studentId}:${readingId}`],
   };
 }
 
@@ -304,6 +300,10 @@ const NOT_PASSED = `not exists (
   select 1 from attempts where student_id = $1::uuid and reading_id = $2::uuid and result = 'pass'
 )`;
 const TRIES = `(select count(*) from attempts where student_id = $1::uuid and reading_id = $2::uuid)`;
+// The student's limits (MAX_TRIES and EFFORT_CHECK_LIMIT unless a teacher
+// granted one more try).
+const TRIES_ALLOWED = triesAllowedSql("$1::uuid", "$2::uuid");
+const CHECKS_ALLOWED = checksAllowedSql("$1::uuid", "$2::uuid");
 
 // Whether a check is running: an unfinished claim younger than the stale
 // timeout, given as parameter $n.
@@ -327,18 +327,18 @@ const CHECKS = `(select count(*) from effort_checks where student_id = $1::uuid 
 // 3. Say why when nothing was inserted.
 export function claimStatements(studentId: string, readingId: string, claimId: string): Statement[] {
   return [
-    lockStatement(studentId, readingId),
+    effortLockStatement(studentId, readingId),
     {
-      // $3 claim id, $4 MAX_TRIES, $5 stale seconds, $6 EFFORT_CHECK_LIMIT.
+      // $3 claim id, $4 stale seconds.
       text: `insert into effort_checks (id, student_id, reading_id)
 select $3::uuid, $1::uuid, $2::uuid
 where ${ELIGIBLE}
 and ${NOT_PASSED}
-and ${TRIES} < $4::int
-and not ${liveClaim(5)}
-and ${CHECKS} < $6::int
+and ${TRIES} < ${TRIES_ALLOWED}
+and not ${liveClaim(4)}
+and ${CHECKS} < ${CHECKS_ALLOWED}
 returning id`,
-      params: [studentId, readingId, claimId, MAX_TRIES, EFFORT_CLAIM_STALE_SECONDS, EFFORT_CHECK_LIMIT],
+      params: [studentId, readingId, claimId, EFFORT_CLAIM_STALE_SECONDS],
     },
     {
       // $3 stale seconds.
@@ -346,7 +346,9 @@ returning id`,
   not ${NOT_PASSED} as passed,
   ${TRIES}::int as tries,
   ${liveClaim(3)} as live,
-  ${CHECKS}::int as checks`,
+  ${CHECKS}::int as checks,
+  ${TRIES_ALLOWED} as tries_allowed,
+  ${CHECKS_ALLOWED} as checks_allowed`,
       params: [studentId, readingId, EFFORT_CLAIM_STALE_SECONDS],
     },
   ];
@@ -359,10 +361,11 @@ export function claimOutcome(results: Record<string, unknown>[][]): ClaimOutcome
   if ((results[1]?.length ?? 0) > 0) return "claimed";
   const row = results[2]?.[0];
   if (row?.eligible !== true) return "not_found";
+  const limits = limitsFromRow(row);
   if (row.passed === true) return "already_passed";
-  if (Number(row.tries ?? 0) >= MAX_TRIES) return "out_of_tries";
+  if (Number(row.tries ?? 0) >= limits.tries) return "out_of_tries";
   if (row.live === true) return "busy";
-  if (Number(row.checks ?? 0) >= EFFORT_CHECK_LIMIT) return "too_many_checks";
+  if (Number(row.checks ?? 0) >= limits.checks) return "too_many_checks";
   return "busy";
 }
 
@@ -379,22 +382,25 @@ where id = $3::uuid and student_id = $1::uuid and reading_id = $2::uuid and fini
 // 1. The same lock as the claim.
 // 2. Finish the claim and insert the attempt, in one statement: the update
 //    only matches while the claim is still live and the student still has
-//    fewer than MAX_TRIES attempts and no pass, and the insert only runs
+//    fewer attempts than their limit and no pass, and the insert only runs
 //    for the row it returned.
 // 3. Insert the answers, only for the attempt just saved, and only for
 //    questions of this student's set.
+// 4. If that attempt passed, close any open challenge (status closed, no
+//    resolved_by): Passed beats Challenged, and the teacher has nothing
+//    left to decide.
 export function commitStatements(input: SaveInput): Statement[] {
   const { studentId, readingId } = input;
   const result = input.passed ? "pass" : "fail";
   return [
-    lockStatement(studentId, readingId),
+    effortLockStatement(studentId, readingId),
     {
-      // $3 claim id, $4 attempt id, $5 result, $6 stale seconds, $7 MAX_TRIES.
+      // $3 claim id, $4 attempt id, $5 result, $6 stale seconds.
       text: `with claim as (
   update effort_checks set finished_at = now(), outcome = $5::text
   where id = $3::uuid and student_id = $1::uuid and reading_id = $2::uuid
     and finished_at is null and created_at > now() - make_interval(secs => $6::int)
-    and ${TRIES} < $7::int
+    and ${TRIES} < ${TRIES_ALLOWED}
     and ${NOT_PASSED}
   returning id
 )
@@ -409,7 +415,6 @@ returning try_number`,
         input.attemptId,
         result,
         EFFORT_CLAIM_STALE_SECONDS,
-        MAX_TRIES,
       ],
     },
     {
@@ -432,7 +437,23 @@ returning id`,
         input.verdicts.map((v) => v.nudge),
       ],
     },
+    autoCloseStatement(studentId, readingId, input.attemptId),
   ];
+}
+
+// Step 4 of the commit. $3 attempt id: only an attempt saved in this
+// transaction, and only a pass, closes the challenge.
+export function autoCloseStatement(studentId: string, readingId: string, attemptId: string): Statement {
+  return {
+    text: `update challenges set status = 'closed', resolved_at = now()
+where student_id = $1::uuid and reading_id = $2::uuid and status = 'open'
+  and exists (
+    select 1 from attempts
+    where id = $3::uuid and student_id = $1::uuid and reading_id = $2::uuid and result = 'pass'
+  )
+returning id`,
+    params: [studentId, readingId, attemptId],
+  };
 }
 
 export function committedTry(results: Record<string, unknown>[][]): number | null {

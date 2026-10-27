@@ -1,36 +1,68 @@
-// A student's progress on one reading, derived from their attempts and
-// challenge (the v1 spec's rule): Passed if any attempt passed or a
-// challenge was approved, Challenged if a challenge is open, In progress
-// after any try (or once every effort check is used), else Not started.
-// Pure, so tests cover every case; the queries are in
-// reading-progress-db.ts.
+// A student's progress on one reading, derived from their attempts,
+// checks, limits, and latest challenge (the v1 spec's rule). Pure, so
+// tests cover every case; the queries are in reading-progress-db.ts (the
+// student's pages) and class-status.ts (the teacher's class view), and
+// both go through studentReadingStatus.
 
 import type { Statement } from "./link-rate-limit";
-import { EFFORT_CHECK_LIMIT, MAX_TRIES } from "./validate-answers";
+import { DEFAULT_LIMITS, latestChallengeSql, limitsFromRow, checksAllowedSql, triesAllowedSql, type Limits } from "./reading-limits";
+import { MAX_TRIES } from "./validate-answers";
 
-export type ChallengeStatus = "open" | "approved" | "denied";
+// closed: auto-closed because the student passed (see
+// submit-answers-core.ts).
+export type ChallengeStatus = "open" | "approved" | "denied" | "closed";
 
-export type StudentReadingStatus = "not_started" | "in_progress" | "passed" | "challenged";
+// The student's latest challenge round. `extraTry`: denied with "Give one
+// more try" (the student may answer again, and send a new note if that
+// try fails too).
+export type LatestChallenge = { status: ChallengeStatus; extraTry: boolean };
+
+export type StudentReadingStatus = "not_started" | "in_progress" | "passed" | "challenged" | "challenge_denied";
 
 export const STUDENT_READING_STATUS_LABELS: Record<StudentReadingStatus, string> = {
   not_started: "Not started",
   in_progress: "In progress",
   passed: "Passed",
   challenged: "Challenged",
+  challenge_denied: "Challenge denied",
 };
 
-// `checks` is every effort check started, failed ones included.
-export type StatusInput = { passed: boolean; tries: number; checks: number; challenge: ChallengeStatus | null };
+// `checks` is every effort check started, failed ones included. `limits`
+// defaults to MAX_TRIES and EFFORT_CHECK_LIMIT.
+export type StatusInput = {
+  passed: boolean;
+  tries: number;
+  checks: number;
+  challenge: LatestChallenge | null;
+  limits?: Limits;
+};
 
-// A denied challenge goes back to In progress: the student has used their
-// tries, and the teacher decides what comes next. So does reaching the
-// check limit with no try saved (every check failed): the student has
-// started, and can send a note.
+// In order:
+// - Passed: any attempt passed (also after a challenge, which is then
+//   closed), or the teacher accepted the latest challenge.
+// - Challenged: the latest challenge is open.
+// - Challenge denied: the latest challenge was denied, with no extra try.
+// - In progress: any try, or every check used (all failed on our side),
+//   or a denial with one more try (whether or not it's used yet).
+// - Not started.
 export function studentReadingStatus(input: StatusInput): StudentReadingStatus {
-  if (input.passed || input.challenge === "approved") return "passed";
-  if (input.challenge === "open") return "challenged";
-  if (input.tries > 0 || input.checks >= EFFORT_CHECK_LIMIT || input.challenge === "denied") return "in_progress";
+  const { challenge } = input;
+  const limits = input.limits ?? DEFAULT_LIMITS;
+  if (input.passed || challenge?.status === "approved") return "passed";
+  if (challenge?.status === "open") return "challenged";
+  if (challenge?.status === "denied" && !challenge.extraTry) return "challenge_denied";
+  if (input.tries > 0 || input.checks >= limits.checks || challenge) return "in_progress";
   return "not_started";
+}
+
+export function parseChallengeStatus(value: unknown): ChallengeStatus | null {
+  return value === "open" || value === "approved" || value === "denied" || value === "closed" ? value : null;
+}
+
+// From a row with `status` (or `challenge`) and `extra_try`.
+export function latestChallenge(status: unknown, extraTry: unknown): LatestChallenge | null {
+  const parsed = parseChallengeStatus(status);
+  return parsed ? { status: parsed, extraTry: extraTry === true } : null;
 }
 
 export type SavedAnswer = { text: string; pass: boolean; nudge: string };
@@ -44,38 +76,44 @@ export type AttemptView = {
 
 export type ReadingProgress = {
   attempts: AttemptView[];
-  challenge: ChallengeStatus | null;
+  challenge: LatestChallenge | null;
   // Effort checks started, failed ones included (see EFFORT_CHECK_LIMIT).
   checks: number;
+  limits: Limits;
 };
 
 // What the reading page shows under the questions.
 export type AnswerStage =
   // Answer (again). `previous` is the last failed try, for the prefill,
-  // the per-answer results, and the nudges.
-  | { kind: "answer"; tryNumber: number; previous: AttemptView | null }
-  // Done: the passing try (or, when the teacher approved a challenge, the
+  // the per-answer results, and the nudges. `extraTry`: the teacher denied
+  // the note but gave one more try (exactly 1 left).
+  | { kind: "answer"; tryNumber: number; maxTries: number; previous: AttemptView | null; extraTry: boolean }
+  // Done: the passing try (or, when the teacher accepted a challenge, the
   // last try) shown read-only.
   | { kind: "passed"; attempt: AttemptView | null; byTeacher: boolean }
-  // 3 failed tries and no challenge yet: the last try and the note box.
-  | { kind: "out_of_tries"; attempt: AttemptView | null }
+  // Every try used and no open challenge: the last try and the note box.
+  // `extraTry`: that was the teacher's one more try.
+  | { kind: "out_of_tries"; attempt: AttemptView | null; extraTry: boolean }
   // Every effort check used (model failures count but don't use a try)
   // with fewer than 3 tries, no pass, and no challenge yet: no answer
   // form, the last try if there is one, and the note box.
   | { kind: "check_limit"; attempt: AttemptView | null }
-  // A challenge was sent (open or denied).
+  // A challenge was sent and is open, or was denied without one more try
+  // (no form: the teacher decided).
   | { kind: "challenged"; status: "open" | "denied"; attempt: AttemptView | null };
 
 export function answerStage(progress: ReadingProgress): AnswerStage {
-  const { attempts, challenge, checks } = progress;
+  const { attempts, challenge, checks, limits } = progress;
   const latest = attempts.at(-1) ?? null;
   const passing = attempts.find((a) => a.result === "pass");
   if (passing) return { kind: "passed", attempt: passing, byTeacher: false };
-  if (challenge === "approved") return { kind: "passed", attempt: latest, byTeacher: true };
-  if (challenge) return { kind: "challenged", status: challenge, attempt: latest };
-  if (attempts.length >= MAX_TRIES) return { kind: "out_of_tries", attempt: latest };
-  if (checks >= EFFORT_CHECK_LIMIT) return { kind: "check_limit", attempt: latest };
-  return { kind: "answer", tryNumber: attempts.length + 1, previous: latest };
+  if (challenge?.status === "approved") return { kind: "passed", attempt: latest, byTeacher: true };
+  if (challenge?.status === "open") return { kind: "challenged", status: "open", attempt: latest };
+  if (challenge?.status === "denied" && !challenge.extraTry) return { kind: "challenged", status: "denied", attempt: latest };
+  const extraTry = challenge?.status === "denied" && challenge.extraTry;
+  if (attempts.length >= limits.tries) return { kind: "out_of_tries", attempt: latest, extraTry };
+  if (checks >= limits.checks) return { kind: "check_limit", attempt: latest };
+  return { kind: "answer", tryNumber: attempts.length + 1, maxTries: limits.tries, previous: latest, extraTry };
 }
 
 // For the page's live region, so a screen reader hears what changed after
@@ -83,16 +121,19 @@ export function answerStage(progress: ReadingProgress): AnswerStage {
 export function stageAnnouncement(stage: AnswerStage): string {
   switch (stage.kind) {
     case "passed":
-      return stage.byTeacher ? "Your teacher passed this reading." : "You passed this reading. Nice work!";
+      return stage.byTeacher ? "Your teacher accepted your answers." : "You passed this reading. Nice work!";
     case "challenged":
-      return stage.status === "open" ? "Sent. Your teacher will take a look." : "Your teacher looked at your note.";
+      return stage.status === "open" ? "Sent. Your teacher will take a look." : "Your teacher read your note.";
     case "out_of_tries":
-      return `That was try ${MAX_TRIES} of ${MAX_TRIES}. You can send a note to your teacher.`;
+      return stage.extraTry
+        ? "That was your extra try. You can send a note to your teacher."
+        : `That was try ${MAX_TRIES} of ${MAX_TRIES}. You can send a note to your teacher.`;
     case "check_limit":
       return "We couldn’t check your answers. You can send a note to your teacher.";
     case "answer":
+      if (stage.extraTry) return "Your teacher gave you one more try. You have 1 try left.";
       return stage.previous
-        ? `Not yet. ${passedCountLabel(stage.previous)} Read the tips and try again. This is try ${stage.tryNumber} of ${MAX_TRIES}.`
+        ? `Not yet. ${passedCountLabel(stage.previous)} Read the tips and try again. This is try ${stage.tryNumber} of ${stage.maxTries}.`
         : "";
   }
 }
@@ -125,7 +166,12 @@ order by a.try_number`,
       params: [studentId, readingId],
     },
     {
-      text: `select status from challenges where student_id = $1::uuid and reading_id = $2::uuid`,
+      // Always one row: the latest challenge (or nulls) and the limits.
+      text: `select lc.status, lc.extra_try,
+  ${triesAllowedSql("$1::uuid", "$2::uuid")} as tries_allowed,
+  ${checksAllowedSql("$1::uuid", "$2::uuid")} as checks_allowed
+from (select 1) one
+left join lateral ${latestChallengeSql("$1::uuid", "$2::uuid")} lc on true`,
       params: [studentId, readingId],
     },
     {
@@ -154,10 +200,13 @@ export function readingProgress(results: Record<string, unknown>[][]): ReadingPr
       answers,
     };
   });
-  const status = results[1]?.[0]?.status;
-  const challenge =
-    status === "open" || status === "approved" || status === "denied" ? status : null;
-  return { attempts, challenge, checks: Number(results[2]?.[0]?.checks ?? 0) };
+  const row = results[1]?.[0];
+  return {
+    attempts,
+    challenge: latestChallenge(row?.status, row?.extra_try),
+    checks: Number(results[2]?.[0]?.checks ?? 0),
+    limits: limitsFromRow(row),
+  };
 }
 
 // The class's published readings, newest first, with this student's
@@ -170,9 +219,11 @@ export function readingListStatement(classId: string, studentId: string): Statem
     where a.reading_id = r.id and a.student_id = $2::uuid and a.result = 'pass'
   ) as passed,
   (select count(*)::int from attempts a where a.reading_id = r.id and a.student_id = $2::uuid) as tries,
-  (select ch.status from challenges ch where ch.reading_id = r.id and ch.student_id = $2::uuid) as challenge,
-  (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid) as checks
+  lc.status as challenge, lc.extra_try,
+  (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid) as checks,
+  ${checksAllowedSql("$2::uuid", "r.id")} as checks_allowed
 from readings r
+left join lateral ${latestChallengeSql("$2::uuid", "r.id")} lc on true
 where r.class_id = $1::uuid and r.status = 'published'
 order by r.created_at desc, r.id desc`,
     params: [classId, studentId],
@@ -187,18 +238,16 @@ export type StudentReadingListItem = {
 };
 
 export function readingListItems(rows: Record<string, unknown>[]): StudentReadingListItem[] {
-  return rows.map((row) => {
-    const c = row.challenge;
-    return {
-      id: String(row.id),
-      title: String(row.title),
-      questionCount: Number(row.question_count),
-      status: studentReadingStatus({
-        passed: row.passed === true,
-        tries: Number(row.tries ?? 0),
-        checks: Number(row.checks ?? 0),
-        challenge: c === "open" || c === "approved" || c === "denied" ? c : null,
-      }),
-    };
-  });
+  return rows.map((row) => ({
+    id: String(row.id),
+    title: String(row.title),
+    questionCount: Number(row.question_count),
+    status: studentReadingStatus({
+      passed: row.passed === true,
+      tries: Number(row.tries ?? 0),
+      checks: Number(row.checks ?? 0),
+      challenge: latestChallenge(row.challenge, row.extra_try),
+      limits: limitsFromRow(row),
+    }),
+  }));
 }
