@@ -1,5 +1,5 @@
-// Clerk webhook: keeps the teachers row in step with the teacher's Clerk
-// account. Pure flow over an injected verifier and executor, so tests run
+// Clerk webhook: keeps the teachers row (every Clerk account's row,
+// teacher or self-learner) in step with the Clerk account. Pure flow over an injected verifier and executor, so tests run
 // it with fakes (and the real verifier); the route is
 // src/app/api/webhooks/clerk/route.ts.
 //
@@ -15,7 +15,9 @@
 //   else the first one, the same as the lazy creation in teacher.ts).
 //   ON CONFLICT (clerk_user_id) DO UPDATE, so it is race-safe with that
 //   lazy creation (a first visit and the webhook at the same moment end
-//   with one row), and a redelivery is harmless.
+//   with one row), and a redelivery is harmless. It never sets a role:
+//   a new account chooses on /welcome (see account-role.ts), and the
+//   upsert leaves an existing row's role alone.
 // - user.updated: update only (update teachers ... where clerk_user_id),
 //   never an insert. Svix doesn't promise delivery order, so a late
 //   user.updated can arrive after user.deleted; an upsert would bring the
@@ -23,10 +25,12 @@
 //   a teacher who never visited gets their row from the lazy creation.
 //   A user with no email address at all is skipped on either event (email
 //   is required); the lazy creation refuses such a user too.
-// - user.deleted: deletes the teacher's classes, then the teachers row,
-//   in one transaction (deleteTeacherStatements). The classes cascade to
-//   their readings, students, and all student work; the teacher row then
-//   cascades to the teacher's own logs (see docs/privacy.md). The Clerk
+// - user.deleted: deletes the account's classes, then its self-learner
+//   readings, then the teachers row, in one transaction
+//   (deleteTeacherStatements). The classes cascade to their readings,
+//   students, and all student work; the self-learner readings to their
+//   questions, tries, answers, and effort checks; the account row then to
+//   its own logs (see docs/privacy.md). The Clerk
 //   account is gone, so they can never sign in to see it again; keeping
 //   the children's data would only keep it longer than needed. A repeat
 //   (or a user who never visited) deletes nothing and is still a 200.
@@ -85,26 +89,31 @@ returning id`,
   };
 }
 
-// Deletes a teacher and everything they own, as one transaction. Not a
-// single "delete from teachers": that statement would also run
-// challenges.resolved_by's ON DELETE SET NULL on challenges the same
-// statement is removing through their student or reading, and Postgres
-// fails it with 23503 (the set null update re-checks the challenge's
-// student_id foreign key after the student is gone). So:
+// Deletes an account (teacher or self-learner) and everything it owns, as
+// one transaction. Not a single "delete from teachers": that statement
+// would also run challenges.resolved_by's ON DELETE SET NULL on challenges
+// the same statement is removing through their student or reading, and
+// Postgres fails it with 23503 (the set null update re-checks the
+// challenge's student_id foreign key after the student is gone). So:
 //
-// 1. Lock the teacher row, so a class created right now (insertClassIfAllowed
-//    takes the same lock) either commits first and is deleted in step 2,
-//    or waits and then finds no teacher.
+// 1. Lock the account row, so a class or self-learner reading created
+//    right now (insertClassIfAllowed and the self-learner create take the
+//    same lock) either commits first and is deleted below, or waits and
+//    then finds no account.
 // 2. Delete their classes. That cascades to students and readings, and
 //    under them questions, attempts, answers, challenges (resolved ones
 //    too: resolved_by is only ever the class's own teacher), effort
 //    checks, question generations, student question calls, and cap raises.
-// 3. Delete the teacher row: with the classes gone, what's left under it
-//    is the teacher's own logs (link_fetch_attempts,
-//    question_generation_attempts, and any reading_cap_raises left), all
-//    ON DELETE CASCADE. Applied when this returns the row.
+// 3. Delete their self-learner readings. That cascades to self_questions,
+//    self_attempts, self_answers, and self_effort_checks (every self_*
+//    foreign key is ON DELETE CASCADE, none SET NULL or RESTRICT). An
+//    account that switched roles has both kinds, so both steps always run.
+// 4. Delete the account row: what's left under it is the teacher's own
+//    logs (link_fetch_attempts, question_generation_attempts, and any
+//    reading_cap_raises left), and the cascade would reach any self_*
+//    row step 3 missed. Applied when this returns the row.
 //
-// With no such teacher every statement matches nothing.
+// With no such account every statement matches nothing.
 export function deleteTeacherStatements(clerkUserId: string): Statement[] {
   const params = [clerkUserId];
   return [
@@ -114,8 +123,18 @@ export function deleteTeacherStatements(clerkUserId: string): Statement[] {
 where teacher_id in (select id from teachers where clerk_user_id = $1::text)`,
       params,
     },
+    {
+      text: `delete from self_readings
+where account_id in (select id from teachers where clerk_user_id = $1::text)`,
+      params,
+    },
     { text: `delete from teachers where clerk_user_id = $1::text returning id`, params },
   ];
+}
+
+// The account delete's own result: the last statement's rows.
+export function deletedAccountRows(results: Record<string, unknown>[][]): number {
+  return results.at(-1)?.length ?? 0;
 }
 
 export type WebhookOutcome =
@@ -143,7 +162,7 @@ export async function handleClerkEvent(event: ClerkEvent, execute: StatementExec
   if (event.type === "user.deleted") {
     if (typeof data.id !== "string" || !data.id) return "skipped_no_id";
     const results = await execute(deleteTeacherStatements(data.id));
-    return (results[2]?.length ?? 0) > 0 ? "deleted" : "already_gone";
+    return deletedAccountRows(results) > 0 ? "deleted" : "already_gone";
   }
   return "ignored";
 }

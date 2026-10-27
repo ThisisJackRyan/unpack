@@ -27,6 +27,19 @@ export const readingStatusEnum = pgEnum("reading_status", [
 ]);
 export const gradeLevelEnum = pgEnum("grade_level", GRADE_LEVELS);
 export const attemptResultEnum = pgEnum("attempt_result", ["pass", "fail"]);
+// Which home a signed-in account uses (see src/lib/account-role.ts). Null
+// until the account makes the first-run choice on /welcome.
+export const accountRoleEnum = pgEnum("account_role", [
+  "teacher",
+  "self_learner",
+]);
+// A self-learner's reading: in progress, passed (a passing try), or moved
+// on (every try or every effort check used without a pass).
+export const selfReadingStatusEnum = pgEnum("self_reading_status", [
+  "in_progress",
+  "passed",
+  "moved_on",
+]);
 // closed: the student passed on their own while the challenge was open
 // (auto-closed by the passing commit, see submit-answers-core.ts).
 export const challengeStatusEnum = pgEnum("challenge_status", [
@@ -41,14 +54,35 @@ const createdAt = () =>
 
 // Tables
 
-export const teachers = pgTable("teachers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  clerkUserId: text("clerk_user_id").notNull().unique(),
-  name: text("name"),
-  email: text("email").notNull(),
-  plan: planEnum("plan").notNull().default("free"),
-  createdAt: createdAt(),
-});
+// One row per Clerk account: teachers and self-learners alike (the table
+// keeps its first name). `role` picks the home; switching it in settings
+// keeps every row under the account.
+export const teachers = pgTable(
+  "teachers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull().unique(),
+    name: text("name"),
+    email: text("email").notNull(),
+    plan: planEnum("plan").notNull().default("free"),
+    createdAt: createdAt(),
+    // Null until the first-run choice. Rows from before PR 13 were
+    // backfilled to teacher.
+    role: accountRoleEnum("role"),
+    // When the account confirmed it is 13 or older, the first time it chose
+    // self-learner. No birthdate is ever asked for or stored.
+    ageConfirmedAt: timestamp("age_confirmed_at", { withTimezone: true }),
+  },
+  (t) => [
+    // No self-learner without the age confirmation (COPPA): the role
+    // statements in src/lib/account-role.ts set both in one statement, and
+    // this is the backstop.
+    check(
+      "teachers_self_learner_age_check",
+      sql`${t.role} is distinct from 'self_learner' or ${t.ageConfirmedAt} is not null`,
+    ),
+  ],
+);
 
 export const classes = pgTable(
   "classes",
@@ -449,6 +483,128 @@ export const joinAttempts = pgTable(
   ],
 );
 
+// Self-learner mode (see src/lib/self-readings-core.ts). Its own tables,
+// never class or student rows, each scoped to the account and cascading
+// from the teachers row, so the Clerk webhook's account delete removes all
+// of it. No challenges: a self-learner moves on after the last try.
+
+// One row per reading a self-learner starts. Rows are never deleted by the
+// self-learner (only with the account), so the 5-per-7-days allowance
+// counts these rows by created_at (see src/lib/self-allowance.ts).
+// questions_claim_token / questions_claimed_at: the claim that makes the
+// question set generate at most once at a time (see
+// src/lib/self-questions-core.ts).
+export const selfReadings = pgTable(
+  "self_readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    sourceUrl: text("source_url"),
+    bodyText: text("body_text").notNull(),
+    gradeLevel: gradeLevelEnum("grade_level").notNull(),
+    questionCount: integer("question_count").notNull().default(3),
+    status: selfReadingStatusEnum("status").notNull().default("in_progress"),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    questionsClaimToken: uuid("questions_claim_token"),
+    questionsClaimedAt: timestamp("questions_claimed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("self_readings_account_id_created_at_idx").on(t.accountId, t.createdAt),
+    check(
+      "self_readings_question_count_check",
+      sql`${t.questionCount} between 1 and 10`,
+    ),
+  ],
+);
+
+export const selfQuestions = pgTable(
+  "self_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => selfReadings.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    prompt: text("prompt").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("self_questions_reading_position_unique").on(t.readingId, t.position),
+  ],
+);
+
+export const selfAttempts = pgTable(
+  "self_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => selfReadings.id, { onDelete: "cascade" }),
+    tryNumber: integer("try_number").notNull(),
+    result: attemptResultEnum("result").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("self_attempts_reading_try_unique").on(t.readingId, t.tryNumber),
+    index("self_attempts_account_id_idx").on(t.accountId),
+    // MAX_TRIES (3): no one more try in self-learner mode.
+    check("self_attempts_try_number_check", sql`${t.tryNumber} between 1 and 3`),
+  ],
+);
+
+export const selfAnswers = pgTable(
+  "self_answers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    attemptId: uuid("attempt_id")
+      .notNull()
+      .references(() => selfAttempts.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id")
+      .notNull()
+      .references(() => selfQuestions.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    aiPass: boolean("ai_pass").notNull(),
+    aiFeedback: text("ai_feedback"),
+  },
+  (t) => [
+    unique("self_answers_attempt_question_unique").on(t.attemptId, t.questionId),
+    index("self_answers_question_id_idx").on(t.questionId),
+  ],
+);
+
+// Same role as effort_checks: the in-flight claim and the cost guard
+// (EFFORT_CHECK_LIMIT per reading, for all time). Only ids and times.
+export const selfEffortChecks = pgTable(
+  "self_effort_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => selfReadings.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    outcome: text("outcome"),
+  },
+  (t) => [
+    index("self_effort_checks_reading_id_idx").on(t.readingId),
+    index("self_effort_checks_account_id_idx").on(t.accountId),
+    check(
+      "self_effort_checks_outcome_check",
+      sql`${t.outcome} is null or ${t.outcome} in ('pass', 'fail', 'error')`,
+    ),
+  ],
+);
+
 // Inferred types
 
 export type Teacher = typeof teachers.$inferSelect;
@@ -469,3 +625,4 @@ export type Challenge = typeof challenges.$inferSelect;
 export type NewChallenge = typeof challenges.$inferInsert;
 export type EffortCheck = typeof effortChecks.$inferSelect;
 export type ReadingCapRaise = typeof readingCapRaises.$inferSelect;
+export type SelfReading = typeof selfReadings.$inferSelect;

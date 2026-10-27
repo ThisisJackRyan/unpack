@@ -3,9 +3,8 @@
 import { redirect } from "next/navigation";
 import { getClassForTeacher } from "@/lib/classes";
 import { fetchArticle } from "@/lib/fetch-article";
-import { FetchArticleError, type FetchArticleErrorKind } from "@/lib/fetch-errors";
 import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
-import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
+import { resolveReadingSource, SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
 import {
   getReadingForTeacher,
   insertReading,
@@ -14,23 +13,8 @@ import {
 } from "@/lib/readings";
 import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
-import {
-  BODY_TEXT_MAX_LENGTH,
-  resolveLinkTitle,
-  validateReadingForm,
-} from "@/lib/validate-reading";
-import type { ReadingFormState } from "./form-state";
-
-const LINK_ERRORS: Record<FetchArticleErrorKind, string> = {
-  invalid_url: "Enter a full web link, like https://example.com/story.",
-  blocked: "We can’t open that link.",
-  timeout: "That page took too long to load.",
-  too_large: "That page is too big for us to read.",
-  not_html: "That link isn’t a web page. It may be a PDF or other file.",
-  http_error: "We couldn’t open that page.",
-  extract_failed: "We couldn’t find the article text on that page.",
-  too_long: `That article is over ${BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")} characters.`,
-};
+import { validateReadingForm } from "@/lib/validate-reading";
+import type { ReadingFormState } from "@/components/reading-form-state";
 
 function readForm(formData: FormData, source: unknown) {
   return validateReadingForm({
@@ -72,77 +56,20 @@ export async function createReading(
     return { errors: { form: "We couldn’t find this class." }, values };
   }
 
-  let draft: ReadingDraft;
-  if (data.source === "link") {
-    // Counts this attempt, before fetching, whatever the fetch's outcome.
-    // Fails closed: if we can't check the limit, we don't fetch.
-    let allowed: boolean;
-    try {
-      allowed = await recordLinkFetchAttempt(teacher.id);
-    } catch (error) {
-      logDbError("createReading: recordLinkFetchAttempt failed", error);
-      return {
-        errors: { form: "We couldn’t save the reading. Please try again." },
-        values,
-      };
-    }
-    if (!allowed) {
-      return {
-        errors: { url: LINK_FETCH_LIMITED_MESSAGE },
-        values,
-        // Pasted text isn't limited.
-        suggestText: "Paste the text instead.",
-      };
-    }
-
-    let article: Awaited<ReturnType<typeof fetchArticle>>;
-    try {
-      article = await fetchArticle(data.url);
-    } catch (error) {
-      const kind = error instanceof FetchArticleError ? error.kind : "http_error";
-      // Kind and host only: no full URL (query strings), IPs, or stacks.
-      console.error("createReading: fetchArticle failed", {
-        kind,
-        host: error instanceof FetchArticleError ? error.host : undefined,
-        name: error instanceof Error ? error.name : typeof error,
-      });
-      return {
-        errors: { url: LINK_ERRORS[kind] },
-        values,
-        suggestText:
-          kind === "invalid_url"
-            ? undefined
-            : kind === "too_long"
-              ? "Paste a shorter section instead."
-              : "Paste the text instead.",
-      };
-    }
-    const title = resolveLinkTitle(data.title, article.title);
-    if (!title) {
-      return {
-        errors: { title: "We couldn’t find a title on that page. Please add one." },
-        values,
-      };
-    }
-    draft = {
-      title,
-      bodyText: article.text,
-      // Where the text really came from, after any redirects.
-      sourceUrl: article.url,
-      gradeLevel: data.gradeLevel,
-      questionCount: data.questionCount,
-      questionMode: data.questionMode,
-    };
-  } else {
-    draft = {
-      title: data.title,
-      bodyText: data.bodyText,
-      sourceUrl: null,
-      gradeLevel: data.gradeLevel,
-      questionCount: data.questionCount,
-      questionMode: data.questionMode,
-    };
+  const resolved = await resolveReadingSource(data, {
+    recordLinkFetch: () => recordLinkFetchAttempt(teacher.id),
+    fetchArticle: (url) => fetchArticle(url),
+    log: (message, fields) => console.error(`createReading: ${message}`, fields),
+  });
+  if (!resolved.ok) {
+    return { errors: resolved.errors, values, suggestText: resolved.suggestText };
   }
+  const draft: ReadingDraft = {
+    ...resolved.source,
+    gradeLevel: data.gradeLevel,
+    questionCount: data.questionCount,
+    questionMode: data.questionMode,
+  };
 
   // redirect() throws, so it stays outside this try.
   let readingId: string;
@@ -155,7 +82,7 @@ export async function createReading(
   } catch (error) {
     logDbError("createReading: insertReading failed", error);
     return {
-      errors: { form: "We couldn’t save the reading. Please try again." },
+      errors: { form: SAVE_READING_FAILED_MESSAGE },
       values,
     };
   }

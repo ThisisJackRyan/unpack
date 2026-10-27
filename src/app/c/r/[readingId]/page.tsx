@@ -12,11 +12,12 @@ import { PENDING_MAX_REFRESHES, readingParagraphs, sourceHost } from "@/lib/stud
 import { getPublishedReading, loadStudentReading } from "@/lib/student-readings";
 import { MAX_TRIES } from "@/lib/validate-answers";
 import { sendChallengeAction, submitAnswersAction } from "./actions";
-import { AnswerForm } from "./answer-form";
-import { AnswerReview, CheckIcon } from "./answer-parts";
+import { AnswerForm } from "@/components/answer-form";
+import { AnswerReview } from "@/components/answer-parts";
+import { Banner } from "@/components/banner";
 import { ChallengeForm } from "./challenge-form";
-import { PendingRefresh, RetryButton } from "./refresh";
-import { QuestionSkeletons } from "./skeleton";
+import { PendingRefresh, RetryButton } from "@/components/refresh";
+import { QuestionSkeletons } from "@/components/question-skeletons";
 
 // A student's first open of a unique per student reading writes their set,
 // which QUESTION_WRITE_DEADLINE_MS (110s, in src/lib/ai/settings.ts) ends
@@ -214,25 +215,4 @@ function QuestionsStage({
         </>
       );
   }
-}
-
-function Banner({ tone, title, children }: { tone: "done" | "info"; title: string; children: React.ReactNode }) {
-  const done = tone === "done";
-  return (
-    <div
-      className={`flex gap-4 rounded-2xl border px-5 py-5 ${
-        done ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-indigo-200 bg-indigo-50 text-indigo-950"
-      }`}
-    >
-      {done && (
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
-          <CheckIcon className="h-6 w-6" />
-        </span>
-      )}
-      <div className="flex flex-col gap-1">
-        <p className="text-xl font-semibold">{title}</p>
-        <p className="text-lg">{children}</p>
-      </div>
-    </div>
-  );
 }

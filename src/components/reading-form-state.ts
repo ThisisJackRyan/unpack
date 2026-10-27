@@ -1,5 +1,6 @@
-// Shared by the reading actions and form. Kept out of actions.ts because a
-// "use server" file may only export async functions.
+// Shared by the reading actions (teacher and self-learner) and the reading
+// form. Kept out of the actions because a "use server" file may only export
+// async functions.
 import type {
   ReadingFormErrors,
   ReadingFormValues,

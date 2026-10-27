@@ -50,7 +50,7 @@
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import { countDraftsClearedByGradeChange, updateClassSettings } from "@/lib/classes";
-import { deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
+import { deletedAccountRows, deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
 import { capView } from "@/lib/reading-cap";
@@ -645,7 +645,7 @@ async function cleanup(): Promise<void> {
   let deleted = 0;
   for (const prefix of ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept"]) {
     const results = await neonExecutor(deleteTeacherStatements(`${prefix}_${RUN_ID}`));
-    deleted += results[2]?.length ?? 0;
+    deleted += deletedAccountRows(results);
   }
   console.log(`\ncleanup: deleted ${deleted} test teachers (and everything under them)`);
 }

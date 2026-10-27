@@ -11,11 +11,13 @@ A reading check that's hard to fake: students read a text, then answer AI-genera
 5. On a fail, the student gets a specific nudge and revises, up to 3 tries. On a pass, they move on.
 6. After 3 fails, the student can send a challenge that the teacher reviews and resolves.
 
+Self-learners (13+) can also sign in and use the same loop on their own readings, 5 new ones per rolling 7 days, with no class and no challenge: after 3 failed tries they see the nudges and move on.
+
 ## Stack (locked)
 
 - [Next.js 16](https://nextjs.org) on [Vercel](https://vercel.com)
 - [Neon](https://neon.tech) Postgres
-- [Clerk](https://clerk.com) auth for **teachers only**. Students have no accounts: they join with a class code, their first name, and the first 1-2 letters of their last name.
+- [Clerk](https://clerk.com) auth for **teachers and self-learners** (a new account chooses its role on `/welcome`). Students have no accounts: they join with a class code, their first name, and the first 1-2 letters of their last name.
 - [Claude](https://www.anthropic.com/claude) via the Anthropic API for question generation and the effort check
 
 ## Docs
@@ -36,13 +38,13 @@ pnpm build     # production build
 pnpm test      # unit tests (no network; the Anthropic SDK is mocked)
 ```
 
-Copy `.env.example` to `.env.local` and fill it in. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`. The question request (`output_config.effort`, strict tools, auto tool choice) targets current 5.x models; an older `ANTHROPIC_MODEL` may return a 400.
+Copy `.env.example` to `.env.local` and fill it in. Sign-in and sign-up land on `/home`, which sends each account to its home; `NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL` and `NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL` are optional (keep them `/home` if set). Apply migration `drizzle/0008_self_learner.sql` (`pnpm db:migrate`) before running this version. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`. The question request (`output_config.effort`, strict tools, auto tool choice) targets current 5.x models; an older `ANTHROPIC_MODEL` may return a 400.
 
 The student join form's bot check (Cloudflare Turnstile) is on when both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. In production both are required: with either missing, every join is refused and the server logs which one (set `TURNSTILE_DISABLED=1` to opt out on purpose; it logs a warning on every join). For local dev leave both empty (off), or use Cloudflare's public test keys (see `.env.example`). On Vercel Preview the hostname check uses the branch and deployment URLs (`VERCEL_BRANCH_URL`, `VERCEL_URL`); if previews are served on a custom domain, set `TURNSTILE_EXPECTED_HOSTNAMES` for the Preview environment. `TURNSTILE_DISABLED=1` is an emergency switch only; remove it once the problem is fixed. Teacher sign-up's bot check is Clerk's own "Challenge suspicious sign-ups" (Clerk Dashboard, Protect, Protections), on by default for new Clerk apps; see the v1 spec for exactly what it covers.
 
 ### Clerk webhook
 
-`/api/webhooks/clerk` keeps the `teachers` row in step with Clerk: `user.created` saves the teacher's name and primary email, `user.updated` updates them on an existing teacher (never creating one, so a late event can't bring back a deleted teacher), and `user.deleted` deletes the teacher and everything under them (classes, readings, students, and their work) in one transaction. To set it up for each Clerk instance (development and production are separate):
+`/api/webhooks/clerk` keeps the `teachers` row (every account, teacher or self-learner) in step with Clerk: `user.created` saves the account's name and primary email (never a role), `user.updated` updates them on an existing account (never creating one, so a late event can't bring back a deleted account), and `user.deleted` deletes the account and everything under it (classes, readings, students, and their work, and self-learner readings with their questions, tries, answers, and effort checks) in one transaction. To set it up for each Clerk instance (development and production are separate):
 
 1. Clerk Dashboard, **Configure**, **Webhooks**, **Add endpoint**.
 2. Endpoint URL: `https://<your domain>/api/webhooks/clerk`.
@@ -53,4 +55,4 @@ The route is public (no Clerk session); every delivery's signature is checked. A
 
 ### Database checks
 
-`pnpm db:check-*` scripts (class limit, student questions, student join, student answers, teacher queue, abuse protection, teacher gaps) run race checks against a local or dev database with a mock model. They write and delete rows, so they refuse to run unless `ALLOW_DB_WRITES=1` is set for that one command (for example `ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-abuse-protection`). Don't export it in your shell, and never point them at production.
+`pnpm db:check-*` scripts (class limit, student questions, student join, student answers, teacher queue, abuse protection, teacher gaps, self-learner) run race checks against a local or dev database with a mock model. They write and delete rows, so they refuse to run unless `ALLOW_DB_WRITES=1` is set for that one command (for example `ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-abuse-protection`). Don't export it in your shell, and never point them at production.

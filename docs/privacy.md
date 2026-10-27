@@ -1,6 +1,6 @@
-# unpack: Student data and privacy (v1, Oct 27, 2026)
+# unpack: Student and self-learner data and privacy (v1, Oct 27, 2026)
 
-unpack is used by children, so we collect as little as we can and say exactly what we keep. This page lists every place student data is stored, column by column, why it's there, who can see it, and how long it stays. It covers the code as of PR 12; update it with any change to `src/db/schema.ts`.
+unpack is used by children, so we collect as little as we can and say exactly what we keep. This page lists every place student data is stored, column by column, why it's there, who can see it, and how long it stays. It covers the code as of PR 13 (which added self-learner accounts; see [Self-learner data](#self-learner-data-added-in-pr-13)); update it with any change to `src/db/schema.ts`.
 
 ## What a student gives us
 
@@ -65,15 +65,62 @@ id, key_kind (ip/code), key_hash, created_at. For an IP, key_hash is an HMAC-SHA
 
 ### Not student data
 
-`teachers`, `classes`, `readings`, `link_fetch_attempts`, `question_generation_attempts`, and `reading_cap_raises` (added in PR 12: which teacher raised a reading's student limit, when, and from and to what) hold teacher data and teacher-side counters only.
+`teachers` (now every Clerk account: teachers and self-learners, see below), `classes`, `readings`, `link_fetch_attempts`, `question_generation_attempts`, and `reading_cap_raises` (added in PR 12: which teacher raised a reading's student limit, when, and from and to what) hold teacher data and teacher-side counters only.
+
+## Self-learner data (added in PR 13)
+
+Self-learners are people **13 or older** who sign in with Clerk and read for themselves. They are not students: no class, no teacher, and no student rows. A reader under 13 can't use this mode (they join a class with a code instead).
+
+### `teachers` (the account row), new columns
+
+| Column | What | Why |
+|---|---|---|
+| role | teacher, self_learner, or null until chosen on `/welcome` | Picks the account's home and which pages and actions it may use. Accounts from before PR 13 were set to teacher. |
+| age_confirmed_at | When the account ticked "I’m 13 or older", the first time it chose self-learner | COPPA: self-learner mode is 13+ only. **We never ask for or store a birthdate**, only that it was confirmed and when. A self-learner row without it is refused by the database. Null for teachers who never chose self-learner. Kept if the account switches back to teacher. |
+
+The name and email in this row come from Clerk, as for teachers.
+
+### `self_readings` (one row per reading a self-learner starts)
+
+id, account_id, title, source_url (if they pasted a link), body_text (the text they pasted or we fetched), grade_level (the level they picked), question_count, status (in progress, passed, moved on), finished_at, questions_claim_token and questions_claimed_at (a random UUID and a time, while their questions are being written), created_at. created_at also counts toward the 5 per 7 days allowance, so rows aren't deleted by the self-learner. Cascade from `teachers`.
+
+### `self_questions`
+
+id, reading_id, position, prompt (the AI-written question), created_at. No self-learner input. Cascade from `self_readings`.
+
+### `self_attempts` (one row per try)
+
+id, account_id, reading_id, try_number (1 to 3), result (pass/fail), created_at. Cascade from `teachers` and `self_readings`.
+
+### `self_answers` (one row per answer on a try)
+
+id, attempt_id, question_id, **text** (what they wrote, up to 1,000 characters), ai_pass, ai_feedback (the AI's nudge). Their own writing; they could type anything. Cascade from `self_attempts` and `self_questions`.
+
+### `self_effort_checks` (one row per AI effort check)
+
+id, account_id, reading_id, created_at, finished_at, outcome (pass/fail/error). Counts checks toward the limit. No text. Cascade from `teachers` and `self_readings`.
+
+A self-learner's question writes and link fetches are also counted in `question_generation_attempts` and `link_fetch_attempts` (ids and times only, pruned after a day), the same per-account limits teachers have.
+
+### Who can see it
+
+Only the self-learner, signed in. Every self-learner query is scoped to the signed-in account in the statement itself, and reads only `self_*` rows: another account (a teacher, or another self-learner) gets "not found". Teachers never see self-learner data, and self-learners never see class or student data. Operators can reach the database, as above.
+
+### Switching roles
+
+Switching between teacher and self-learner in Settings deletes nothing. A teacher who switches keeps their classes and their students' work (students can still use the class), and a self-learner who switches back sees their readings again.
+
+### How long it stays
+
+Until the Clerk account is deleted. Self-learners can't delete single readings in PR 13. When the Clerk account is deleted, the webhook deletes, in the same transaction as the account's classes, all of its `self_readings` (cascading to `self_questions`, `self_attempts`, `self_answers`, and `self_effort_checks`) and then the account row (which removes the role, the age confirmation time, and any self-learner rows left). Every self-learner foreign key is ON DELETE CASCADE. Neon's restore history keeps deleted rows until its window passes, as above.
 
 ## Services that receive student data
 
-- **Anthropic (Claude API)** receives the reading text, the questions, and the student's answers (for the effort check), and the reading text (to write questions). **No names, no ids, no session or class data** are sent. Anthropic handles API data per Anthropic's API terms (its commercial terms and data retention policy); we don't state a retention period here. Check the current wording before launch.
+- **Anthropic (Claude API)** receives the reading text, the questions, and the student's (or self-learner's) answers (for the effort check), and the reading text (to write questions). **No names, no ids, no session or class data** are sent. A self-learner's requests use solo instructions (no teacher or student wording) but send the same kinds of data. Anthropic handles API data per Anthropic's API terms (its commercial terms and data retention policy); we don't state a retention period here. Check the current wording before launch.
 - **Cloudflare Turnstile** (only when the bot check is turned on): the widget runs in the student's browser on the join page, so Cloudflare receives what any browser request carries (the IP address, browser and device signals) to decide whether it's a person, per Cloudflare's Turnstile terms and privacy policy. Our server sends Cloudflare only the widget's token and our secret, **not** the IP address and not the name.
 - **Vercel** (hosting) sees requests, including IP addresses, in its request logs, per Vercel's terms. Our own error logs carry only error names, codes, and ids (no names, answers, or notes).
 - **Neon** (database) stores everything above.
-- **Clerk** holds teacher accounts only; no student data. The teacher's name and email in `teachers` are synced from Clerk: on their first visit, and by the Clerk webhook (`/api/webhooks/clerk`) whenever the Clerk account is created or changed (a change only updates an existing row, so a late change event can't bring back a deleted teacher). When a teacher's Clerk account is deleted, the webhook deletes, in one transaction, their classes (which cascades to the classes' readings and every student and all student work in them, notes to the teacher included) and then their `teachers` row (which cascades to their own logs: link fetches, question generations, and limit raises). A repeat delete changes nothing. Webhook logs carry only the event type and outcome, never a name, email, or id.
+- **Clerk** holds teacher and self-learner accounts; no student data. For a self-learner, the age confirmation is ours (`age_confirmed_at`), not sent to Clerk. The teacher's name and email in `teachers` are synced from Clerk: on their first visit, and by the Clerk webhook (`/api/webhooks/clerk`) whenever the Clerk account is created or changed (a change only updates an existing row, so a late change event can't bring back a deleted teacher). When a teacher's Clerk account is deleted, the webhook deletes, in one transaction, their classes (which cascades to the classes' readings and every student and all student work in them, notes to the teacher included), then their self-learner readings and everything under them, and then their `teachers` row (which cascades to their own logs: link fetches, question generations, and limit raises). A repeat delete changes nothing. Webhook logs carry only the event type and outcome, never a name, email, or id.
 
 ## How long it stays
 

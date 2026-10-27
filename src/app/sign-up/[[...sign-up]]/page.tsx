@@ -1,6 +1,7 @@
 import { SignUp } from "@clerk/nextjs";
 
-// Teacher sign-up. Its bot check is Clerk's own "Challenge suspicious
+// Account sign-up (teachers and self-learners; the role is chosen next,
+// on /welcome, where /home sends a new account). Its bot check is Clerk's own "Challenge suspicious
 // sign-ups" (Clerk Dashboard, Protect, Protections; on by default for new
 // apps): a Cloudflare Turnstile challenge for suspicious sign-ups, which
 // the prebuilt <SignUp /> shows inside itself, so nothing to add here.
@@ -10,7 +11,7 @@ import { SignUp } from "@clerk/nextjs";
 export default function SignUpPage() {
   return (
     <main className="flex flex-1 items-center justify-center px-6 py-16">
-      <SignUp />
+      <SignUp fallbackRedirectUrl="/home" />
     </main>
   );
 }
