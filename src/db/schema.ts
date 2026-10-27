@@ -351,6 +351,41 @@ export const questionGenerations = pgTable(
   ],
 );
 
+// One row per model call made for a student's own question set (see
+// src/lib/student-questions-core.ts): written in the same transaction as
+// the claim (or stale takeover) that is about to call the model, and only
+// then, so cached opens and throttled ones add nothing. created_at is set
+// to the claim's claimed_at, so a call that ends without a response from
+// the model (an outage, a bad key, a timeout) deletes exactly its own row
+// with its claim: only answered calls stay counted. The "Try again"
+// throttle counts these rows: STUDENT_GENERATION_WINDOW_LIMIT per student
+// per reading per STUDENT_GENERATION_WINDOW_MINUTES, and
+// STUDENT_GENERATION_CALL_LIMIT for all time. Kept (the lifetime cap needs
+// them) until the student or reading is deleted, or the teacher's "Let
+// them try again" clears that student's rows for that reading
+// (src/lib/student-question-reset.ts). Only ids and a time.
+export const studentQuestionCalls = pgTable(
+  "student_question_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => readings.id, { onDelete: "cascade" }),
+    studentId: uuid("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("student_question_calls_student_reading_created_at_idx").on(
+      t.studentId,
+      t.readingId,
+      t.createdAt,
+    ),
+    index("student_question_calls_reading_id_idx").on(t.readingId),
+  ],
+);
+
 // One row per counted join attempt per key, for the join rate limits (see
 // src/lib/join-rate-limit.ts): an allowed attempt writes an "ip" row and a
 // "code" row. key_hash is a hex digest, so no raw IP address (or typed

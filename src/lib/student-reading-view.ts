@@ -7,6 +7,8 @@
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
 import {
   PENDING_RETRY_AFTER_MS,
+  STUDENT_GENERATION_THROTTLED_MESSAGE,
+  STUDENT_GENERATION_USED_UP_MESSAGE,
   STUDENT_SETS_LIMITED_MESSAGE,
   studentFacingResult,
   type StudentQuestion,
@@ -26,6 +28,11 @@ export type StudentReadingView =
   | { kind: "questions"; questions: StudentQuestion[] }
   | { kind: "pending"; retryAfterMs: number }
   | { kind: "limit_reached"; message: string }
+  // The "Try again" throttle: a break, then Try again works.
+  | { kind: "throttled"; message: string }
+  // Every call for this reading is used: Try again works once the teacher
+  // has used "Let them try again".
+  | { kind: "calls_used_up"; message: string }
   | { kind: "error"; message: string }
   | { kind: "not_found" };
 
@@ -41,6 +48,10 @@ export function perStudentView(result: StudentQuestionsResult): StudentReadingVi
       return { kind: "pending", retryAfterMs: facing.retryAfterMs };
     case "limit_reached":
       return { kind: "limit_reached", message: STUDENT_SETS_LIMITED_MESSAGE };
+    case "calls_used_up":
+      return { kind: "calls_used_up", message: STUDENT_GENERATION_USED_UP_MESSAGE };
+    case "throttled":
+      return { kind: "throttled", message: STUDENT_GENERATION_THROTTLED_MESSAGE };
     case "error":
       return { kind: "error", message: QUESTIONS_ERROR_MESSAGE };
     case "not_found":

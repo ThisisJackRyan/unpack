@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { StudentShell } from "@/components/student-shell";
 import { card, primaryButton } from "@/components/ui";
+import { botCheckSiteKey } from "@/lib/join-bot-check";
 import { getStudentSession } from "@/lib/student-auth";
 import { JoinForm } from "./join-form";
 
@@ -51,7 +52,7 @@ export default async function JoinPage() {
             </p>
           </div>
           <div className={`${card} rounded-2xl p-6 sm:p-8`}>
-            <JoinForm secondary={Boolean(session)} />
+            <JoinForm secondary={Boolean(session)} botCheckSiteKey={botCheckSiteKey()} />
           </div>
         </section>
       </div>

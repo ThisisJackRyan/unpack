@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
-import { getQuestionModel } from "./ai/client";
+import { getQuestionModel, isQuestionWritingConfigured } from "./ai/client";
 import { writeQuestionSet } from "./ai/questions";
 import { isUuid } from "./classes";
 import type { GradeLevel } from "./grade-levels";
@@ -14,7 +14,8 @@ import {
   releaseStatement,
   studentContextStatement,
   studentQuestionsStatement,
-  takeOverStatement,
+  takeOverOutcome,
+  takeOverStatements,
   type StudentQuestionStore,
   type StudentQuestionWriter,
   type StudentQuestionsResult,
@@ -29,6 +30,7 @@ export type {
   StudentQuestionsResult,
 } from "./student-questions-core";
 export {
+  STUDENT_GENERATION_THROTTLED_MESSAGE,
   STUDENT_SETS_LIMITED_MESSAGE,
   STUDENT_SETS_PER_READING_LIMIT,
 } from "./student-questions-core";
@@ -63,11 +65,10 @@ export function postgresStudentQuestionStore(
       return claimOutcome(await execute(claimStatements(readingId, studentId, token, limit)), limit);
     },
     async takeOverStale(readingId, studentId, token, staleSeconds) {
-      const rows = await one(takeOverStatement(readingId, studentId, token, staleSeconds));
-      return rows.length > 0;
+      return takeOverOutcome(await execute(takeOverStatements(readingId, studentId, token, staleSeconds)));
     },
-    async release(readingId, studentId, token) {
-      await one(releaseStatement(readingId, studentId, token));
+    async release(readingId, studentId, token, refundCall) {
+      await one(releaseStatement(readingId, studentId, token, refundCall));
     },
     async commit(readingId, studentId, token, prompts) {
       const results = await execute(commitStatements(readingId, studentId, token, prompts));
@@ -77,12 +78,23 @@ export function postgresStudentQuestionStore(
 }
 
 // The real writer: the configured model, at the reading's grade and count.
-const modelWriter: StudentQuestionWriter = (context) =>
-  writeQuestionSet(getQuestionModel(), {
-    bodyText: context.bodyText,
-    gradeLevel: context.gradeLevel,
-    count: context.questionCount,
-  });
+// Reports each reply the model sends, so the throttle counts a write only
+// if the model answered (see failureCounts). getQuestionModel throws
+// before any call when the key is missing, so that never counts.
+const modelWriter: StudentQuestionWriter = (context, hooks) => {
+  const model = getQuestionModel();
+  return writeQuestionSet(
+    {
+      model: model.model,
+      create: async (params, options) => {
+        const reply = await model.create(params, options);
+        hooks.onModelResponse();
+        return reply;
+      },
+    },
+    { bodyText: context.bodyText, gradeLevel: context.gradeLevel, count: context.questionCount },
+  );
+};
 
 export type GetStudentQuestionsOptions = {
   // For scripts/check-student-questions.ts: a mock model, so the check
@@ -107,6 +119,8 @@ export async function getOrCreateStudentQuestions(
     store: options.store ?? postgresStudentQuestionStore(),
     write: options.write ?? modelWriter,
     newToken: randomUUID,
+    // An injected writer (the DB checks) needs no key.
+    configured: options.write ? true : isQuestionWritingConfigured(),
     onError: (fields) =>
       console.error("getOrCreateStudentQuestions: write failed", { ...fields, readingId }),
   });

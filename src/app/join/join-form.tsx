@@ -4,18 +4,26 @@ import { useActionState } from "react";
 import { field, primaryButton, secondaryButton } from "@/components/ui";
 import { joinClassAction } from "./actions";
 import { FIRST_NAME_MAX_LENGTH, LAST_INITIALS_MAX_LENGTH, type JoinState } from "./form-state";
+import { TurnstileWidget } from "./turnstile-widget";
 
 const initialState: JoinState = {};
 
 const label = "text-lg font-semibold text-zinc-900";
 const hint = "text-base text-zinc-600";
-// Amber, like the reading page: a fix to make, not a danger.
-const error = "text-base font-medium text-amber-900";
+// Red, like every form error (red is for errors and destructive actions).
+const error = "text-base font-medium text-red-700";
 
-// One big code field, then the two name fields, then one full-width
-// button. `secondary` styles the button down when the page already has a
-// primary action (going back to the student's current class).
-export function JoinForm({ secondary = false }: { secondary?: boolean }) {
+// One big code field, then the two name fields, then the bot check (only
+// when it's on: `botCheckSiteKey` is set), then one full-width button.
+// `secondary` styles the button down when the page already has a primary
+// action (going back to the student's current class).
+export function JoinForm({
+  secondary = false,
+  botCheckSiteKey = null,
+}: {
+  secondary?: boolean;
+  botCheckSiteKey?: string | null;
+}) {
   const [state, formAction, pending] = useActionState(joinClassAction, initialState);
   const errors = state.errors ?? {};
   const values = state.values;
@@ -98,6 +106,8 @@ export function JoinForm({ secondary = false }: { secondary?: boolean }) {
           {errors.lastInitials}
         </p>
       </div>
+
+      {botCheckSiteKey && <TurnstileWidget siteKey={botCheckSiteKey} resetKey={state} />}
 
       <p aria-live="polite" className={`${error} empty:hidden`}>
         {errors.form}

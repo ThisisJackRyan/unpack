@@ -30,8 +30,21 @@ import { checksAllowedSql, effortLockSql, EXTRA_TRY_CHECKS, limitsFromRow, tries
 export const CHALLENGE_DECISIONS = ["accept", "deny"] as const;
 export type ChallengeDecision = (typeof CHALLENGE_DECISIONS)[number];
 
-export function isChallengeDecision(value: unknown): value is ChallengeDecision {
-  return typeof value === "string" && (CHALLENGE_DECISIONS as readonly string[]).includes(value);
+// The queue card's three buttons, each its own explicit choice: Accept,
+// Deny, and "Deny, give one more try". (A separate checkbox could be left
+// ticked while the teacher clicked Accept, and be silently ignored.)
+export const DECISION_CHOICES = {
+  accept: { decision: "accept", extraTry: false },
+  deny: { decision: "deny", extraTry: false },
+  deny_extra_try: { decision: "deny", extraTry: true },
+} as const satisfies Record<string, { decision: ChallengeDecision; extraTry: boolean }>;
+export type DecisionChoice = keyof typeof DECISION_CHOICES;
+
+// The form's "decision" value, or null for anything else.
+export function parseDecisionChoice(value: unknown): { decision: ChallengeDecision; extraTry: boolean } | null {
+  return typeof value === "string" && Object.hasOwn(DECISION_CHOICES, value)
+    ? DECISION_CHOICES[value as DecisionChoice]
+    : null;
 }
 
 export type DecideInput = {

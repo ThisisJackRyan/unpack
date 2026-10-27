@@ -7,6 +7,7 @@
 import type { Statement } from "./link-rate-limit";
 import { checksAllowedSql, latestChallengeSql, limitsFromRow, triesAllowedSql } from "./reading-limits";
 import { latestChallenge, studentReadingStatus, type StudentReadingStatus } from "./reading-progress";
+import { STUDENT_GENERATION_CALL_LIMIT } from "./student-questions-core";
 
 export type ClassStatusCell = {
   status: StudentReadingStatus;
@@ -14,6 +15,12 @@ export type ClassStatusCell = {
   triesAllowed: number;
   checks: number;
   checksAllowed: number;
+  // Used every "Try again" model call for this reading's own questions
+  // (STUDENT_GENERATION_CALL_LIMIT) without getting a set, and no call is
+  // running: the student is stuck until the teacher uses "Let them try
+  // again". Only possible on a per-student reading, and only while the
+  // status is Not started (no questions means no tries).
+  needsReset: boolean;
 };
 
 export type ClassStatusStudent = { id: string; name: string };
@@ -62,13 +69,22 @@ order by lower(s.first_name), lower(s.last_initials), s.created_at, s.id`,
   (select count(*)::int from effort_checks e where e.student_id = s.id and e.reading_id = r.id) as checks,
   lc.status as challenge, lc.extra_try,
   ${triesAllowedSql("s.id", "r.id")} as tries_allowed,
-  ${checksAllowedSql("s.id", "r.id")} as checks_allowed
+  ${checksAllowedSql("s.id", "r.id")} as checks_allowed,
+  (
+    r.question_mode = 'per_student'
+    and not exists (select 1 from questions q where q.reading_id = r.id and q.student_id = s.id)
+    and not exists (
+      select 1 from question_generations g
+      where g.reading_id = r.id and g.student_id = s.id and g.status = 'pending'
+    )
+    and (select count(*) from student_question_calls k where k.reading_id = r.id and k.student_id = s.id) >= $3::int
+  ) as needs_reset
 from classes c
 join students s on s.class_id = c.id
 join readings r on r.class_id = c.id and r.status = 'published'
 left join lateral ${latestChallengeSql("s.id", "r.id")} lc on true
 where ${OWNED}`,
-      params: [classId, teacherId],
+      params: [classId, teacherId, STUDENT_GENERATION_CALL_LIMIT],
     },
   ];
 }
@@ -89,6 +105,7 @@ export function classStatusCell(row: Record<string, unknown>): ClassStatusCell {
     triesAllowed: limits.tries,
     checks,
     checksAllowed: limits.checks,
+    needsReset: row.needs_reset === true,
   };
 }
 
@@ -106,6 +123,10 @@ export function classStatus(results: Record<string, unknown>[][]): ClassStatus {
 }
 
 export const NOT_STARTED_CELL: ClassStatusCell = classStatusCell({});
+
+// Under the Needs a reset pill. Says what happened without "tries", which
+// on these pages means answer tries.
+export const NEEDS_RESET_HELP = "Their questions didn’t load.";
 
 // "2 of 3 tries"
 export function triesLabel(cell: ClassStatusCell): string {

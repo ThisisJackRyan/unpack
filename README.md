@@ -22,6 +22,7 @@ A reading check that's hard to fake: students read a text, then answer AI-genera
 
 - [Product brief](docs/product-brief.md)
 - [v1 features and data model](docs/v1-spec.md)
+- [Student data and privacy](docs/privacy.md)
 
 ## Local development
 
@@ -36,3 +37,9 @@ pnpm test      # unit tests (no network; the Anthropic SDK is mocked)
 ```
 
 Copy `.env.example` to `.env.local` and fill it in. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`. The question request (`output_config.effort`, strict tools, auto tool choice) targets current 5.x models; an older `ANTHROPIC_MODEL` may return a 400.
+
+The student join form's bot check (Cloudflare Turnstile) is on when both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. In production both are required: with either missing, every join is refused and the server logs which one (set `TURNSTILE_DISABLED=1` to opt out on purpose; it logs a warning on every join). For local dev leave both empty (off), or use Cloudflare's public test keys (see `.env.example`). Teacher sign-up's bot check is Clerk's own "Challenge suspicious sign-ups" (Clerk Dashboard, Protect, Protections), on by default for new Clerk apps; see the v1 spec for exactly what it covers.
+
+### Database checks
+
+`pnpm db:check-*` scripts (class limit, student questions, student join, student answers, teacher queue, abuse protection) run race checks against a local or dev database with a mock model. They write and delete rows, so they refuse to run unless `ALLOW_DB_WRITES=1` is set for that one command (for example `ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-abuse-protection`). Don't export it in your shell, and never point them at production.

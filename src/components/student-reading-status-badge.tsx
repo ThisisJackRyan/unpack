@@ -40,3 +40,19 @@ export function StudentReadingStatusBadge({
     </span>
   );
 }
+
+// "Needs a reset": the student used every "Try again" for this reading's
+// own questions without getting any (ClassStatusCell.needsReset). Shown
+// instead of Not started on the teacher's views. Amber and ringed with a
+// hollow dot, so it reads apart from Challenged (filled amber), and never
+// red: it's a fix for the teacher, not an error.
+export const NEEDS_RESET_LABEL = "Needs a reset";
+
+export function NeedsResetBadge({ size = "base" }: { size?: "base" | "sm" }) {
+  return (
+    <span className={`${pill} bg-white text-amber-900 ring-1 ring-amber-300 ring-inset ${size === "sm" ? "text-sm" : "text-base"}`}>
+      <span aria-hidden="true" className="h-2 w-2 rounded-full border-2 border-amber-500" />
+      {NEEDS_RESET_LABEL}
+    </span>
+  );
+}

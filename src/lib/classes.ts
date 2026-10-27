@@ -3,10 +3,18 @@ import { and, asc, count, eq } from "drizzle-orm";
 import { db, getSql, schema } from "@/db";
 import type { Class, Teacher } from "@/db/schema";
 import type { GradeLevel } from "./grade-levels";
-import { withUniqueJoinCode } from "./join-code";
+import { withUniqueJoinCode, type JoinCodeOptions } from "./join-code";
+import {
+  newJoinCodeWith,
+  setCodeActiveWith,
+  type NewCodeResult,
+  type SetCodeActiveResult,
+} from "./join-code-settings";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import { classGradeChangeStatements, insertedCount } from "./shared-questions";
+import { deleteStudentWith, type DeleteStudentResult } from "./student-delete";
+import { resetStudentQuestionCallsWith, type ResetStudentTriesResult } from "./student-question-reset";
 
 // Server-only class queries, always scoped to the owning teacher.
 
@@ -132,4 +140,52 @@ export async function updateClassGrade(
 ): Promise<boolean> {
   if (!isUuid(classId)) return false;
   return insertedCount(await execute(classGradeChangeStatements(classId, teacherId, gradeLevel))) === 1;
+}
+
+// The join code controls and the student delete, scoped to the owning
+// teacher in the statement itself (see join-code-settings.ts and
+// student-delete.ts). A malformed id is "not_found". `execute` and the
+// join code options are for scripts/check-abuse-protection.ts; the app
+// passes nothing.
+
+export async function setJoinCodeActive(
+  classId: string,
+  teacherId: string,
+  active: boolean,
+  execute: StatementExecutor = neonExecutor,
+): Promise<SetCodeActiveResult> {
+  if (!isUuid(classId)) return { status: "not_found" };
+  return setCodeActiveWith(classId, teacherId, active, execute);
+}
+
+export async function newJoinCode(
+  classId: string,
+  teacherId: string,
+  execute: StatementExecutor = neonExecutor,
+  options: JoinCodeOptions = {},
+): Promise<NewCodeResult> {
+  if (!isUuid(classId)) return { status: "not_found" };
+  return newJoinCodeWith(classId, teacherId, execute, options);
+}
+
+export async function deleteStudent(
+  classId: string,
+  teacherId: string,
+  studentId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<DeleteStudentResult> {
+  if (!isUuid(classId) || !isUuid(studentId)) return { status: "not_found" };
+  return deleteStudentWith(classId, teacherId, studentId, execute);
+}
+
+// "Let them try again" (see student-question-reset.ts).
+export async function resetStudentQuestionCalls(
+  classId: string,
+  teacherId: string,
+  studentId: string,
+  readingId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<ResetStudentTriesResult> {
+  if (!isUuid(classId) || !isUuid(studentId) || !isUuid(readingId)) return { status: "not_found" };
+  return resetStudentQuestionCallsWith(classId, teacherId, studentId, readingId, execute);
 }

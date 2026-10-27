@@ -36,7 +36,6 @@ export const CHALLENGE_SENT_MESSAGE = "Sent! Your teacher will take a look.";
 export const CHALLENGE_ALREADY_SENT_MESSAGE = "You already sent a note. Your teacher will take a look.";
 export const CHALLENGE_NOT_READY_MESSAGE = `You can send a note after ${MAX_TRIES} tries.`;
 export const CHALLENGE_PASSED_MESSAGE = "You already passed this one. Nice work!";
-export const CHALLENGE_DECIDED_MESSAGE = "Your teacher already read your note.";
 export const CHALLENGE_BUSY_MESSAGE = "We’re still checking your answers. Try again in a minute.";
 export const CHALLENGE_FAILED_MESSAGE = "We couldn’t send your note. Try again.";
 
@@ -48,7 +47,9 @@ export type ChallengeResult =
   | { status: "not_ready" }
   // Approved, or the student passed.
   | { status: "already_passed" }
-  // The teacher denied the last note without one more try.
+  // The teacher denied the last note without one more try. Never shown as
+  // a message: the action refreshes the page, which shows "Your teacher
+  // read your note." in place of the form.
   | { status: "decided" }
   // An effort check is still running for this student and reading.
   | { status: "busy" }
@@ -163,7 +164,8 @@ export async function sendChallengeWith(
   }
 }
 
-export function challengeMessage(result: ChallengeResult): string {
+// Every outcome but "decided" (see ChallengeResult).
+export function challengeMessage(result: Exclude<ChallengeResult, { status: "decided" }>): string {
   switch (result.status) {
     case "sent":
       return CHALLENGE_SENT_MESSAGE;
@@ -175,8 +177,6 @@ export function challengeMessage(result: ChallengeResult): string {
       return CHALLENGE_NOT_READY_MESSAGE;
     case "already_passed":
       return CHALLENGE_PASSED_MESSAGE;
-    case "decided":
-      return CHALLENGE_DECIDED_MESSAGE;
     case "busy":
       return CHALLENGE_BUSY_MESSAGE;
     case "not_found":

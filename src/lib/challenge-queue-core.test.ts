@@ -5,7 +5,7 @@ import {
   decideOutcome,
   decideStatements,
   decisionMessage,
-  isChallengeDecision,
+  parseDecisionChoice,
   openCountStatement,
   queueItems,
   queueStatements,
@@ -145,11 +145,13 @@ describe("decisionMessage", () => {
     for (const m of messages) assert.doesNotMatch(m, /\u2014/);
   });
 
-  it("knows the decisions", () => {
-    assert.equal(isChallengeDecision("accept"), true);
-    assert.equal(isChallengeDecision("deny"), true);
-    assert.equal(isChallengeDecision("approve"), false);
-    assert.equal(isChallengeDecision(null), false);
+  it("reads each button as its own explicit choice", () => {
+    assert.deepEqual(parseDecisionChoice("accept"), { decision: "accept", extraTry: false });
+    assert.deepEqual(parseDecisionChoice("deny"), { decision: "deny", extraTry: false });
+    assert.deepEqual(parseDecisionChoice("deny_extra_try"), { decision: "deny", extraTry: true });
+    for (const v of ["accept_extra_try", "toString", "__proto__", "", null, undefined, 1]) {
+      assert.equal(parseDecisionChoice(v), null, String(v));
+    }
   });
 });
 
