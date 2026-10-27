@@ -1,4 +1,5 @@
 import { SignUp } from "@clerk/nextjs";
+import { AuthFrame } from "@/components/auth-frame";
 import { AFTER_AUTH_PATH } from "@/lib/auth-routes";
 
 // Account sign-up (teachers and self-learners; the role is chosen next,
@@ -11,8 +12,8 @@ import { AFTER_AUTH_PATH } from "@/lib/auth-routes";
 // legacy "Bot sign-up protection" would need <div id="clerk-captcha" />.)
 export default function SignUpPage() {
   return (
-    <main className="flex flex-1 items-center justify-center px-6 py-16">
+    <AuthFrame>
       <SignUp fallbackRedirectUrl={AFTER_AUTH_PATH} />
-    </main>
+    </AuthFrame>
   );
 }

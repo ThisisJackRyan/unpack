@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SignOutButton } from "@clerk/nextjs";
+import { LogoMark } from "@/components/illustrations";
 import { card, focusRing, primaryButtonLarge } from "@/components/ui";
 
 // Where a deleted Clerk account lands if a session outlived it (see
@@ -10,21 +11,24 @@ export default function AccountDeleted() {
     <div className="flex flex-1 flex-col bg-ink-50 text-lg text-ink-900">
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-6 py-16">
         <div className={`${card} flex flex-col gap-4 px-6 py-10 sm:px-10`}>
-          <p className="text-xl font-semibold tracking-tight text-primary-700">unpack</p>
-          <h1 className="text-2xl font-semibold text-ink-950">This account was deleted</h1>
+          <p className="flex items-center gap-2 text-xl font-bold tracking-tight text-ink-950">
+            <LogoMark className="h-8 w-8" />
+            unpack
+          </p>
+          <h1 className="text-2xl font-bold text-ink-950">This account was deleted</h1>
           <p className="text-lg text-ink-700">
             It can’t be opened again, and its classes and readings were deleted with it. To use unpack again, sign
             out, then sign up with a new account.
           </p>
           <div className="mt-2 flex flex-col gap-3 sm:flex-row">
             <SignOutButton redirectUrl="/">
-              <button type="button" className={`${primaryButtonLarge}`}>
+              <button type="button" className={primaryButtonLarge}>
                 Sign out
               </button>
             </SignOutButton>
             <Link
               href="/"
-              className={`inline-flex min-h-14 items-center justify-center rounded-xl px-4 text-lg font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`}
+              className={`inline-flex min-h-14 items-center justify-center rounded-2xl px-4 text-lg font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`}
             >
               Go to the start page
             </Link>
