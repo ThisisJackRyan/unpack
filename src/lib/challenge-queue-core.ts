@@ -30,10 +30,6 @@ import { checksAllowedSql, effortLockSql, EXTRA_TRY_CHECKS, limitsFromRow, tries
 export const CHALLENGE_DECISIONS = ["accept", "deny"] as const;
 export type ChallengeDecision = (typeof CHALLENGE_DECISIONS)[number];
 
-export function isChallengeDecision(value: unknown): value is ChallengeDecision {
-  return typeof value === "string" && (CHALLENGE_DECISIONS as readonly string[]).includes(value);
-}
-
 // The queue card's three buttons, each its own explicit choice: Accept,
 // Deny, and "Deny, give one more try". (A separate checkbox could be left
 // ticked while the teacher clicked Accept, and be silently ignored.)

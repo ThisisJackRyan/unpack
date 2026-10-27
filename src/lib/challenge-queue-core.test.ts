@@ -5,7 +5,6 @@ import {
   decideOutcome,
   decideStatements,
   decisionMessage,
-  isChallengeDecision,
   parseDecisionChoice,
   openCountStatement,
   queueItems,
@@ -144,13 +143,6 @@ describe("decisionMessage", () => {
       "We couldn’t find that challenge. The list is up to date.",
     ]);
     for (const m of messages) assert.doesNotMatch(m, /\u2014/);
-  });
-
-  it("knows the decisions", () => {
-    assert.equal(isChallengeDecision("accept"), true);
-    assert.equal(isChallengeDecision("deny"), true);
-    assert.equal(isChallengeDecision("approve"), false);
-    assert.equal(isChallengeDecision(null), false);
   });
 
   it("reads each button as its own explicit choice", () => {
