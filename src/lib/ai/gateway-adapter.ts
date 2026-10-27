@@ -36,6 +36,9 @@ export type GatewayCallOptions = {
 // Keeps calls on Anthropic, as before the gateway: without it, the
 // gateway may route an anthropic/ model to another host of Claude (Amazon
 // Bedrock, Google Vertex AI), which would be another processor.
+// Deliberate, don't widen it for uptime: these requests carry children's
+// writing, so fewer processors wins over availability. When Anthropic is
+// down the call fails and the try is given back (see docs/privacy.md).
 export const GATEWAY_ROUTING = { only: ["anthropic"] } satisfies GatewayProviderOptions;
 
 // The provider options the gateway applies on its Anthropic call.
