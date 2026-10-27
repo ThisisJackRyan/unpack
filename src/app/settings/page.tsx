@@ -27,6 +27,7 @@ export default async function SettingsPage() {
           submitLabel="Save"
           initialRole={account.role}
           ageConfirmed={account.ageConfirmedAt !== null}
+          confirmSwitch={account.role === "teacher"}
         />
         <p className="border-t border-zinc-200 pt-5 text-base text-zinc-600">
           Switching only changes which home you see. Nothing is deleted: your classes and your own readings stay saved,
