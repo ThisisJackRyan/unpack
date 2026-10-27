@@ -26,6 +26,9 @@
 //   past the new cap make exactly 300 in all. The class page's badge
 //   reads Full at 150, nothing just after the raise, and Full at 300; the
 //   reading page shows full at 300 with no raise button.
+// - Readings list (the class page): drafts are listed next to published
+//   readings, each with its status (the page shows the Draft badge from
+//   it); another teacher gets an empty list for the class.
 // - Teacher delete (the Clerk webhook's user.deleted, through
 //   handleClerkEvent): a teacher with a class, students, a published
 //   per-student reading with a row in every table under it, RESOLVED
@@ -54,7 +57,7 @@ import { deletedAccountRows, deleteTeacherStatements, handleClerkEvent } from "@
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
 import { capView } from "@/lib/reading-cap";
-import { deleteReading, getClassCapBadges, getReadingCap, raiseReadingCap } from "@/lib/readings";
+import { deleteReading, getClassCapBadges, getReadingCap, listReadings, raiseReadingCap } from "@/lib/readings";
 import { getOrCreateStudentQuestions, postgresStudentQuestionStore } from "@/lib/student-questions";
 import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "@/lib/student-questions-core";
 import { createAccountStatements, hashClerkUserId } from "@/lib/deleted-accounts";
@@ -295,6 +298,19 @@ async function readingGrade(readingId: string) {
 
 async function classRow(classId: string) {
   return one<{ name: string; grade_level: string }>(sql`select name, grade_level from classes where id = ${classId}`);
+}
+
+async function checkReadingsList() {
+  console.log("\n== READINGS LIST ==");
+  const classId = await newClass("Room 7", "4");
+  const draft = await newReading(classId, "A draft", "shared", "draft");
+  const published = await newReading(classId, "A published one", "per_student", "published");
+  const list = await listReadings(classId, teacherId);
+  const byId = new Map(list.map((r) => [r.id, r.status]));
+  check(list.length === 2, `the owner sees both readings (got ${list.length})`);
+  check(byId.get(draft) === "draft", `...the draft is listed as a draft: ${byId.get(draft)}`);
+  check(byId.get(published) === "published", `...the published one as published: ${byId.get(published)}`);
+  check((await listReadings(classId, otherTeacherId)).length === 0, "another teacher sees no readings for the class");
 }
 
 async function checkClassSettings() {
@@ -672,6 +688,7 @@ async function main(): Promise<void> {
     await setup();
     await checkCascades();
     await checkReadingDelete();
+    await checkReadingsList();
     await checkClassSettings();
     await checkCap();
     await checkTeacherDelete();
