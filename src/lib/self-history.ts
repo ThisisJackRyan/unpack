@@ -40,8 +40,6 @@ export type HistoryItem = {
   gradeLabel: string;
   // "Oct 27, 2026", in the reader's zone, formatted on the server.
   dateLabel: string;
-  // For <time dateTime>.
-  isoDate: string;
   result: SelfReadingResult;
   resultLabel: string;
 };
@@ -71,7 +69,6 @@ export function historyItems(rows: Record<string, unknown>[], timeZone: string):
       title: String(row.title),
       gradeLabel: isGradeLevel(row.grade_level) ? gradeLevelLabel(row.grade_level) : "",
       dateLabel: format.format(created),
-      isoDate: created.toISOString(),
       result,
       resultLabel: SELF_RESULT_LABELS[result],
     };

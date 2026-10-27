@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { MetaLine } from "@/components/meta-line";
 import { SelfResultBadge } from "@/components/self-result-badge";
 import { OpenBook } from "@/components/illustrations";
 import { card, focusRing, primaryButtonLarge } from "@/components/ui";
 import { EMPTY_STATE_COPY, type EmptyStateScreen, type HistoryItem } from "@/lib/self-history";
 
-// The self-learner's readings, newest first: title, date, level, and
-// result. Each opens its reading page.
+// The self-learner's readings, newest first: title, a meta line (date and
+// level, only the parts present), and result. Each opens its reading page.
 export function HistoryList({ items }: { items: HistoryItem[] }) {
   return (
     <ul className="flex flex-col gap-3">
@@ -17,16 +18,7 @@ export function HistoryList({ items }: { items: HistoryItem[] }) {
           >
             <span className="flex min-w-0 flex-col gap-1">
               <span className="text-xl font-bold break-words text-ink-950">{item.title}</span>
-              <span className="text-lg text-ink-700">
-                <time dateTime={item.isoDate}>{item.dateLabel}</time>
-                {item.gradeLabel && (
-                  <>
-                    <span aria-hidden="true"> · </span>
-                    <span className="sr-only">, </span>
-                    {item.gradeLabel}
-                  </>
-                )}
-              </span>
+              <MetaLine as="span" className="text-lg text-ink-700" parts={[item.dateLabel, item.gradeLabel]} />
             </span>
             <SelfResultBadge result={item.result} />
           </Link>

@@ -29,11 +29,13 @@ describe("meta line", () => {
       "../app/learn/r/[readingId]/page.tsx",
       "../app/teacher/classes/[id]/readings/[readingId]/page.tsx",
       "../app/teacher/classes/[id]/readings/[readingId]/questions-panel.tsx",
+      "../app/learn/history-list.tsx",
     ]) {
       const source = readFileSync(new URL(path, import.meta.url), "utf8");
       assert.match(source, /<MetaLine\b/, path);
       assert.doesNotMatch(source, /sr-only">, </, path);
       assert.doesNotMatch(source, /\} · /, path);
+      assert.doesNotMatch(source, /> · </, path);
     }
   });
 });

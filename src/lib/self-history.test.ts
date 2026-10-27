@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { metaParts, metaSpokenText } from "./meta-line";
 import { EMPTY_STATE_COPY, historyItems, historyStatement, parseSelfResult } from "./self-history";
 
 const ID = "00000000-0000-4000-8000-000000000001";
@@ -31,7 +32,13 @@ describe("historyItems", () => {
         ["r0", "Rivers", "Kindergarten", "Oct 19, 2026", "in_progress", "In progress"],
       ],
     );
-    assert.equal(items[0].isoDate, "2026-10-27T02:00:00.000Z");
+  });
+
+  it("leaves no stray separator when the level is missing", () => {
+    const [item] = historyItems([{ id: "r", title: "T", grade_level: "weird", status: "in_progress", created_at: "2026-10-19T12:00:00Z" }], "UTC");
+    assert.equal(item.gradeLabel, "");
+    assert.deepEqual(metaParts([item.dateLabel, item.gradeLabel]), ["Oct 19, 2026"]);
+    assert.equal(metaSpokenText([item.dateLabel, item.gradeLabel]), "Oct 19, 2026");
   });
 
   it("treats an unknown status as in progress, and an empty list as empty", () => {
