@@ -46,6 +46,8 @@ Student status for a reading is derived from attempts and challenges: Passed if 
 - Try 4 is blocked; only the challenge option appears.
 - Shared mode: questions are cached per reading. Per-student mode: each student's set is generated once and cached, and it isn't regenerated on retries.
 - Free plan: creating a 2nd class is blocked.
+- Readings: the text must be 200 to 20,000 characters after cleanup (line endings, control characters, extra blank lines). A longer article is refused, never cut. Titles are up to 120 characters, links up to 2,048.
+- Link fetching: limited to 20 per teacher per 10 minutes (pasted text isn't limited). We only fetch http/https links to public hosts, with 8 seconds and 2 MB per fetch, and only HTML pages.
 - Joining a class is rate limited per IP and per code, with a bot check.
 - Student data is visible only to the owning teacher, and we store only first names plus last initials.
 

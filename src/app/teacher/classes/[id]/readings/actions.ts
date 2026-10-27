@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { getClassForTeacher } from "@/lib/classes";
 import { fetchArticle } from "@/lib/fetch-article";
 import { FetchArticleError, type FetchArticleErrorKind } from "@/lib/fetch-errors";
+import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
 import { insertReading, updateDraftReading, type ReadingDraft } from "@/lib/readings";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import {
@@ -66,6 +68,27 @@ export async function createReading(
 
   let draft: ReadingDraft;
   if (data.source === "link") {
+    // Counts this attempt, before fetching, whatever the fetch's outcome.
+    // Fails closed: if we can't check the limit, we don't fetch.
+    let allowed: boolean;
+    try {
+      allowed = await recordLinkFetchAttempt(teacher.id);
+    } catch (error) {
+      logDbError("createReading: recordLinkFetchAttempt failed", error);
+      return {
+        errors: { form: "We couldn’t save the reading. Please try again." },
+        values,
+      };
+    }
+    if (!allowed) {
+      return {
+        errors: { url: LINK_FETCH_LIMITED_MESSAGE },
+        values,
+        // Pasted text isn't limited.
+        suggestText: "Paste the text instead.",
+      };
+    }
+
     let article: Awaited<ReturnType<typeof fetchArticle>>;
     try {
       article = await fetchArticle(data.url);

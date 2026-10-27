@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   BODY_TEXT_MAX_LENGTH,
   BODY_TEXT_MIN_LENGTH,
+  BODY_TEXT_TOO_LONG_MESSAGE,
   cutTitle,
   normalizeBodyText,
   normalizeTitle,
@@ -193,6 +194,16 @@ describe("validateReadingForm: text mode", () => {
     assert.deepEqual(errorsOf({ bodyText: `${atMax}a` }), {
       bodyText:
         "This is too long. Keep it under 20,000 characters, or paste a shorter section.",
+    });
+  });
+
+  it("shares the too-long message with the form's counter check", () => {
+    assert.equal(
+      BODY_TEXT_TOO_LONG_MESSAGE,
+      "This is too long. Keep it under 20,000 characters, or paste a shorter section.",
+    );
+    assert.deepEqual(errorsOf({ bodyText: "a".repeat(BODY_TEXT_MAX_LENGTH + 1) }), {
+      bodyText: BODY_TEXT_TOO_LONG_MESSAGE,
     });
   });
 

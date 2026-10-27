@@ -7,10 +7,13 @@ import {
   decodeBody,
   decompress,
   isHtmlType,
+  metaCharset,
   parseContentType,
   readCapped,
   safeFetch,
+  sniffCharset,
 } from "./safe-fetch";
+import { isBlockedAddress } from "./url-guard";
 
 async function kindOf(promise: Promise<unknown>): Promise<string | undefined> {
   try {
@@ -53,6 +56,71 @@ describe("decodeBody", () => {
     const utf8 = Buffer.from("café ’", "utf8");
     assert.equal(decodeBody(utf8, undefined), "café ’");
     assert.equal(decodeBody(utf8, "not-a-charset"), "café ’");
+  });
+});
+
+describe("charset sniffing", () => {
+  const latin1Page = (head: string) =>
+    Buffer.concat([
+      Buffer.from(`<!doctype html><html><head>${head}<title>Menu</title></head><body><p>caf`, "latin1"),
+      Buffer.from([0xe9]),
+      Buffer.from("</p></body></html>", "latin1"),
+    ]);
+
+  it("reads <meta charset> when the header has none", () => {
+    const body = latin1Page('<meta charset="windows-1252">');
+    assert.equal(sniffCharset(body, undefined), "windows-1252");
+    assert.match(decodeBody(body, undefined), /<p>café<\/p>/);
+  });
+
+  it("reads <meta http-equiv=Content-Type content=...charset=...>", () => {
+    const body = latin1Page(
+      '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=ISO-8859-1">',
+    );
+    // WHATWG maps iso-8859-1 to windows-1252.
+    assert.equal(sniffCharset(body, undefined), "windows-1252");
+    assert.match(decodeBody(body, undefined), /<p>café<\/p>/);
+    assert.equal(
+      metaCharset(Buffer.from("<meta http-equiv=content-type content='text/html;charset=koi8-r'>")),
+      "koi8-r",
+    );
+    assert.equal(metaCharset(Buffer.from("<meta charset=shift_jis>")), "shift_jis");
+  });
+
+  it("lets the header charset win over the meta tag", () => {
+    const body = Buffer.from('<meta charset="windows-1252"><p>café</p>', "utf8");
+    assert.equal(sniffCharset(body, "utf-8"), "utf-8");
+    assert.match(decodeBody(body, "utf-8"), /café/);
+  });
+
+  it("lets a byte order mark win over the header and the meta tag", () => {
+    const utf8 = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('<meta charset="windows-1252"><p>café</p>')]);
+    assert.equal(sniffCharset(utf8, "windows-1252"), "utf-8");
+    assert.equal(decodeBody(utf8, "windows-1252"), '<meta charset="windows-1252"><p>café</p>');
+
+    const le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("<p>café</p>", "utf16le")]);
+    assert.equal(sniffCharset(le, "utf-8"), "utf-16le");
+    assert.equal(decodeBody(le, "utf-8"), "<p>café</p>");
+
+    const be = Buffer.from([0xfe, 0xff, 0x00, 0x63, 0x00, 0xe9]);
+    assert.equal(decodeBody(be, undefined), "cé");
+  });
+
+  it("ignores an unknown label and keeps looking, then falls back to UTF-8", () => {
+    const body = latin1Page('<meta charset="windows-1252">');
+    assert.equal(sniffCharset(body, "no-such-charset"), "windows-1252");
+    assert.equal(sniffCharset(Buffer.from('<meta charset="nope"><p>x</p>'), undefined), "utf-8");
+    assert.equal(sniffCharset(Buffer.from("<p>no meta</p>"), undefined), "utf-8");
+  });
+
+  it("reads a meta UTF-16 label as UTF-8", () => {
+    assert.equal(metaCharset(Buffer.from('<meta charset="utf-16">')), "utf-8");
+  });
+
+  it("skips comments and looks only at the first 1024 bytes", () => {
+    assert.equal(metaCharset(Buffer.from('<!-- <meta charset="koi8-r"> --><p>x</p>')), undefined);
+    const late = Buffer.from(`${" ".repeat(1024)}<meta charset="windows-1252">`);
+    assert.equal(metaCharset(late), undefined);
   });
 });
 
@@ -144,6 +212,23 @@ describe("safeFetch", () => {
       "timeout",
     );
     assert.ok(Date.now() - started < 2000);
+  });
+
+  it("refuses the test-only address policy outside NODE_ENV=test", async () => {
+    const saved = process.env.NODE_ENV;
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    try {
+      await assert.rejects(
+        safeFetch("http://127.0.0.1:1/", {
+          unsafeTestAddressPolicy: { isBlockedAddress, allowAnyPort: true },
+        }),
+        (error) => !(error instanceof FetchArticleError) && /only allowed in tests/.test(String(error)),
+      );
+    } finally {
+      // Assigning undefined to process.env stores the string "undefined".
+      if (saved === undefined) delete (process.env as Record<string, string | undefined>).NODE_ENV;
+      else (process.env as Record<string, string | undefined>).NODE_ENV = saved;
+    }
   });
 
   it("reports DNS failures as http_error", async () => {

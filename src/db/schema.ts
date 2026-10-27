@@ -197,6 +197,26 @@ export const challenges = pgTable(
   ],
 );
 
+// One row per link fetch a teacher starts from the add-reading form, for the
+// per-teacher rate limit (see src/lib/link-rate-limit.ts). Rows older than a
+// day are pruned as new ones are recorded.
+export const linkFetchAttempts = pgTable(
+  "link_fetch_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teacherId: uuid("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("link_fetch_attempts_teacher_id_created_at_idx").on(
+      t.teacherId,
+      t.createdAt,
+    ),
+  ],
+);
+
 // Inferred types
 
 export type Teacher = typeof teachers.$inferSelect;

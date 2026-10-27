@@ -1,9 +1,17 @@
+import "server-only";
 import http from "node:http";
 import https from "node:https";
 import { pipeline, type Readable } from "node:stream";
 import zlib from "node:zlib";
 import { FetchArticleError } from "./fetch-errors";
-import { checkRedirect, checkUrl, createGuardedLookup, type Resolver } from "./url-guard";
+import {
+  checkRedirect,
+  checkUrl,
+  createGuardedLookup,
+  DEFAULT_ADDRESS_POLICY,
+  type AddressPolicy,
+  type Resolver,
+} from "./url-guard";
 
 // Server-only: fetches one HTML page from a public web server for the
 // add-reading form. Uses node:http(s) rather than global fetch so the socket
@@ -28,7 +36,24 @@ export type SafeFetchOptions = {
   maxRedirects?: number;
   // Tests swap in a fake resolver; the app uses DNS.
   resolver?: Resolver;
+  // TEST ONLY. Lets the end-to-end tests reach a node:http server on
+  // 127.0.0.1 and an ephemeral port, which the default policy blocks.
+  // safeFetch throws if this is set and NODE_ENV isn't "test". Next builds
+  // and runs the app with NODE_ENV "production" or "development" (and
+  // inlines it), so no app code path can turn this on, and the server
+  // action never passes it: fetchArticle's options type leaves it out.
+  // node:test doesn't set NODE_ENV, so the test file sets it.
+  unsafeTestAddressPolicy?: AddressPolicy;
 };
+
+function addressPolicy(options: SafeFetchOptions): AddressPolicy {
+  const policy = options.unsafeTestAddressPolicy;
+  if (!policy) return DEFAULT_ADDRESS_POLICY;
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("unsafeTestAddressPolicy is only allowed in tests");
+  }
+  return policy;
+}
 
 export type FetchedPage = { url: URL; html: string };
 
@@ -49,16 +74,69 @@ export function isHtmlType(mimeType: string): boolean {
   return HTML_TYPES.includes(mimeType);
 }
 
-// Decodes with the charset from Content-Type, or UTF-8 when there is none or
-// TextDecoder doesn't know it.
-export function decodeBody(body: Uint8Array, charset: string | undefined): string {
-  let decoder: TextDecoder;
+// How many bytes to search for a <meta> charset, as browsers do.
+const META_SNIFF_BYTES = 1024;
+
+// The WHATWG encoding name for a label, or undefined if TextDecoder doesn't
+// know it.
+function encodingFor(label: string | undefined): string | undefined {
+  if (!label) return undefined;
   try {
-    decoder = new TextDecoder(charset ?? "utf-8");
+    return new TextDecoder(label).encoding;
   } catch {
-    decoder = new TextDecoder("utf-8");
+    return undefined;
   }
-  return decoder.decode(body);
+}
+
+// The charset a <meta charset> or <meta http-equiv="Content-Type"
+// content="...; charset=..."> declares in the first 1024 bytes, read as
+// latin1 (labels are ASCII). Comments are skipped.
+export function metaCharset(body: Uint8Array): string | undefined {
+  const head = Buffer.from(body.subarray(0, META_SNIFF_BYTES))
+    .toString("latin1")
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+  for (const [tag] of head.matchAll(/<meta[\s/][^>]*>?/gi)) {
+    const attrs = new Map<string, string>();
+    for (const m of tag.matchAll(
+      /([a-z-]+)\s*=\s*(?:"([^"]*)"?|'([^']*)'?|([^\s>]+))/gi,
+    )) {
+      const name = m[1].toLowerCase();
+      if (!attrs.has(name)) attrs.set(name, m[2] ?? m[3] ?? m[4] ?? "");
+    }
+    let label = attrs.get("charset");
+    if (
+      label === undefined &&
+      attrs.get("http-equiv")?.toLowerCase() === "content-type"
+    ) {
+      label = /charset\s*=\s*["']?([^"';\s]+)/i.exec(attrs.get("content") ?? "")?.[1];
+    }
+    const encoding = encodingFor(label?.trim());
+    if (encoding) {
+      // A page can't really be UTF-16 if its meta tag was readable as
+      // ASCII, so browsers read it as UTF-8.
+      return encoding.startsWith("utf-16") ? "utf-8" : encoding;
+    }
+  }
+  return undefined;
+}
+
+// Picks the charset in the HTML spec's order: a byte order mark, then the
+// Content-Type header, then a <meta> tag in the first 1024 bytes, then
+// UTF-8. A label TextDecoder doesn't know counts as no label.
+export function sniffCharset(
+  body: Uint8Array,
+  headerCharset: string | undefined,
+): string {
+  if (body[0] === 0xef && body[1] === 0xbb && body[2] === 0xbf) return "utf-8";
+  if (body[0] === 0xfe && body[1] === 0xff) return "utf-16be";
+  if (body[0] === 0xff && body[1] === 0xfe) return "utf-16le";
+  return encodingFor(headerCharset) ?? metaCharset(body) ?? "utf-8";
+}
+
+// Decodes an HTML body with the charset sniffCharset picks. TextDecoder
+// drops the byte order mark.
+export function decodeBody(body: Uint8Array, headerCharset: string | undefined): string {
+  return new TextDecoder(sniffCharset(body, headerCharset)).decode(body);
 }
 
 // Reads a stream into one buffer, failing with "too_large" as soon as it
@@ -127,8 +205,9 @@ export async function safeFetch(
     maxBytes = MAX_RESPONSE_BYTES,
     maxRedirects = MAX_REDIRECTS,
   } = options;
-  let url = checkUrl(input);
-  const lookup = createGuardedLookup(options.resolver);
+  const policy = addressPolicy(options);
+  let url = checkUrl(input, policy);
+  const lookup = createGuardedLookup(options.resolver, policy);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deadlineMs);
   let response: http.IncomingMessage | undefined;
@@ -142,7 +221,7 @@ export async function safeFetch(
         if (redirects >= maxRedirects) {
           throw new FetchArticleError("http_error", url.hostname);
         }
-        url = checkRedirect(url, location);
+        url = checkRedirect(url, location, policy);
         continue;
       }
       if (status < 200 || status >= 300) {

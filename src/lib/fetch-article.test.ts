@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { parseHTML } from "linkedom";
-import { extractArticle, htmlToText } from "./fetch-article";
+import {
+  exceedsElementLimits,
+  extractArticle,
+  htmlToText,
+  MAX_DEPTH,
+  MAX_ELEMENTS,
+  MAX_START_TAGS,
+} from "./fetch-article";
 import { FetchArticleError } from "./fetch-errors";
 import { BODY_TEXT_MAX_LENGTH } from "./validate-reading";
 
@@ -90,7 +97,70 @@ describe("extractArticle", () => {
   });
 });
 
+describe("extractArticle: size limits", () => {
+  const story = `<p>${"An octopus has three hearts and blue blood, and it can taste with its arms. ".repeat(5)}</p>`;
+  const page = (body: string) =>
+    `<html><head><title>Deep</title></head><body>${body}</body></html>`;
+  const nested = (depth: number) =>
+    page(`${"<div>".repeat(depth)}${story}${"</div>".repeat(depth)}`);
+
+  // Fails with the kind, never a RangeError or other raw error.
+  function failsWith(html: string, kind: string) {
+    let caught: unknown;
+    try {
+      extractArticle(html, PAGE);
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof FetchArticleError, String(caught));
+    assert.equal(caught.kind, kind);
+  }
+
+  it("reads an article nested a normal depth", () => {
+    assert.match(extractArticle(nested(50), PAGE).text, /^An octopus has three hearts/);
+  });
+
+  it("fails with extract_failed on 20,000 nested divs", () => {
+    failsWith(nested(20_000), "extract_failed");
+  });
+
+  it("fails with extract_failed past MAX_DEPTH", () => {
+    failsWith(nested(MAX_DEPTH + 1), "extract_failed");
+  });
+
+  it("fails with extract_failed past MAX_ELEMENTS", () => {
+    failsWith(page(`<article>${story}${"<i></i>".repeat(MAX_ELEMENTS)}</article>`), "extract_failed");
+  });
+
+  it("refuses a page past MAX_START_TAGS before parsing it", () => {
+    const started = Date.now();
+    failsWith(nested(200_000), "extract_failed");
+    failsWith(page("<br>".repeat(MAX_START_TAGS + 1)), "extract_failed");
+    // Parsing 200,000 nested divs takes tens of seconds.
+    assert.ok(Date.now() - started < 2000);
+  });
+
+  it("counts elements and depth without recursion", () => {
+    const { document } = parseHTML(page(`<div><p>a</p><p>b<i>c</i></p></div><p>d</p>`));
+    assert.equal(exceedsElementLimits(document.documentElement), false);
+    assert.equal(exceedsElementLimits(null), false);
+    const deep = parseHTML(nested(MAX_DEPTH + 10)).document;
+    assert.equal(exceedsElementLimits(deep.documentElement), true);
+  });
+});
+
 describe("htmlToText", () => {
+  it("handles a tree far deeper than the call stack allows", () => {
+    type Node = { nodeType: number; nodeValue: string | null; localName?: string; childNodes: Node[] };
+    const leaf: Node = { nodeType: 3, nodeValue: "deep text", childNodes: [] };
+    let root: Node = leaf;
+    for (let i = 0; i < 200_000; i++) {
+      root = { nodeType: 1, nodeValue: null, localName: "span", childNodes: [root] };
+    }
+    assert.equal(htmlToText(root), "deep text");
+  });
+
+
   it("collapses whitespace but keeps <pre> as written", () => {
     const { document } = parseHTML(
       "<html><body><div id='r'><p>a   b\n c</p><pre>x\n  y</pre><p>d<br>e</p></div></body></html>",

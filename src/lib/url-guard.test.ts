@@ -68,8 +68,24 @@ describe("isBlockedAddress: IPv6", () => {
     "2001::1", "2001:0:4136:e378::1", // Teredo
     "64:ff9b:1::1",
     "fe80::1%eth0",
+    // Outside 2000::/3, so blocked by the allowlist without being listed.
+    "::ffff:0:7f00:1", // IPv4-translated 127.0.0.1
+    "::ffff:0:808:808", // IPv4-translated, blocked even for a public v4
+    "5f00::1", // SRv6 SIDs
+    "4000::1", "1fff:ffff::1", "e000::1",
+    // Inside 2000::/3 but special.
+    "3fff::1", "3fff:fff:ffff::1", // documentation 3fff::/20
+    "2001:2::1", // benchmarking, inside 2001::/23
   ];
-  const allowed = ["2606:4700:4700::1111", "2a00:1450:4001:80b::200e", "2001:4860:4860::8888"];
+  const allowed = [
+    "2606:4700::1",
+    "2606:4700:4700::1111",
+    "2a00:1450:4001:80b::200e",
+    "2001:4860:4860::8888",
+    "2000::1", // first address of 2000::/3
+    "3fff:1000::1", // just past 3fff::/20
+    "3ffe::1", // just before 3fff::/20
+  ];
 
   for (const address of blocked) {
     it(`blocks ${address}`, () => assert.equal(isBlockedAddress(address), true));
@@ -104,6 +120,7 @@ describe("embedded IPv4", () => {
       "::ffff:10.1.2.3",
       "64:ff9b::7f00:1",
       "64:ff9b::192.168.0.1",
+      "64:ff9b::a00:1", // NAT64 of 10.0.0.1
       "2002:7f00:1::",
       "2002:a9fe:a9fe::1",
     ]) {
@@ -112,7 +129,12 @@ describe("embedded IPv4", () => {
   });
 
   it("allows a public IPv4 inside each form", () => {
-    for (const address of ["::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::1"]) {
+    for (const address of [
+      "::ffff:8.8.8.8",
+      "64:ff9b::808:808", // NAT64 of 8.8.8.8, though 64:ff9b:: is outside 2000::/3
+      "64:ff9b::1.1.1.1",
+      "2002:808:808::1",
+    ]) {
       assert.equal(isBlockedAddress(address), false, address);
     }
   });
@@ -188,6 +210,11 @@ describe("checkUrl", () => {
       "http://[::ffff:169.254.169.254]/",
       "http://[64:ff9b::127.0.0.1]/",
       "http://[2002:7f00:1::]/",
+      "http://[::ffff:0:7f00:1]/",
+      "http://[5f00::1]/",
+      "http://[3fff::1]/",
+      "http://[fc00::1]/",
+      "http://[2001:db8::1]/",
       "http://0.0.0.0/",
       "http://255.255.255.255/",
     ]) {
