@@ -20,7 +20,6 @@ jobs:
       NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
       NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
       DATABASE_URL: postgresql://user:password@localhost:5432/unpack
-      ANTHROPIC_API_KEY: sk-ant-dummy
       NEXT_TELEMETRY_DISABLED: 1
     steps:
       - uses: actions/checkout@v4
