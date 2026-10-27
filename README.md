@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# unpack
 
-## Getting Started
+A reading check that's hard to fake: students read a text, then answer AI-generated questions about it, and they move on only when they've genuinely tried.
 
-First, run the development server:
+## Core loop
+
+1. A teacher picks a reading (link or pasted text) and shares a class code.
+2. A student joins with the code and reads the text in unpack.
+3. AI generates a few open-ended questions tied to specific details in the passage, plus one asking for the student's own take.
+4. The student answers. AI grades pass/fail on **effort only** (did they try and engage with the text), not quality.
+5. On a fail, the student gets a specific nudge and revises, up to 3 tries. On a pass, they move on.
+6. After 3 fails, the student can send a challenge that the teacher reviews and resolves.
+
+## Stack (locked)
+
+- [Next.js 16](https://nextjs.org) on [Vercel](https://vercel.com)
+- [Neon](https://neon.tech) Postgres
+- [Clerk](https://clerk.com) auth for **teachers only**. Students have no accounts: they join with a class code, their first name, and the first 1-2 letters of their last name.
+- [Claude](https://www.anthropic.com/claude) via the Anthropic API for question generation and the effort check
+
+## Docs
+
+- [Product brief](docs/product-brief.md)
+- [v1 features and data model](docs/v1-spec.md)
+
+## Local development
+
+Requires Node.js and [pnpm](https://pnpm.io).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install   # install dependencies
+pnpm dev       # start the dev server at http://localhost:3000
+pnpm lint      # run ESLint
+pnpm build     # production build
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
