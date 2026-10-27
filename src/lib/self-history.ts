@@ -13,6 +13,23 @@ export const SELF_RESULT_LABELS: Record<SelfReadingResult, string> = {
   moved_on: "Moved on",
 };
 
+// The empty state on /learn (where to start) and on /learn/history (what
+// will show up there). Each screen has its own copy.
+export const EMPTY_STATE_COPY = {
+  learn: {
+    heading: "No readings yet",
+    body: "Paste a link or some text you want to read. We’ll ask you a few questions about it.",
+    button: "Start a new reading",
+  },
+  history: {
+    heading: "Nothing read yet",
+    body: `Every reading you start will be listed here, newest first, with its date, its level, and how it went: ${SELF_RESULT_LABELS.in_progress}, ${SELF_RESULT_LABELS.passed}, or ${SELF_RESULT_LABELS.moved_on}.`,
+    button: "Start your first reading",
+  },
+} as const;
+
+export type EmptyStateScreen = keyof typeof EMPTY_STATE_COPY;
+
 export function parseSelfResult(value: unknown): SelfReadingResult {
   return value === "passed" || value === "moved_on" ? value : "in_progress";
 }

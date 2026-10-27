@@ -30,7 +30,7 @@ export default async function LearnHomePage() {
       </div>
 
       {history.length === 0 ? (
-        <EmptyHistory />
+        <EmptyHistory screen="learn" />
       ) : state.remaining > 0 ? (
         <div className="flex flex-col items-start gap-3">
           <StartLink />

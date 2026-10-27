@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SelfResultBadge } from "@/components/self-result-badge";
 import { card, focusRing } from "@/components/ui";
-import type { HistoryItem } from "@/lib/self-history";
+import { EMPTY_STATE_COPY, type EmptyStateScreen, type HistoryItem } from "@/lib/self-history";
 
 // The self-learner's readings, newest first: title, date, level, and
 // result. Each opens its reading page.
@@ -35,7 +35,10 @@ export function HistoryList({ items }: { items: HistoryItem[] }) {
   );
 }
 
-export function EmptyHistory() {
+// No readings yet. `screen` picks the copy: /learn says how to start,
+// /learn/history says what will be listed there.
+export function EmptyHistory({ screen }: { screen: EmptyStateScreen }) {
+  const copy = EMPTY_STATE_COPY[screen];
   return (
     <div className={`${card} flex flex-col items-center gap-4 rounded-2xl px-6 py-14 text-center`}>
       <svg aria-hidden="true" viewBox="0 0 96 96" className="h-24 w-24" fill="none">
@@ -44,22 +47,20 @@ export function EmptyHistory() {
         <path d="M72 34c-8-4-16-4-24 2v32c8-6 16-6 24-2V34Z" fill="#fff" stroke="#4f46e5" strokeWidth="3" strokeLinejoin="round" />
         <path d="M30 44c4-1 8-1 12 1M30 52c4-1 8-1 12 1M54 45c4-2 8-2 12-1M54 53c4-2 8-2 12-1" stroke="#a5b4fc" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      <h2 className="text-2xl font-semibold text-zinc-950">No readings yet</h2>
-      <p className="max-w-sm text-lg text-zinc-600">
-        Paste a link or some text you want to read. We’ll ask you a few questions about it.
-      </p>
-      <StartLink className="mt-2" />
+      <h2 className="text-2xl font-semibold text-zinc-950">{copy.heading}</h2>
+      <p className="max-w-sm text-lg text-zinc-600">{copy.body}</p>
+      <StartLink className="mt-2" label={copy.button} />
     </div>
   );
 }
 
-export function StartLink({ className = "" }: { className?: string }) {
+export function StartLink({ className = "", label = "Start a new reading" }: { className?: string; label?: string }) {
   return (
     <Link
       href="/learn/new"
       className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-7 text-lg font-semibold text-white transition-colors hover:bg-indigo-700 ${focusRing} ${className}`}
     >
-      Start a new reading
+      {label}
     </Link>
   );
 }

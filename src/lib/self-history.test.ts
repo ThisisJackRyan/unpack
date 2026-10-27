@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { historyItems, historyStatement, parseSelfResult } from "./self-history";
+import { EMPTY_STATE_COPY, historyItems, historyStatement, parseSelfResult } from "./self-history";
 
 const ID = "00000000-0000-4000-8000-000000000001";
 
@@ -37,5 +37,26 @@ describe("historyItems", () => {
   it("treats an unknown status as in progress, and an empty list as empty", () => {
     assert.equal(parseSelfResult("weird"), "in_progress");
     assert.deepEqual(historyItems([], "UTC"), []);
+  });
+});
+
+describe("EMPTY_STATE_COPY", () => {
+  it("gives /learn/history its own copy, not the /learn copy", () => {
+    const { learn, history } = EMPTY_STATE_COPY;
+    assert.notEqual(history.heading, learn.heading);
+    assert.notEqual(history.body, learn.body);
+    assert.equal(history.heading, "Nothing read yet");
+    assert.match(history.body, /listed here/);
+    for (const label of ["In progress", "Passed", "Moved on"]) assert.ok(history.body.includes(label), label);
+    assert.equal(history.button, "Start your first reading");
+  });
+
+  it("uses curly apostrophes and no em dashes", () => {
+    for (const copy of Object.values(EMPTY_STATE_COPY)) {
+      for (const text of Object.values(copy)) {
+        assert.ok(!text.includes("'"), text);
+        assert.ok(!text.includes("\u2014"), text);
+      }
+    }
   });
 });

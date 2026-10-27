@@ -21,7 +21,7 @@ export default async function HistoryPage() {
         <h1 className="text-4xl font-semibold tracking-tight text-zinc-950">History</h1>
         {items.length > 0 && <StartLink />}
       </div>
-      {items.length === 0 ? <EmptyHistory /> : <HistoryList items={items} />}
+      {items.length === 0 ? <EmptyHistory screen="history" /> : <HistoryList items={items} />}
     </div>
   );
 }
