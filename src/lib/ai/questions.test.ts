@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { QUESTIONS_TOOL_NAME } from "./prompts";
+import { PRIVACY_RULE, QUESTIONS_TOOL_NAME } from "./prompts";
 import {
   buildQuestionRequest,
   parseQuestionsResponse,
@@ -13,6 +13,7 @@ import {
   writeReplacementQuestion,
   type QuestionModel,
 } from "./questions";
+import { QUESTION_WRITE_DEADLINE_MS } from "./settings";
 
 const BODY = "Mia found a fox in the snow. ".repeat(20);
 
@@ -217,6 +218,126 @@ describe("writeReplacementQuestion", () => {
       current: THREE,
     });
     assert.match(calls[0].messages[0].content as string, /"what do you think" question/);
+  });
+});
+
+describe("privacy rule in requests", () => {
+  it("is in the system prompt of full-set and replacement requests", async () => {
+    const { model, calls } = fakeModel([
+      message([toolUse({ questions: THREE })]),
+      message([toolUse({ questions: ["What would you change in the story?"] })]),
+    ]);
+    await writeQuestionSet(model, { bodyText: BODY, gradeLevel: "4", count: 3 });
+    await writeReplacementQuestion(model, {
+      bodyText: BODY,
+      gradeLevel: "4",
+      position: 3,
+      count: 3,
+      current: THREE,
+    });
+    assert.equal(calls.length, 2);
+    for (const call of calls) assert.ok(String(call.system).includes(PRIVACY_RULE));
+  });
+});
+
+// A model call that never answers: it only settles when its signal aborts,
+// the way the SDK does (APIUserAbortError).
+function hangingModel(options: { honorSignal?: boolean } = {}) {
+  let calls = 0;
+  const model: QuestionModel = {
+    model: "claude-sonnet-5-5",
+    create: (_params, { signal }) => {
+      calls++;
+      return new Promise((_, reject) => {
+        if (options.honorSignal === false) return;
+        signal.addEventListener("abort", () => reject(new Anthropic.APIUserAbortError()), { once: true });
+      });
+    },
+  };
+  return { model, calls: () => calls };
+}
+
+describe("write deadline", () => {
+  const input = { bodyText: BODY, gradeLevel: "4" as const, count: 3 };
+
+  // AbortSignal.timeout's timer doesn't hold the event loop open (in the
+  // app, the open request does), so a test with only a hanging call would
+  // end before the deadline fires.
+  let keepAlive: ReturnType<typeof setInterval>;
+  beforeEach(() => {
+    keepAlive = setInterval(() => {}, 1_000);
+  });
+  afterEach(() => clearInterval(keepAlive));
+
+  it("is 110 seconds by default", () => {
+    assert.equal(QUESTION_WRITE_DEADLINE_MS, 110_000);
+  });
+
+  it("passes the deadline signal to every call", async () => {
+    const { model, calls } = fakeModel([message([toolUse({ questions: THREE })])]);
+    const seen: (AbortSignal | undefined)[] = [];
+    const create = model.create;
+    model.create = (params, options) => {
+      seen.push(options?.signal);
+      return create(params, options);
+    };
+    await writeQuestionSet(model, input);
+    assert.equal(calls.length, 1);
+    assert.ok(seen[0] instanceof AbortSignal);
+    assert.equal(seen[0]!.aborted, false);
+  });
+
+  it("aborts a hanging call and maps it to the timeout message", async () => {
+    const { model, calls } = hangingModel();
+    const started = Date.now();
+    await assert.rejects(writeQuestionSet(model, input, { deadlineMs: 30 }), (error: unknown) => {
+      // The SDK's APIUserAbortError or the deadline's TimeoutError,
+      // whichever settles first; both are a timeout.
+      assert.equal(questionErrorKind(error), "timeout");
+      assert.equal(QUESTION_ERROR_MESSAGES[questionErrorKind(error)], "That took too long. Try again.");
+      return true;
+    });
+    assert.ok(Date.now() - started < 1_000);
+    assert.equal(calls(), 1);
+  });
+
+  it("ends the write even if a call ignores its signal", async () => {
+    const { model } = hangingModel({ honorSignal: false });
+    await assert.rejects(
+      writeReplacementQuestion(
+        model,
+        { bodyText: BODY, gradeLevel: "4", position: 1, count: 3, current: THREE },
+        { deadlineMs: 30 },
+      ),
+      (error: unknown) => questionErrorKind(error) === "timeout",
+    );
+  });
+
+  it("covers both attempts: no second attempt starts after the deadline", async () => {
+    const calls: number[] = [];
+    const model: QuestionModel = {
+      model: "claude-sonnet-5-5",
+      create: async () => {
+        calls.push(Date.now());
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return message([toolUse({ questions: ["Only one?"] })]);
+      },
+    };
+    await assert.rejects(writeQuestionSet(model, input, { deadlineMs: 25 }), (error: unknown) => {
+      assert.equal(questionErrorKind(error), "timeout");
+      return true;
+    });
+    // Give a would-be second attempt time to start.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(calls.length, 1);
+  });
+
+  it("maps every abort shape to timeout", () => {
+    assert.equal(questionErrorKind(new Anthropic.APIUserAbortError()), "timeout");
+    assert.equal(questionErrorKind(new DOMException("deadline", "TimeoutError")), "timeout");
+    assert.equal(questionErrorKind(new DOMException("aborted", "AbortError")), "timeout");
+    const signal = AbortSignal.abort(new DOMException("deadline", "TimeoutError"));
+    assert.equal(questionErrorKind(signal.reason), "timeout");
   });
 });
 

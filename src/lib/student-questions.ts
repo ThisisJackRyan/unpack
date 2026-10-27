@@ -7,7 +7,8 @@ import { writeQuestionSet } from "./ai/questions";
 import { isUuid } from "./classes";
 import type { GradeLevel } from "./grade-levels";
 import {
-  claimStatement,
+  claimOutcome,
+  claimStatements,
   commitStatements,
   getOrCreateStudentQuestionsWith,
   releaseStatement,
@@ -27,6 +28,10 @@ export type {
   StudentQuestion,
   StudentQuestionsResult,
 } from "./student-questions-core";
+export {
+  STUDENT_SETS_LIMITED_MESSAGE,
+  STUDENT_SETS_PER_READING_LIMIT,
+} from "./student-questions-core";
 
 export function postgresStudentQuestionStore(
   execute: StatementExecutor = neonExecutor,
@@ -35,11 +40,15 @@ export function postgresStudentQuestionStore(
   return {
     async loadContext(readingId, studentId) {
       const [row] = await one(studentContextStatement(readingId, studentId));
-      if (!row) return undefined;
+      if (!row) return { status: "not_found" };
+      if (row.in_class !== true) return { status: "not_allowed" };
       return {
-        bodyText: String(row.body_text),
-        gradeLevel: row.grade_level as GradeLevel,
-        questionCount: Number(row.question_count),
+        status: "ok",
+        context: {
+          bodyText: String(row.body_text),
+          gradeLevel: row.grade_level as GradeLevel,
+          questionCount: Number(row.question_count),
+        },
       };
     },
     async readQuestions(readingId, studentId) {
@@ -50,8 +59,8 @@ export function postgresStudentQuestionStore(
         prompt: String(r.prompt),
       }));
     },
-    async claim(readingId, studentId, token) {
-      return (await one(claimStatement(readingId, studentId, token))).length > 0;
+    async claim(readingId, studentId, token, limit) {
+      return claimOutcome(await execute(claimStatements(readingId, studentId, token, limit)), limit);
     },
     async takeOverStale(readingId, studentId, token, staleSeconds) {
       const rows = await one(takeOverStatement(readingId, studentId, token, staleSeconds));
@@ -82,10 +91,12 @@ export type GetStudentQuestionsOptions = {
   store?: StudentQuestionStore;
 };
 
-// Returns the student's cached set, or writes and caches it once. Only for
-// a published per-student reading in the student's own class; anything
-// else is "not_found". Student generations don't count toward the
-// teacher's rate limit (see question-rate-limit.ts).
+// Returns the student's cached set, or writes and caches it once. See
+// StudentQuestionsResult for every outcome: "not_found" for anything but a
+// published per-student reading (or a malformed id), "not_allowed" for a
+// student outside its class, "limit_reached" past the per-reading cap.
+// Student generations don't count toward the teacher's rate limit (see
+// question-rate-limit.ts).
 export async function getOrCreateStudentQuestions(
   readingId: string,
   studentId: string,

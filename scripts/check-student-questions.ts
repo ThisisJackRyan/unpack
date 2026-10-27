@@ -4,10 +4,16 @@
 // - getOrCreateStudentQuestions: parallel first opens call the model once
 //   per student and save exactly question_count rows, positions 1..N; a
 //   stale claim is taken over (and the old holder can't save); a failed
-//   model call releases the claim.
+//   model call releases the claim; a student from another class is
+//   "not_allowed".
+// - The per-reading cap: --cap-students parallel first opens by distinct
+//   students on one reading -> exactly STUDENT_SETS_PER_READING_LIMIT sets,
+//   the rest "limit_reached".
 // - The teacher generation rate limit: 40 parallel -> exactly 30.
 // - Shared questions: generate, delete with renumbering, the last-question
-//   rule, edit-page clearing, publish, and the lock after publish.
+//   rule, edit-page clearing, publish, the lock after publish, and title-only
+//   edits after publish.
+// - updateClassGrade: clears only drafts that follow the class grade.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-student-questions [flags]
 //
@@ -15,6 +21,13 @@
 //   --n=15         parallel opens per student per round (default 15)
 //   --rounds=3     rounds (default 3)
 //   --students=3   students (default 3)
+//   --cap-students=200  distinct students in the cap race (default 200)
+//   --cap-rounds=1      cap race rounds, each on a fresh reading (default 1)
+//   --db-concurrency=60 most DB requests in flight in the cap race (default
+//                       60). All opens start at once; this only keeps a
+//                       local Postgres (max_connections 100, one connection
+//                       per proxied request) from refusing connections.
+//                       Neon's pooler doesn't need it.
 //
 // Same host guard and NEON_FETCH_ENDPOINT handling as check-class-limit.ts;
 // set CHECK_CLASS_LIMIT_HOST to opt in for one Neon dev branch. Writes a
@@ -22,6 +35,8 @@
 // it, by cascade) at the end. Never run against production.
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
+import type { StatementExecutor } from "@/lib/link-rate-limit";
+import { neonExecutor } from "@/lib/neon-executor";
 import { recordQuestionGeneration } from "@/lib/question-generation-attempts";
 import { QUESTION_GENERATION_LIMIT } from "@/lib/question-rate-limit";
 import {
@@ -32,13 +47,17 @@ import {
   saveQuestionSet,
   updateSharedQuestion,
 } from "@/lib/shared-questions-db";
-import { updateDraftReading } from "@/lib/readings";
+import { updateClassGrade } from "@/lib/classes";
+import { saveReadingEdit } from "@/lib/readings";
 import type { ReadingRef } from "@/lib/shared-questions";
 import {
   getOrCreateStudentQuestions,
   postgresStudentQuestionStore,
 } from "@/lib/student-questions";
-import { CLAIM_STALE_SECONDS } from "@/lib/student-questions-core";
+import {
+  CLAIM_STALE_SECONDS,
+  STUDENT_SETS_PER_READING_LIMIT,
+} from "@/lib/student-questions-core";
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set. Refusing to run.");
@@ -92,6 +111,9 @@ function intFlag(name: string, fallback: number): number {
 const N = intFlag("n", 15);
 const ROUNDS = intFlag("rounds", 3);
 const STUDENTS = intFlag("students", 3);
+const CAP_STUDENTS = intFlag("cap-students", 200);
+const CAP_ROUNDS = intFlag("cap-rounds", 1);
+const DB_CONCURRENCY = intFlag("db-concurrency", 60);
 const COUNT = 3;
 const RUN_ID = Math.random().toString(36).slice(2, 10);
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
@@ -122,10 +144,10 @@ const claimStats = { won: 0, lost: 0 };
 const baseStore = postgresStudentQuestionStore();
 const countingStore = {
   ...baseStore,
-  async claim(r: string, s: string, t: string) {
-    const won = await baseStore.claim(r, s, t);
-    claimStats[won ? "won" : "lost"]++;
-    return won;
+  async claim(r: string, s: string, t: string, limit: number) {
+    const outcome = await baseStore.claim(r, s, t, limit);
+    claimStats[outcome === "claimed" ? "won" : "lost"]++;
+    return outcome;
   },
 };
 
@@ -275,12 +297,188 @@ async function checkFailureReleases(readingId: string, studentId: string) {
 }
 
 async function checkNotFound(readingId: string, draftId: string, otherStudent: string, student: string) {
-  console.log("\n== NOT FOUND CASES ==");
+  console.log("\n== NOT FOUND / NOT ALLOWED CASES ==");
   const a = await getOrCreateStudentQuestions(readingId, otherStudent, { write: mockWriter(otherStudent) });
   const b = await getOrCreateStudentQuestions(draftId, student, { write: mockWriter(student) });
-  check(a.status === "not_found", `student from another class: ${a.status}`);
+  check(a.status === "not_allowed", `student from another class: ${a.status} (want not_allowed)`);
   check(b.status === "not_found", `draft reading: ${b.status}`);
-  check(!modelCalls.get(otherStudent), "no model call for not_found");
+  check(!modelCalls.get(otherStudent), "no model call for not_allowed");
+  // The claim's own class check, even if the load check were skipped.
+  const claim = await baseStore.claim(readingId, otherStudent, "00000000-0000-4000-8000-0000000000c1", STUDENT_SETS_PER_READING_LIMIT);
+  const rows = await sql`
+    select 1 from question_generations where reading_id = ${readingId} and student_id = ${otherStudent}`;
+  check(claim === "refused" && rows.length === 0, `direct claim for another class's student: ${claim}, rows ${rows.length}`);
+}
+
+// neonExecutor with at most `limit` batches in flight.
+function throttled(limit: number): StatementExecutor {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async (statements) => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    active++;
+    try {
+      return await neonExecutor(statements);
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
+async function checkCap() {
+  const limit = STUDENT_SETS_PER_READING_LIMIT;
+  console.log(
+    `\n== PER-READING CAP: ${CAP_ROUNDS} round(s) x ${CAP_STUDENTS} distinct students at once, cap ${limit}, ` +
+      `${DB_CONCURRENCY} DB requests in flight ==`,
+  );
+  const store = postgresStudentQuestionStore(throttled(DB_CONCURRENCY));
+  let maxWaiting = 0;
+  let waitingNow = 0;
+  const capStore = {
+    ...store,
+    // Counts opens waiting on a claim at once, to show they contended.
+    async claim(r: string, s: string, t: string, l: number) {
+      maxWaiting = Math.max(maxWaiting, ++waitingNow);
+      try {
+        return await store.claim(r, s, t, l);
+      } finally {
+        waitingNow--;
+      }
+    },
+  };
+  const students: string[] = [];
+  const values = Array.from({ length: CAP_STUDENTS }, (_, i) => i);
+  const rows = await sql.query(
+    `insert into students (class_id, first_name, last_initials, name_key, session_token_hash)
+select $1::uuid, 'Cap' || i, 'Z', 'cap' || i || ' z', $2::text || i
+from unnest($3::int[]) as i
+returning id`,
+    [classId, `cap_${RUN_ID}_`, values],
+  );
+  for (const r of rows as Record<string, unknown>[]) students.push(String(r.id));
+  const wantLimited = Math.max(0, CAP_STUDENTS - limit);
+  const wantSets = Math.min(CAP_STUDENTS, limit);
+
+  for (let round = 1; round <= CAP_ROUNDS; round++) {
+    const { id: readingId } = await one<{ id: string }>(sql`
+      insert into readings (class_id, title, body_text, question_count, question_mode, status)
+      values (${classId}, ${`Cap check ${round}`}, ${BODY}, ${COUNT}, 'per_student', 'published')
+      returning id`);
+    let calls = 0;
+    const write = async () => {
+      calls++;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return TRICKY;
+    };
+    const started = Date.now();
+    const settled = await Promise.allSettled(
+      students.map((s) => getOrCreateStudentQuestions(readingId, s, { write, store: capStore })),
+    );
+    const ms = Date.now() - started;
+    const statuses: Record<string, number> = {};
+    const thrown: string[] = [];
+    for (const r of settled) {
+      if (r.status === "rejected") thrown.push(String((r.reason as Error)?.message));
+      else statuses[r.value.status] = (statuses[r.value.status] ?? 0) + 1;
+    }
+    const counts = await one<{ claims: number; done: number; sets: number; rows: number }>(sql`
+      select
+        (select count(*)::int from question_generations where reading_id = ${readingId}) as claims,
+        (select count(*)::int from question_generations where reading_id = ${readingId} and status = 'done') as done,
+        (select count(distinct student_id)::int from questions where reading_id = ${readingId}) as sets,
+        (select count(*)::int from questions where reading_id = ${readingId}) as rows`);
+    console.log(
+      `round ${round}: ${ms}ms, results ${JSON.stringify(statuses)}, threw ${thrown.length}${thrown.length ? ` (${[...new Set(thrown)].join("; ")})` : ""}, ` +
+        `model calls ${calls}, claims ${counts.claims} (done ${counts.done}), sets ${counts.sets}, question rows ${counts.rows}, ` +
+        `most claims in flight at once ${maxWaiting}`,
+    );
+    maxWaiting = 0;
+    check(thrown.length === 0, `round ${round}: no errors thrown (${thrown.length})`);
+    check(
+      (statuses.ready ?? 0) === wantSets && (statuses.limit_reached ?? 0) === wantLimited,
+      `round ${round}: ready ${statuses.ready ?? 0}, limit_reached ${statuses.limit_reached ?? 0} (want ${wantSets}/${wantLimited})`,
+    );
+    check(calls === wantSets, `round ${round}: model calls ${calls} (want ${wantSets})`);
+    check(
+      counts.claims === wantSets && counts.done === wantSets && counts.sets === wantSets &&
+        counts.rows === wantSets * COUNT,
+      `round ${round}: claims ${counts.claims}, done ${counts.done}, sets ${counts.sets}, rows ${counts.rows} (want ${wantSets}/${wantSets}/${wantSets}/${wantSets * COUNT})`,
+    );
+
+    if (round === 1 && wantLimited > 0) {
+      // At the cap: a student with a set still gets it, a refused one stays
+      // refused, and neither calls the model.
+      const refused = students.find((_, i) => settled[i].status === "fulfilled" &&
+        (settled[i] as PromiseFulfilledResult<{ status: string }>).value.status === "limit_reached")!;
+      const served = students.find((_, i) => settled[i].status === "fulfilled" &&
+        (settled[i] as PromiseFulfilledResult<{ status: string }>).value.status === "ready")!;
+      const again = await getOrCreateStudentQuestions(readingId, served, { write });
+      const still = await getOrCreateStudentQuestions(readingId, refused, { write });
+      check(
+        again.status === "ready" && still.status === "limit_reached" && calls === wantSets,
+        `at the cap: served student ${again.status}, refused student ${still.status}, model calls still ${calls}`,
+      );
+      // A failed write releases its slot: free one by deleting a set's claim
+      // and rows (as a release would for a pending claim), and the next
+      // student gets it.
+      await sql`delete from questions where reading_id = ${readingId} and student_id = ${served}`;
+      await sql`delete from question_generations where reading_id = ${readingId} and student_id = ${served}`;
+      const failed = await getOrCreateStudentQuestions(readingId, refused, {
+        write: async () => {
+          calls++;
+          throw new Error("mock model failure");
+        },
+      });
+      const { n: afterFail } = await one<{ n: number }>(sql`
+        select count(*)::int as n from question_generations where reading_id = ${readingId}`);
+      const retry = await getOrCreateStudentQuestions(readingId, refused, { write });
+      check(
+        failed.status === "error" && afterFail === limit - 1 && retry.status === "ready",
+        `freed slot: failed write ${failed.status}, claims after release ${afterFail} (want ${limit - 1}), retry ${retry.status}`,
+      );
+    }
+  }
+}
+
+async function checkClassGrade() {
+  console.log("\n== CLASS GRADE CHANGE ==");
+  const { id: gradeClass } = await one<{ id: string }>(sql`
+    insert into classes (teacher_id, name, grade_level, join_code)
+    values (${teacherId}, 'Grade check', '4', ${`QG${RUN_ID}`.toUpperCase().slice(0, 8)})
+    returning id`);
+  const add = async (title: string, grade: string | null, status: string) => {
+    const { id } = await one<{ id: string }>(sql`
+      insert into readings (class_id, title, body_text, grade_level, question_count, question_mode, status)
+      values (${gradeClass}, ${title}, ${BODY}, ${grade}::grade_level, 3, 'shared', ${status}::reading_status)
+      returning id`);
+    await sql`
+      insert into questions (reading_id, student_id, position, prompt)
+      select ${id}::uuid, null, p, 'Q' || p from generate_series(1, 3) as p`;
+    return id;
+  };
+  const follows = await add("Follows class", null, "draft");
+  const override = await add("Override", "7", "draft");
+  const published = await add("Published", null, "published");
+  const n = async (id: string) =>
+    (await one<{ n: number }>(sql`select count(*)::int as n from questions where reading_id = ${id}`)).n;
+
+  check(!(await updateClassGrade(gradeClass, "00000000-0000-4000-8000-0000000000ff", "6")), "another teacher can't change the grade");
+  check((await n(follows)) === 3, "nothing cleared for another teacher");
+  check(await updateClassGrade(gradeClass, teacherId, "6"), "grade changed 4 -> 6");
+  const { g } = await one<{ g: string }>(sql`select grade_level as g from classes where id = ${gradeClass}`);
+  const after = [await n(follows), await n(override), await n(published)];
+  check(
+    g === "6" && after.join(",") === "0,3,3",
+    `class grade ${g}; questions left: follows-class draft ${after[0]}, override draft ${after[1]}, published ${after[2]} (want 0,3,3)`,
+  );
+  await sql`
+    insert into questions (reading_id, student_id, position, prompt)
+    select ${follows}::uuid, null, p, 'Q' || p from generate_series(1, 3) as p`;
+  check(
+    (await updateClassGrade(gradeClass, teacherId, "6")) && (await n(follows)) === 3,
+    "same grade again clears nothing",
+  );
 }
 
 async function checkRateLimit() {
@@ -290,12 +488,14 @@ async function checkRateLimit() {
   );
   const allowed = results.filter((r) => r.status === "fulfilled" && r.value).length;
   const blocked = results.filter((r) => r.status === "fulfilled" && !r.value).length;
-  const thrown = results.filter((r) => r.status === "rejected").length;
+  const errors = results.flatMap((r) => (r.status === "rejected" ? [String((r.reason as Error)?.message)] : []));
+  const thrown = errors.length;
   const { n } = await one<{ n: number }>(sql`
     select count(*)::int as n from question_generation_attempts where teacher_id = ${teacherId}`);
   check(
     allowed === QUESTION_GENERATION_LIMIT && blocked === 10 && thrown === 0 && n === 30,
-    `allowed ${allowed}, blocked ${blocked}, threw ${thrown}, rows ${n} (want 30/10/0/30)`,
+    `allowed ${allowed}, blocked ${blocked}, threw ${thrown}, rows ${n} (want 30/10/0/30)` +
+      (thrown ? `: ${[...new Set(errors)].join("; ").slice(0, 300)}` : ""),
   );
 }
 
@@ -346,9 +546,9 @@ async function checkShared() {
   check(await updateSharedQuestion(ref, last.id, "Edited?"), "edit a question");
 
   const edit = { title: "Shared check", bodyText: BODY, gradeLevel: null, questionCount: 1, questionMode: "shared" as const };
-  await updateDraftReading(classId, readingId, teacherId, { ...edit, title: "Renamed" });
+  await saveReadingEdit(classId, readingId, teacherId, { ...edit, title: "Renamed" });
   check((await list()).length === 1, "title-only edit keeps the questions");
-  await updateDraftReading(classId, readingId, teacherId, { ...edit, questionCount: 2 });
+  await saveReadingEdit(classId, readingId, teacherId, { ...edit, questionCount: 2 });
   check((await list()).length === 0 && (await count()) === 2, "changing the count clears the questions");
   check(!(await publishReading(ref)), "publish refused after clearing");
 
@@ -359,7 +559,27 @@ async function checkShared() {
   check(!(await updateSharedQuestion(ref, q.id, "Late?")), "edit refused after publish");
   check(!(await deleteSharedQuestion(ref, q.id)), "delete refused after publish");
   check(!(await saveQuestionSet(ref, fp2, ["X?", "Y?"], "replace")), "regenerate all refused after publish");
-  check(!(await updateDraftReading(classId, readingId, teacherId, { ...edit, questionCount: 2 })), "edit page refused after publish");
+  const published = { ...edit, questionCount: 2 };
+  const title = async () =>
+    (await one<{ t: string }>(sql`select title as t from readings where id = ${readingId}`)).t;
+  for (const [what, change] of [
+    ["text", { bodyText: BODY + " More." }],
+    ["grade", { gradeLevel: "5" as const }],
+    ["count", { questionCount: 3 }],
+    ["mode", { questionMode: "per_student" as const }],
+  ] as const) {
+    const applied = await saveReadingEdit(classId, readingId, teacherId, { ...published, title: "Nope", ...change });
+    check(!applied && (await title()) === "Shared check", `published: ${what} change refused, title unchanged`);
+  }
+  check(
+    await saveReadingEdit(classId, readingId, teacherId, { ...published, title: "Renamed after publish" }),
+    "published: title-only edit saved",
+  );
+  check((await title()) === "Renamed after publish", `published: title is now "${await title()}"`);
+  check(
+    !(await saveReadingEdit(classId, readingId, "00000000-0000-4000-8000-0000000000ff", { ...published, title: "Hijack" })),
+    "published: another teacher can't rename it",
+  );
   check((await list()).join("|") === "1:P1?|2:P2?", "published questions unchanged");
 
   // Publish racing edits: whatever the order, never published with a
@@ -403,8 +623,10 @@ async function main(): Promise<void> {
     await checkStaleTakeover(readingId, staleStudent);
     await checkFailureReleases(readingId, failStudent);
     await checkNotFound(readingId, draftId, otherStudent, spare);
+    await checkCap();
     await checkRateLimit();
     await checkShared();
+    await checkClassGrade();
   } finally {
     await cleanup();
   }

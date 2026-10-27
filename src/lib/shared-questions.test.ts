@@ -4,12 +4,14 @@ import type { Statement } from "./link-rate-limit";
 import {
   checkPublish,
   deleteQuestionStatements,
-  editDraftStatements,
+  editApplied,
+  editReadingStatements,
   LAST_QUESTION_MESSAGE,
   lockDraftStatement,
   planDelete,
   PUBLISH_NEEDS_QUESTIONS_MESSAGE,
   publishStatements,
+  PUBLISHED_TITLE_ONLY_MESSAGE,
   READING_CHANGED_MESSAGE,
   updateQuestionStatements,
   writeSetStatements,
@@ -21,6 +23,7 @@ import {
   saveQuestionSet,
   updateSharedQuestion,
 } from "./shared-questions-db";
+import { saveReadingEdit } from "./readings";
 
 const REF: ReadingRef = {
   readingId: "00000000-0000-4000-8000-00000000000a",
@@ -37,7 +40,7 @@ const ALL_WRITES: [string, Statement[]][] = [
   ["update", updateQuestionStatements(REF, Q, "New?")],
   ["delete", deleteQuestionStatements(REF, Q)],
   ["publish", publishStatements(REF)],
-  ["edit", editDraftStatements(REF, { title: "T", bodyText: "x", gradeLevel: null, questionCount: 3, questionMode: "shared" })],
+  ["edit", editReadingStatements(REF, { title: "T", bodyText: "x", gradeLevel: null, questionCount: 3, questionMode: "shared" })],
 ];
 
 // What Postgres returns once the reading is published: the lock matches no
@@ -57,7 +60,9 @@ describe("publish lock", () => {
 
   it("every later write is guarded by the draft check (or only touches its own temp rows)", () => {
     for (const [name, statements] of ALL_WRITES) {
-      for (const s of statements.slice(1)) {
+      // The edit's published title update is checked in editReadingStatements.
+      const guarded = name === "edit" ? statements.slice(1, 3) : statements.slice(1);
+      for (const s of guarded) {
         const tempOnly = /position < 0/.test(s.text) && !/position > 0/.test(s.text);
         assert.ok(tempOnly || /status = 'draft'/.test(s.text), `${name}: ${s.text}`);
       }
@@ -140,8 +145,15 @@ describe("deleteQuestionStatements", () => {
   });
 });
 
-describe("editDraftStatements", () => {
-  const [, clear, update] = editDraftStatements(REF, {
+describe("editReadingStatements", () => {
+  const EDIT = {
+    title: "T",
+    bodyText: "body",
+    gradeLevel: "5" as const,
+    questionCount: 4,
+    questionMode: "shared" as const,
+  };
+  const [, clear, update, titleOnly] = editReadingStatements(REF, {
     title: "T",
     bodyText: "body",
     gradeLevel: "5",
@@ -163,6 +175,72 @@ describe("editDraftStatements", () => {
     assert.match(update.text, /r\.status = 'draft'/);
     assert.match(update.text, /returning r\.id$/);
     assert.deepEqual(update.params.slice(3), ["body", "5", 4, "shared", "T"]);
+  });
+
+  it("on a published reading changes only the title, and only if nothing else changed", () => {
+    assert.match(titleOnly.text, /^update readings r set title = \$8::text\nfrom classes c/);
+    assert.equal(/body_text =\s*\$4::text,|question_count = \$6::int,/.test(titleOnly.text), false);
+    assert.match(titleOnly.text, /r\.status = 'published'/);
+    assert.match(titleOnly.text, /r\.body_text = \$4::text/);
+    assert.match(titleOnly.text, /r\.grade_level is not distinct from \$5::grade_level/);
+    assert.match(titleOnly.text, /r\.question_count = \$6::int/);
+    assert.match(titleOnly.text, /r\.question_mode = \$7::question_mode/);
+    assert.match(titleOnly.text, /c\.teacher_id = \$3::uuid/);
+    assert.equal(/questions/.test(titleOnly.text), false);
+    assert.deepEqual(titleOnly.params, update.params);
+  });
+
+  it("applies when the draft update or the title update returns a row", () => {
+    assert.equal(editApplied([[{ id: 1 }], [], [{ id: 1 }], []]), true);
+    assert.equal(editApplied([[], [], [], [{ id: 1 }]]), true);
+    assert.equal(editApplied([[], [], [], []]), false);
+  });
+
+  // What Postgres does with the batch for a published reading: the lock
+  // and the draft writes match nothing; the title update matches only if
+  // every other field is what's saved.
+  const SAVED = { ...EDIT, title: "Old" };
+  function publishedReading() {
+    let title = SAVED.title;
+    const execute = async (statements: Statement[]) => {
+      const [, , , t] = statements;
+      const [, , , body, grade, count, mode, newTitle] = t.params;
+      const same =
+        body === SAVED.bodyText && grade === SAVED.gradeLevel &&
+        count === SAVED.questionCount && mode === SAVED.questionMode;
+      if (same) title = String(newTitle);
+      return [[], [], [], same ? [{ id: REF.readingId }] : []];
+    };
+    return { execute, title: () => title };
+  }
+
+  it("saves a title-only edit to a published reading", async () => {
+    const db = publishedReading();
+    assert.equal(
+      await saveReadingEdit(REF.classId, REF.readingId, REF.teacherId, { ...SAVED, title: "New" }, db.execute),
+      true,
+    );
+    assert.equal(db.title(), "New");
+  });
+
+  it("refuses any other change to a published reading", async () => {
+    for (const change of [
+      { bodyText: "other body" },
+      { gradeLevel: null },
+      { gradeLevel: "6" as const },
+      { questionCount: 3 },
+      { questionMode: "per_student" as const },
+    ]) {
+      const db = publishedReading();
+      const edit = { ...SAVED, title: "New", ...change };
+      assert.equal(
+        await saveReadingEdit(REF.classId, REF.readingId, REF.teacherId, edit, db.execute),
+        false,
+        JSON.stringify(change),
+      );
+      assert.equal(db.title(), "Old");
+    }
+    assert.equal(PUBLISHED_TITLE_ONLY_MESSAGE, "This reading is published. Only its title can be changed.");
   });
 });
 

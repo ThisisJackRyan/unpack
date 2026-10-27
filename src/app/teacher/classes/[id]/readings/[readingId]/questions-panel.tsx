@@ -36,6 +36,8 @@ type Running = { intent: QuestionIntent; questionId?: string };
 
 const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
 const quietButton = `${smallButton} text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950`;
+// primaryButton in red, for confirming a delete.
+const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-red-700 px-5 text-base font-semibold text-white transition-colors hover:bg-red-800 ${focusRing}`;
 
 const ROLE_LABELS: Record<QuestionRole, string> = {
   detail: "From the text",
@@ -45,7 +47,8 @@ const ROLE_LABELS: Record<QuestionRole, string> = {
 
 // Numbered, stacked question cards with inline edit and per-card actions
 // (modeled on the Google Gemini "Creating a quiz" flow), skeleton cards
-// while writing, and a confirm step before Regenerate all and Publish.
+// while writing, and a confirm step before Regenerate all, Publish, and
+// Delete.
 export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questions }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [running, setRunning] = useState<Running | null>(null);
@@ -160,6 +163,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
                 }}
                 regenerating={busy("regenerate_one", q.id)}
                 saving={busy("update", q.id)}
+                deleting={busy("delete", q.id)}
                 disabled={pending}
                 canDelete={questions.length > 1}
                 error={cardError(q.id)}
@@ -287,35 +291,42 @@ function ConfirmButton({
   isPending,
   disabled,
   describedBy,
+  buttonTitle,
   title,
   body,
   confirmLabel,
+  confirmClassName = primaryButton,
   intent,
+  questionId,
   dispatch,
   track,
   className,
 }: {
-  label: string;
+  label: ReactNode;
   pendingLabel: string;
   isPending: boolean;
   disabled: boolean;
   describedBy?: string;
+  buttonTitle?: string;
   title: string;
   body: string;
   confirmLabel: string;
+  confirmClassName?: string;
   intent: QuestionIntent;
+  questionId?: string;
   dispatch: Dispatch;
   track: (event: FormEvent<HTMLFormElement>) => void;
   className: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const id = `confirm-${intent}`;
+  const id = questionId ? `confirm-${intent}-${questionId}` : `confirm-${intent}`;
   return (
     <>
       <button
         type="button"
         disabled={disabled}
         aria-describedby={describedBy}
+        title={buttonTitle}
         aria-haspopup="dialog"
         onClick={() => dialogRef.current?.showModal()}
         className={className}
@@ -336,6 +347,7 @@ function ConfirmButton({
         </p>
         <IntentForm
           intent={intent}
+          questionId={questionId}
           dispatch={dispatch}
           track={track}
           onSubmit={() => dialogRef.current?.close()}
@@ -348,7 +360,7 @@ function ConfirmButton({
           >
             Cancel
           </button>
-          <button type="submit" className={primaryButton}>
+          <button type="submit" className={confirmClassName}>
             {confirmLabel}
           </button>
         </IntentForm>
@@ -365,6 +377,7 @@ function QuestionCard({
   onCancel,
   regenerating,
   saving,
+  deleting,
   disabled,
   canDelete,
   error,
@@ -378,6 +391,7 @@ function QuestionCard({
   onCancel: () => void;
   regenerating: boolean;
   saving: boolean;
+  deleting: boolean;
   disabled: boolean;
   canDelete: boolean;
   error?: string;
@@ -490,16 +504,26 @@ function QuestionCard({
                 <span className="sr-only"> question {question.position}</span>
               </button>
             </IntentForm>
-            <IntentForm intent="delete" questionId={question.id} dispatch={dispatch} track={track}>
-              <button
-                type="submit"
-                disabled={disabled || !canDelete}
-                title={canDelete ? undefined : LAST_QUESTION_MESSAGE}
-                className={`${smallButton} text-red-700 hover:bg-red-50`}
-              >
-                Delete<span className="sr-only"> question {question.position}</span>
-              </button>
-            </IntentForm>
+            <ConfirmButton
+              label={
+                <>
+                  Delete<span className="sr-only"> question {question.position}</span>
+                </>
+              }
+              pendingLabel="Deleting…"
+              isPending={deleting}
+              disabled={disabled || !canDelete}
+              buttonTitle={canDelete ? undefined : LAST_QUESTION_MESSAGE}
+              title="Delete this question?"
+              body="This can’t be undone."
+              confirmLabel="Delete"
+              confirmClassName={dangerButton}
+              intent="delete"
+              questionId={question.id}
+              dispatch={dispatch}
+              track={track}
+              className={`${smallButton} text-red-700 hover:bg-red-50`}
+            />
           </div>
         )}
       </div>

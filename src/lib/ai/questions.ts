@@ -18,10 +18,14 @@ import {
   QUESTION_EFFORT,
   QUESTION_MAX_TOKENS,
   QUESTION_WRITE_ATTEMPTS,
+  QUESTION_WRITE_DEADLINE_MS,
 } from "./settings";
 
+// The signal is the write's overall deadline. The SDK checks it before each
+// try and wakes from its backoff sleep when it fires.
 export type MessagesCreate = (
   params: Anthropic.MessageCreateParamsNonStreaming,
+  options: { signal: AbortSignal },
 ) => Promise<Anthropic.Message>;
 
 export type QuestionModel = { model: string; create: MessagesCreate };
@@ -54,11 +58,21 @@ export class QuestionWriterError extends Error {
 }
 
 // Maps anything thrown while writing questions to an error kind.
-// Most specific first: a timeout is a connection error, and a 529 is an
-// InternalServerError.
+// Most specific first: a timeout is a connection error, a 529 is an
+// InternalServerError, and the SDK's abort error is an APIError (the only
+// abort is the write deadline, so it's a timeout).
 export function questionErrorKind(error: unknown): QuestionErrorKind {
   if (error instanceof QuestionWriterError) return error.kind;
-  if (error instanceof Anthropic.APIConnectionTimeoutError) return "timeout";
+  if (
+    error instanceof Anthropic.APIConnectionTimeoutError ||
+    error instanceof Anthropic.APIUserAbortError
+  ) {
+    return "timeout";
+  }
+  // The deadline's own reason (TimeoutError), or a plain fetch abort.
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return "timeout";
+  }
   if (error instanceof Anthropic.APIConnectionError) return "failed";
   if (
     error instanceof Anthropic.AuthenticationError ||
@@ -73,7 +87,6 @@ export function questionErrorKind(error: unknown): QuestionErrorKind {
     if (error.status === 529 || error.type === "overloaded_error") return "busy";
     return "failed";
   }
-  if (error instanceof Error && error.name === "AbortError") return "timeout";
   return "failed";
 }
 
@@ -211,20 +224,45 @@ export function buildQuestionRequest(
   };
 }
 
+export type WriteOptions = {
+  // Tests pass a short deadline; the app uses QUESTION_WRITE_DEADLINE_MS.
+  deadlineMs?: number;
+};
+
+// Settles with the call, or rejects as soon as the signal fires, so the
+// deadline holds even if a call doesn't honor its signal.
+function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    call.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 // Calls the model, and once more if the output is invalid. Each try is a
 // fresh request with a note on what was wrong: we never echo the rejected
 // answer back, so no thinking blocks are replayed. API errors are not
 // caught here (the SDK has already retried them); they reach the caller.
+//
+// One deadline covers everything (see QUESTION_WRITE_DEADLINE_MS). When it
+// fires, the in-flight call is aborted and the write throws a timeout.
 async function writeValidated(
   model: QuestionModel,
   prompt: string,
   count: number,
   avoid: string[],
+  options: WriteOptions,
 ): Promise<string[]> {
+  const signal = AbortSignal.timeout(options.deadlineMs ?? QUESTION_WRITE_DEADLINE_MS);
   let problem: string | undefined;
   for (let attempt = 0; attempt < QUESTION_WRITE_ATTEMPTS; attempt++) {
+    signal.throwIfAborted();
     const text = problem ? prompt + retryNote(problem) : prompt;
-    const response = await model.create(buildQuestionRequest(model.model, text));
+    const response = await untilAborted(
+      model.create(buildQuestionRequest(model.model, text), { signal }),
+      signal,
+    );
     const parsed = parseQuestionsResponse(response, count, avoid);
     if (parsed.ok) return parsed.questions;
     problem = parsed.problem;
@@ -241,8 +279,9 @@ export type QuestionSetInput = {
 export function writeQuestionSet(
   model: QuestionModel,
   input: QuestionSetInput,
+  options: WriteOptions = {},
 ): Promise<string[]> {
-  return writeValidated(model, questionSetPrompt(input), input.count, []);
+  return writeValidated(model, questionSetPrompt(input), input.count, [], options);
 }
 
 export type ReplacementInput = {
@@ -261,6 +300,7 @@ export type ReplacementInput = {
 export async function writeReplacementQuestion(
   model: QuestionModel,
   input: ReplacementInput,
+  options: WriteOptions = {},
 ): Promise<string> {
   const replacing = input.current[input.position - 1] ?? "";
   const others = input.current.filter((_, i) => i !== input.position - 1);
@@ -272,6 +312,6 @@ export async function writeReplacementQuestion(
     replacing,
     others,
   });
-  const [question] = await writeValidated(model, prompt, 1, input.current);
+  const [question] = await writeValidated(model, prompt, 1, input.current, options);
   return question;
 }

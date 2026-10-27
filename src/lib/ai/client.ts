@@ -39,6 +39,6 @@ export function getQuestionModel(): QuestionModel {
   const client = cached.client;
   return {
     model: process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL,
-    create: (params) => client.messages.create(params),
+    create: (params, options) => client.messages.create(params, options),
   };
 }

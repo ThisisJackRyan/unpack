@@ -35,4 +35,4 @@ pnpm build     # production build
 pnpm test      # unit tests (no network; the Anthropic SDK is mocked)
 ```
 
-Copy `.env.example` to `.env.local` and fill it in. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`.
+Copy `.env.example` to `.env.local` and fill it in. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`. The question request (`output_config.effort`, strict tools, auto tool choice) targets current 5.x models; an older `ANTHROPIC_MODEL` may return a 400.

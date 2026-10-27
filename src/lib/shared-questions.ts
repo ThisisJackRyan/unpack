@@ -16,7 +16,7 @@
 // the shared set is either empty (not written yet) or exactly that long.
 // Writing a set inserts exactly question_count; deleting a question lowers
 // question_count by 1 in the same statement; editing the reading's text,
-// grade, count, or mode clears the set (see editDraftStatements).
+// grade, count, or mode clears the set (see editReadingStatements).
 
 import type { GradeLevel } from "./grade-levels";
 import type { Statement } from "./link-rate-limit";
@@ -30,6 +30,8 @@ export type ReadingRef = {
 
 export const PUBLISHED_LOCKED_MESSAGE =
   "This reading is published. Its questions are locked.";
+export const PUBLISHED_TITLE_ONLY_MESSAGE =
+  "This reading is published. Only its title can be changed.";
 export const LAST_QUESTION_MESSAGE = "A reading needs at least 1 question.";
 export const READING_CHANGED_MESSAGE =
   "This reading changed. Refresh the page and try again.";
@@ -213,13 +215,24 @@ export type DraftEdit = {
   questionMode: QuestionMode;
 };
 
-// Saves the edit page. If the text, grade override, count, or mode changed,
-// the shared set no longer fits the reading, so it is cleared in the same
-// transaction and the page asks for new questions. A title-only edit keeps
-// them. Published readings refuse every edit, title included (the lock
-// returns no row and the update requires a draft): one simple rule.
-// Applied when the last statement returns a row.
-export function editDraftStatements(ref: ReadingRef, edit: DraftEdit): Statement[] {
+// Saves the edit page, as one transaction.
+//
+// A draft (statements 1-3): if the text, grade override, count, or mode
+// changed, the shared set no longer fits the reading, so it is cleared and
+// the page asks for new questions. A title-only edit keeps them.
+//
+// A published reading (statement 4): only the title may change. The update
+// sets nothing but the title, and only while every other field still
+// equals what was sent, so any other change is refused, not dropped. It
+// never touches questions. Statements 1-3 are no-ops on it (the lock
+// returns no row and both writes require a draft), and statement 4 is a
+// no-op on a draft, so exactly one of 3 and 4 can apply. If a publish
+// commits while the teacher is editing a draft, a title-only save still
+// lands; anything more is refused.
+//
+// Applied when statement 3 or 4 returns a row (see editApplied). The
+// source link is never editable.
+export function editReadingStatements(ref: ReadingRef, edit: DraftEdit): Statement[] {
   return [
     lockDraftStatement(ref),
     {
@@ -262,7 +275,92 @@ returning r.id`,
         edit.title,
       ],
     },
+    {
+      text: `update readings r set title = $8::text
+from classes c
+where c.id = r.class_id and ${OWNED} and r.status = 'published'
+  and r.body_text = $4::text
+  and r.grade_level is not distinct from $5::grade_level
+  and r.question_count = $6::int
+  and r.question_mode = $7::question_mode
+returning r.id`,
+      params: [
+        ...refParams(ref),
+        edit.bodyText,
+        edit.gradeLevel,
+        edit.questionCount,
+        edit.questionMode,
+        edit.title,
+      ],
+    },
   ];
+}
+
+// Changes a class's grade level, as one transaction. Draft readings with
+// no grade override take the class's grade, so their shared questions no
+// longer fit and are cleared, the same rule as editing a draft's grade.
+// Readings with an override, and published readings, are untouched.
+// Nothing is cleared when the grade doesn't actually change.
+//
+// $1 class, $2 teacher, $3 new grade.
+//
+// 1. Lock the class row (owned), so two grade changes queue up.
+// 2. Lock the affected draft readings, with the same row lock every shared
+//    question write takes first (lockDraftStatement). A set being saved
+//    right now either commits before this (and step 3 deletes it) or waits
+//    here, then sees the new class grade and fails its fingerprint check
+//    (writeSetStatements), so a set for the old grade can't land after.
+//    Locks are taken class then readings; question writes never lock the
+//    class, so the two can't deadlock.
+// 3. Clear those drafts' shared questions, while the class still has its
+//    old grade (so "changed" is known).
+// 4. Update the grade. Applied when this returns a row.
+//
+// Not wired to any page yet: no page edits a class's grade today.
+export function classGradeChangeStatements(
+  classId: string,
+  teacherId: string,
+  gradeLevel: GradeLevel,
+): Statement[] {
+  const params = [classId, teacherId, gradeLevel];
+  const affected = `r.class_id = $1::uuid and r.status = 'draft' and r.grade_level is null
+  and exists (
+    select 1 from classes c
+    where c.id = $1::uuid and c.teacher_id = $2::uuid
+      and c.grade_level is distinct from $3::grade_level
+  )`;
+  return [
+    {
+      text: `select id from classes where id = $1::uuid and teacher_id = $2::uuid for update`,
+      params: [classId, teacherId],
+    },
+    {
+      text: `select r.id from readings r
+where ${affected}
+order by r.id
+for update of r`,
+      params,
+    },
+    {
+      text: `delete from questions q
+using readings r
+where q.reading_id = r.id and q.student_id is null
+  and ${affected}`,
+      params,
+    },
+    {
+      text: `update classes set grade_level = $3::grade_level
+where id = $1::uuid and teacher_id = $2::uuid
+returning id`,
+      params,
+    },
+  ];
+}
+
+// Did editReadingStatements apply, as a draft edit or a published title
+// edit?
+export function editApplied(results: Record<string, unknown>[][]): boolean {
+  return (results[2]?.length ?? 0) + (results[3]?.length ?? 0) > 0;
 }
 
 // Did the batch apply? Each builder's last meaningful statement returns

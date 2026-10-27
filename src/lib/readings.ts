@@ -3,8 +3,9 @@ import { and, desc, eq } from "drizzle-orm";
 import { db, getSql, schema } from "@/db";
 import type { Class, Reading } from "@/db/schema";
 import { isUuid } from "./classes";
+import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
-import { editDraftStatements } from "./shared-questions";
+import { editApplied, editReadingStatements } from "./shared-questions";
 import type { ReadingSettings } from "./validate-reading";
 
 // Server-only reading queries. Every one is scoped to the owning teacher in
@@ -105,20 +106,18 @@ export async function insertReading(
   return row && { id: row.id };
 }
 
-// Saves edits to a draft, clearing its shared questions if they no longer
-// fit (see editDraftStatements). Returns undefined (and changes nothing)
-// when the reading isn't the teacher's, isn't in that class, or is no
-// longer a draft.
-export async function updateDraftReading(
+// Saves the edit page: any change to a draft (clearing its shared
+// questions if they no longer fit), or a title-only change to a published
+// reading (see editReadingStatements). Returns false (and changes nothing)
+// when the reading isn't the teacher's or isn't in that class, or when it
+// is published and anything but the title changed.
+export async function saveReadingEdit(
   classId: string,
   readingId: string,
   teacherId: string,
-  draft: Omit<ReadingDraft, "sourceUrl">,
-): Promise<{ id: string } | undefined> {
-  if (!isUuid(classId) || !isUuid(readingId)) return undefined;
-  const results = await neonExecutor(
-    editDraftStatements({ classId, readingId, teacherId }, draft),
-  );
-  const row = results[results.length - 1]?.[0] as { id: string } | undefined;
-  return row && { id: row.id };
+  edit: Omit<ReadingDraft, "sourceUrl">,
+  execute: StatementExecutor = neonExecutor,
+): Promise<boolean> {
+  if (!isUuid(classId) || !isUuid(readingId)) return false;
+  return editApplied(await execute(editReadingStatements({ classId, readingId, teacherId }, edit)));
 }
