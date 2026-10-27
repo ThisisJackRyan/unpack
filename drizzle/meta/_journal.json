@@ -43,6 +43,13 @@
       "when": 1793096011300,
       "tag": "0005_teacher_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793099525216,
+      "tag": "0006_abuse_protection",
+      "breakpoints": true
     }
   ]
 }

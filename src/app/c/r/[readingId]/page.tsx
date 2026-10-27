@@ -105,6 +105,15 @@ export default async function StudentReadingPage({ params }: Props) {
           <p className={`${card} rounded-2xl px-6 py-10 text-center text-lg text-zinc-700`}>{view.message}</p>
         )}
 
+        {view.kind === "throttled" && (
+          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
+            <p aria-live="polite" className="text-lg text-zinc-700">
+              {view.message}
+            </p>
+            <RetryButton />
+          </div>
+        )}
+
         {view.kind === "error" && (
           <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
             <p aria-live="polite" className="text-lg text-zinc-700">

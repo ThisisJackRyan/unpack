@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
 import {
   PENDING_RETRY_AFTER_MS,
+  STUDENT_GENERATION_THROTTLED_MESSAGE,
   STUDENT_SETS_LIMITED_MESSAGE,
   type StudentQuestionsResult,
 } from "./student-questions-core";
@@ -26,6 +27,8 @@ describe("perStudentView", () => {
       [{ status: "ready", questions: QUESTIONS }, { kind: "questions", questions: QUESTIONS }],
       [{ status: "pending", retryAfterMs: 2000 }, { kind: "pending", retryAfterMs: 2000 }],
       [{ status: "limit_reached" }, { kind: "limit_reached", message: STUDENT_SETS_LIMITED_MESSAGE }],
+      [{ status: "calls_used_up" }, { kind: "limit_reached", message: STUDENT_SETS_LIMITED_MESSAGE }],
+      [{ status: "throttled" }, { kind: "throttled", message: STUDENT_GENERATION_THROTTLED_MESSAGE }],
       [
         { status: "error", kind: "not_configured", message: "Question writing isn’t set up yet." },
         { kind: "error", message: QUESTIONS_ERROR_MESSAGE },
