@@ -23,7 +23,9 @@
 //   past the cap make exactly 150 sets; another teacher can't raise it;
 //   --raises concurrent raises leave exactly one reading_cap_raises row
 //   and a limit of 300; a second raise is a no-op; then parallel opens
-//   past the new cap make exactly 300 in all.
+//   past the new cap make exactly 300 in all. The class page's badge
+//   reads Full at 150, nothing just after the raise, and Full at 300; the
+//   reading page shows full at 300 with no raise button.
 // - Teacher delete (the Clerk webhook's user.deleted, through
 //   handleClerkEvent): a teacher with a class, students, a published
 //   per-student reading with a row in every table under it, RESOLVED
@@ -51,7 +53,8 @@ import { countDraftsClearedByGradeChange, updateClassSettings } from "@/lib/clas
 import { deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
-import { deleteReading, getReadingCap, raiseReadingCap } from "@/lib/readings";
+import { capView } from "@/lib/reading-cap";
+import { deleteReading, getClassCapBadges, getReadingCap, raiseReadingCap } from "@/lib/readings";
 import { getOrCreateStudentQuestions, postgresStudentQuestionStore } from "@/lib/student-questions";
 import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "@/lib/student-questions-core";
 
@@ -452,6 +455,12 @@ async function checkCap() {
   check((await claims(readingId)) === from && (await setsSaved(readingId)) === from, `${from} claims and ${from} saved sets`);
   const capBefore = await getReadingCap(classId, teacherId, readingId);
   check(JSON.stringify(capBefore) === JSON.stringify({ used: from, limit: from, raised: false }), `the page sees full: ${JSON.stringify(capBefore)}`);
+  const badgesFull = await getClassCapBadges(classId, teacherId);
+  check(
+    badgesFull.size === 1 && JSON.stringify(badgesFull.get(readingId)) === JSON.stringify({ level: "full", used: from, limit: from }),
+    `the class page badges it Full: ${JSON.stringify([...badgesFull])}`,
+  );
+  check((await getClassCapBadges(classId, otherTeacherId)).size === 0, "another teacher sees no badges for the class");
 
   const intruder = await raiseReadingCap(classId, otherTeacherId, readingId);
   check(intruder.status === "not_found", `another teacher's raise: ${intruder.status}`);
@@ -476,6 +485,7 @@ async function checkCap() {
   }[];
   check(log.length === 1, `exactly one log row (got ${log.length})`);
   check(log[0]?.teacher_id === teacherId && log[0]?.from_limit === from && log[0]?.to_limit === to, `the log: ${from} -> ${to} by the owner`);
+  check((await getClassCapBadges(classId, teacherId)).size === 0, `after the raise (${from} of ${to}) the class page shows no badge`);
   const second = await raiseReadingCap(classId, teacherId, readingId);
   check(second.status === "already_raised" && second.limit === to, `a second raise is a no-op: ${JSON.stringify(second)}`);
   check(
@@ -496,6 +506,12 @@ async function checkCap() {
   check((repeat.ready ?? 0) === 10, "students who have a set still get it at the new cap");
   const capAfter = await getReadingCap(classId, teacherId, readingId);
   check(JSON.stringify(capAfter) === JSON.stringify({ used: to, limit: to, raised: true }), `the page sees the new limit: ${JSON.stringify(capAfter)}`);
+  check(capAfter !== undefined && capView(capAfter).kind === "raised_full", "...and shows it full at the new limit, with no button");
+  const badgesAfter = await getClassCapBadges(classId, teacherId);
+  check(
+    JSON.stringify(badgesAfter.get(readingId)) === JSON.stringify({ level: "full", used: to, limit: to }),
+    `the class page badges it Full at ${to}: ${JSON.stringify([...badgesAfter])}`,
+  );
 }
 
 // ---------------------------------------------------------------------------

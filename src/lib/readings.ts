@@ -6,9 +6,12 @@ import { isUuid } from "./classes";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import {
+  classCapBadges,
+  classCapsStatement,
   raiseReadingCapWith,
   readingCapFromRows,
   readingCapStatement,
+  type CapBadge,
   type RaiseCapResult,
   type ReadingCap,
 } from "./reading-cap";
@@ -151,6 +154,17 @@ export async function raiseReadingCap(
 ): Promise<RaiseCapResult> {
   if (!isUuid(classId) || !isUuid(readingId)) return { status: "not_found" };
   return raiseReadingCapWith(classId, teacherId, readingId, execute);
+}
+
+// The class page's cap badges: one grouped count over the class's
+// published per-student readings, scoped to the owner.
+export async function getClassCapBadges(
+  classId: string,
+  teacherId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<Map<string, CapBadge>> {
+  if (!isUuid(classId)) return new Map();
+  return classCapBadges(await execute([classCapsStatement(classId, teacherId)]));
 }
 
 // How full a reading is, for its teacher. Undefined when it isn't theirs.

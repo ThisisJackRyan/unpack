@@ -3,10 +3,9 @@ import Link from "next/link";
 import { questionRole } from "@/lib/ai/prompts";
 import { effectiveGradeLevel, gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel, questionModeLabel } from "@/lib/question-modes";
-import { capHeadline, capView, type CapView } from "@/lib/reading-cap";
+import { capDetail, capHeadline, capView, type CapView } from "@/lib/reading-cap";
 import { getReadingCap } from "@/lib/readings";
 import { listSharedQuestions } from "@/lib/shared-questions-db";
-import { STUDENT_SETS_LIMITED_MESSAGE } from "@/lib/student-questions-core";
 import type { StudentSet } from "@/lib/student-sets";
 import { listStudentSets } from "@/lib/student-sets-db";
 import { sourceHost } from "@/lib/validate-reading";
@@ -178,8 +177,10 @@ export default async function ReadingPage({ params }: Props) {
 }
 
 // The student set cap: a calm note near or at it, with the one-time
-// raise, and the new limit after. Not red: nothing is lost. The headline
-// is a live region, so the change after a raise is announced.
+// raise, and the new limit after (full again at the new limit: no
+// button, it can't go higher). Amber while the raise is still there to
+// use; indigo after. Not red: nothing is lost. The headline is a live
+// region, so the change after a raise is announced.
 function CapPanel({
   view,
   raiseAction,
@@ -187,7 +188,7 @@ function CapPanel({
   view: Exclude<CapView, { kind: "none" }>;
   raiseAction: () => Promise<{ message?: string; error?: string }>;
 }) {
-  const raised = view.kind === "raised";
+  const raised = view.kind === "raised" || view.kind === "raised_full";
   return (
     <section
       aria-labelledby="cap-heading"
@@ -199,15 +200,9 @@ function CapPanel({
         <h2 id="cap-heading" aria-live="polite" className="text-lg font-semibold text-zinc-950">
           {capHeadline(view)}
         </h2>
-        <p className="text-base text-zinc-700">
-          {view.kind === "full"
-            ? `New students who open it now see “${STUDENT_SETS_LIMITED_MESSAGE}” Students who already have their questions keep them.`
-            : view.kind === "near"
-              ? `Once ${view.limit} students have their own questions, new students who open it see “${STUDENT_SETS_LIMITED_MESSAGE}”`
-              : `${view.used} of ${view.limit} students have their own questions. The limit can only be raised once.`}
-        </p>
+        <p className="text-base text-zinc-700">{capDetail(view)}</p>
       </div>
-      {!raised && <RaiseCapButton action={raiseAction} raiseTo={view.raiseTo} />}
+      {(view.kind === "near" || view.kind === "full") && <RaiseCapButton action={raiseAction} raiseTo={view.raiseTo} />}
     </section>
   );
 }

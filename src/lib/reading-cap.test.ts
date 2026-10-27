@@ -3,7 +3,14 @@ import { describe, it } from "node:test";
 import {
   CAP_NEAR_THRESHOLD,
   capAlreadyRaisedMessage,
+  capBadgeDetail,
+  capBadgeLabel,
+  capDetail,
   capHeadline,
+  capLevel,
+  capNearThreshold,
+  classCapBadges,
+  classCapsStatement,
   capRaisedMessage,
   capView,
   raiseCapStatement,
@@ -65,14 +72,93 @@ describe("the reading's cap", () => {
     assert.deepEqual(capView({ used: 135, limit: 150, raised: false }), { kind: "near", used: 135, limit: 150, raiseTo: 300 });
     assert.deepEqual(capView({ used: 150, limit: 150, raised: false }), { kind: "full", used: 150, limit: 150, raiseTo: 300 });
     assert.deepEqual(capView({ used: 150, limit: 300, raised: true }), { kind: "raised", used: 150, limit: 300 });
-    assert.deepEqual(capView({ used: 300, limit: 300, raised: true }), { kind: "raised", used: 300, limit: 300 });
+    assert.deepEqual(capView({ used: 299, limit: 300, raised: true }), { kind: "raised", used: 299, limit: 300 });
+    assert.deepEqual(capView({ used: 300, limit: 300, raised: true }), { kind: "raised_full", used: 300, limit: 300 });
   });
 
   it("has calm copy", () => {
     assert.equal(capHeadline({ kind: "full", used: 150, limit: 150, raiseTo: 300 }), "This reading is full (150 students)");
     assert.equal(capHeadline({ kind: "near", used: 140, limit: 150, raiseTo: 300 }), "This reading is almost full (140 of 150 students)");
     assert.equal(capHeadline({ kind: "raised", used: 151, limit: 300 }), "Limit raised to 300 students");
+    assert.equal(capHeadline({ kind: "raised_full", used: 300, limit: 300 }), "This reading is full (300 students)");
     assert.equal(capRaisedMessage(300), "Limit raised to 300 students.");
     assert.equal(capAlreadyRaisedMessage(300), "The limit was already raised to 300 students.");
+  });
+
+  it("says what students see and whether it can go higher", () => {
+    const asked = "“Ask your teacher for help with this one.”";
+    assert.equal(
+      capDetail({ kind: "full", used: 150, limit: 150, raiseTo: 300 }),
+      `New students who open it now see ${asked} Students who already have their questions keep them.`,
+    );
+    assert.equal(
+      capDetail({ kind: "near", used: 140, limit: 150, raiseTo: 300 }),
+      `Once 150 students have their own questions, new students who open it see ${asked}`,
+    );
+    assert.equal(
+      capDetail({ kind: "raised", used: 151, limit: 300 }),
+      "151 of 300 students have their own questions. The limit can only be raised once.",
+    );
+    assert.equal(
+      capDetail({ kind: "raised_full", used: 300, limit: 300 }),
+      `New students who open it now see ${asked} Students who already have their questions keep them. The limit was raised once already, so it can’t go higher.`,
+    );
+  });
+});
+
+describe("the class page's cap badges", () => {
+  it("is near 15 students short of either limit, full at it", () => {
+    assert.equal(capNearThreshold(150), CAP_NEAR_THRESHOLD);
+    assert.equal(capNearThreshold(300), 285);
+    assert.equal(capLevel(134, 150), "ok");
+    assert.equal(capLevel(135, 150), "near");
+    assert.equal(capLevel(150, 150), "full");
+    assert.equal(capLevel(151, 300), "ok");
+    assert.equal(capLevel(284, 300), "ok");
+    assert.equal(capLevel(285, 300), "near");
+    assert.equal(capLevel(300, 300), "full");
+  });
+
+  it("agrees with the panel on an unraised reading", () => {
+    for (const used of [0, 134, 135, 149, 150]) {
+      const kind = capView({ used, limit: 150, raised: false }).kind;
+      const level = capLevel(used, 150);
+      assert.equal(kind === "none" ? "ok" : kind, level);
+    }
+  });
+
+  it("is one grouped count, owner-scoped, over published per-student readings", () => {
+    const s = classCapsStatement("c1", "t1");
+    assert.match(s.text, /count\(\*\)::int as used/);
+    assert.match(s.text, /coalesce\(max\(x\.to_limit\), \$3::int\)::int as cap/);
+    assert.match(s.text, /join question_generations g on g\.reading_id = r\.id/);
+    assert.match(s.text, /left join reading_cap_raises x on x\.reading_id = r\.id/);
+    assert.match(s.text, /r\.class_id = \$1::uuid and c\.teacher_id = \$2::uuid/);
+    assert.match(s.text, /r\.status = 'published' and r\.question_mode = 'per_student'/);
+    assert.match(s.text, /group by r\.id$/);
+    assert.deepEqual(s.params, ["c1", "t1", 150]);
+  });
+
+  it("keeps only readings near or at their limit", () => {
+    const badges = classCapBadges([
+      [
+        { reading_id: "a", used: 10, cap: 150 },
+        { reading_id: "b", used: 140, cap: 150 },
+        { reading_id: "c", used: 150, cap: 150 },
+        { reading_id: "d", used: 200, cap: 300 },
+        { reading_id: "e", used: 290, cap: 300 },
+        { reading_id: "f", used: 300, cap: 300 },
+      ],
+    ]);
+    assert.deepEqual([...badges.keys()], ["b", "c", "e", "f"]);
+    assert.deepEqual(badges.get("e"), { level: "near", used: 290, limit: 300 });
+    assert.deepEqual(badges.get("f"), { level: "full", used: 300, limit: 300 });
+    assert.equal(classCapBadges([[]]).size, 0);
+  });
+
+  it("has short, calm copy", () => {
+    assert.equal(capBadgeLabel("near"), "Almost full");
+    assert.equal(capBadgeLabel("full"), "Full");
+    assert.equal(capBadgeDetail({ level: "near", used: 140, limit: 150 }), "140 of 150 students have their own questions");
   });
 });

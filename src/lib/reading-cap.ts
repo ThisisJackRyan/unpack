@@ -25,11 +25,21 @@
 // exact: never over 150 before the raise, never over 300 after.
 
 import type { Statement, StatementExecutor } from "./link-rate-limit";
-import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "./student-questions-core";
+import {
+  STUDENT_SETS_LIMITED_MESSAGE,
+  STUDENT_SETS_PER_READING_LIMIT,
+  STUDENT_SETS_RAISED_LIMIT,
+} from "./student-questions-core";
 
 // The button shows from here on (90% of the default cap), so a teacher
 // can raise the limit before a student is turned away.
 export const CAP_NEAR_THRESHOLD = Math.ceil(STUDENT_SETS_PER_READING_LIMIT * 0.9);
+
+// "Almost full" for any limit: the same 15 students short of it as the
+// panel's threshold on the default cap. 135 of 150, 285 of 300.
+export function capNearThreshold(limit: number): number {
+  return Math.max(0, limit - (STUDENT_SETS_PER_READING_LIMIT - CAP_NEAR_THRESHOLD));
+}
 
 export const CAP_RAISE_FAILED_MESSAGE = "We couldn’t raise the limit. Please try again.";
 
@@ -112,20 +122,90 @@ export function readingCapFromRows(results: Record<string, unknown>[][]): Readin
 // - "near" / "full": not raised yet, at CAP_NEAR_THRESHOLD or more, or at
 //   the cap. A note and the "Raise the limit" button.
 // - "raised": the new limit, with how full it is. No button.
+// - "raised_full": raised, and full at the new limit. A note that it's
+//   full and can't go higher. No button.
 export type CapView =
   | { kind: "none" }
   | { kind: "near" | "full"; used: number; limit: number; raiseTo: number }
-  | { kind: "raised"; used: number; limit: number };
+  | { kind: "raised" | "raised_full"; used: number; limit: number };
 
 export function capView(cap: ReadingCap): CapView {
-  if (cap.raised) return { kind: "raised", used: cap.used, limit: cap.limit };
+  if (cap.raised) return { kind: cap.used >= cap.limit ? "raised_full" : "raised", used: cap.used, limit: cap.limit };
   if (cap.used >= cap.limit) return { kind: "full", used: cap.used, limit: cap.limit, raiseTo: STUDENT_SETS_RAISED_LIMIT };
   if (cap.used >= CAP_NEAR_THRESHOLD) return { kind: "near", used: cap.used, limit: cap.limit, raiseTo: STUDENT_SETS_RAISED_LIMIT };
   return { kind: "none" };
 }
 
 export function capHeadline(view: Exclude<CapView, { kind: "none" }>): string {
-  if (view.kind === "full") return `This reading is full (${view.limit} students)`;
+  if (view.kind === "full" || view.kind === "raised_full") return `This reading is full (${view.limit} students)`;
   if (view.kind === "near") return `This reading is almost full (${view.used} of ${view.limit} students)`;
   return `Limit raised to ${view.limit} students`;
+}
+
+// The line under the headline.
+export function capDetail(view: Exclude<CapView, { kind: "none" }>): string {
+  switch (view.kind) {
+    case "full":
+      return `New students who open it now see “${STUDENT_SETS_LIMITED_MESSAGE}” Students who already have their questions keep them.`;
+    case "near":
+      return `Once ${view.limit} students have their own questions, new students who open it see “${STUDENT_SETS_LIMITED_MESSAGE}”`;
+    case "raised":
+      return `${view.used} of ${view.limit} students have their own questions. The limit can only be raised once.`;
+    case "raised_full":
+      return `New students who open it now see “${STUDENT_SETS_LIMITED_MESSAGE}” Students who already have their questions keep them. The limit was raised once already, so it can’t go higher.`;
+  }
+}
+
+// The class page's reading list: a small badge on a published per-student
+// reading near or at its limit (the default or the raised one). Near is
+// from capNearThreshold of whichever limit applies, so on an unraised
+// reading the badge and the panel agree.
+export type CapLevel = "ok" | "near" | "full";
+
+export function capLevel(used: number, limit: number): CapLevel {
+  if (used >= limit) return "full";
+  if (used >= capNearThreshold(limit)) return "near";
+  return "ok";
+}
+
+export type CapBadge = { level: Exclude<CapLevel, "ok">; used: number; limit: number };
+
+export function capBadgeLabel(level: CapBadge["level"]): string {
+  return level === "full" ? "Full" : "Almost full";
+}
+
+// Read after the label by screen readers, and the badge's hover title.
+export function capBadgeDetail(badge: CapBadge): string {
+  return `${badge.used} of ${badge.limit} students have their own questions`;
+}
+
+// One grouped count for every published per-student reading in the class
+// that has any claims, with its limit. Scoped to the owning teacher.
+// $1 class, $2 teacher, $3 default cap.
+export function classCapsStatement(classId: string, teacherId: string): Statement {
+  return {
+    text: `select r.id as reading_id, count(*)::int as used,
+  coalesce(max(x.to_limit), $3::int)::int as cap
+from readings r
+join classes c on c.id = r.class_id
+join question_generations g on g.reading_id = r.id
+left join reading_cap_raises x on x.reading_id = r.id
+where r.class_id = $1::uuid and c.teacher_id = $2::uuid
+  and r.status = 'published' and r.question_mode = 'per_student'
+group by r.id`,
+    params: [classId, teacherId, STUDENT_SETS_PER_READING_LIMIT],
+  };
+}
+
+// Reading id to its badge, only for readings near or at their limit.
+export function classCapBadges(results: Record<string, unknown>[][]): Map<string, CapBadge> {
+  const badges = new Map<string, CapBadge>();
+  for (const row of results[0] ?? []) {
+    const cap = Number(row.cap);
+    const limit = Number.isInteger(cap) && cap > 0 ? cap : STUDENT_SETS_PER_READING_LIMIT;
+    const used = Number(row.used ?? 0);
+    const level = capLevel(used, limit);
+    if (level !== "ok") badges.set(String(row.reading_id), { level, used, limit });
+  }
+  return badges;
 }

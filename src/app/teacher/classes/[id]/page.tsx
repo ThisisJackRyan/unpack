@@ -6,8 +6,10 @@ import { countDraftsClearedByGradeChange } from "@/lib/classes";
 import { READING_DELETED_FLAG, READING_DELETED_MESSAGE } from "@/lib/reading-delete";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel, questionModeLabel } from "@/lib/question-modes";
-import { listReadings, type ReadingListItem } from "@/lib/readings";
+import type { CapBadge as CapBadgeData } from "@/lib/reading-cap";
+import { getClassCapBadges, listReadings, type ReadingListItem } from "@/lib/readings";
 import { getOrCreateTeacher } from "@/lib/teacher";
+import { CapBadge } from "@/components/cap-badge";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { backLink, card, focusRing, primaryButton } from "@/components/ui";
 import { saveClassSettingsAction } from "./class-settings/actions";
@@ -33,10 +35,11 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
   const { notice } = await searchParams;
   const found = await loadClass(id);
   const teacher = await getOrCreateTeacher();
-  const [readings, openChallenges, draftsToClear] = await Promise.all([
+  const [readings, openChallenges, draftsToClear, capBadges] = await Promise.all([
     listReadings(found.id, teacher.id),
     countOpenChallenges(found.id, teacher.id),
     countDraftsClearedByGradeChange(found.id, teacher.id),
+    getClassCapBadges(found.id, teacher.id),
   ]);
   const readingDeleted = notice === READING_DELETED_FLAG;
   const newReadingHref = `/teacher/classes/${found.id}/readings/new`;
@@ -156,7 +159,7 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
         ) : (
           <ul className={`${card} divide-y divide-zinc-200 overflow-hidden`}>
             {readings.map((r) => (
-              <ReadingRow key={r.id} classId={found.id} reading={r} />
+              <ReadingRow key={r.id} classId={found.id} reading={r} capBadge={capBadges.get(r.id)} />
             ))}
           </ul>
         )}
@@ -220,9 +223,11 @@ function ToolLink({
 function ReadingRow({
   classId,
   reading,
+  capBadge,
 }: {
   classId: string;
   reading: ReadingListItem;
+  capBadge?: CapBadgeData;
 }) {
   return (
     <li>
@@ -241,7 +246,10 @@ function ReadingRow({
             {questionModeLabel(reading.questionMode)}
           </span>
         </span>
-        <ReadingStatusBadge status={reading.status} />
+        <span className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {capBadge && <CapBadge badge={capBadge} />}
+          <ReadingStatusBadge status={reading.status} />
+        </span>
       </Link>
     </li>
   );
