@@ -6,7 +6,8 @@
 // a claim and a commit under one advisory lock, nothing after a pass.
 // Differences, all in the statements below:
 // - Scoped to the owner: every statement checks self_readings.account_id,
-//   so another account's reading is not_found.
+//   so another account's reading is not_found. The claim and the commit
+//   also check, in the statement, that the account is a self-learner now.
 // - No challenges, no one more try: the limits are always MAX_TRIES and
 //   EFFORT_CHECK_LIMIT.
 // - The reading's status is settled in the same transaction as the commit
@@ -56,7 +57,14 @@ export function selfEffortLockStatement(readingId: string): Statement {
 }
 
 // $1 account, $2 reading throughout.
-const OWNED = `exists (select 1 from self_readings where id = $2::uuid and account_id = $1::uuid)`;
+// The reading is this account's, and the account is a self-learner right
+// now. Checked inside the claim and the commit themselves (as the create
+// does), so a role switch or another account's id between the page load
+// and the write can't save anything.
+const OWNED = `exists (
+  select 1 from self_readings r join teachers t on t.id = r.account_id
+  where r.id = $2::uuid and r.account_id = $1::uuid and t.role = 'self_learner'
+)`;
 const NOT_PASSED = `not exists (
   select 1 from self_attempts where reading_id = $2::uuid and account_id = $1::uuid and result = 'pass'
 )`;
@@ -169,6 +177,7 @@ export function selfCommitStatements(input: SaveInput): Statement[] {
   update self_effort_checks set finished_at = now(), outcome = $5::text
   where id = $3::uuid and account_id = $1::uuid and reading_id = $2::uuid
     and finished_at is null and created_at > now() - make_interval(secs => $6::int)
+    and ${OWNED}
     and ${TRIES} < $7::int
     and ${NOT_PASSED}
   returning id

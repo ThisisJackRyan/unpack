@@ -33,12 +33,14 @@
 // accounts named test_self_*_<run> and deletes them (and everything under
 // them) at the end through the webhook's delete. Never run against
 // production.
+import { randomUUID } from "node:crypto";
 import { getSql } from "@/db";
 import { setRoleOutcome, setRoleStatements, type AccountRole, type SetRoleOutcome } from "@/lib/account-role";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
 import { deletedAccountRows, deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import { neonExecutor } from "@/lib/neon-executor";
-import { soloStage } from "@/lib/self-answers-core";
+import { selfClaimCheckStatements, selfCommitStatements, soloStage } from "@/lib/self-answers-core";
+import { claimOutcome, committedTry } from "@/lib/submit-answers-core";
 import { allowanceFor } from "@/lib/self-allowance";
 import {
   createSelfReading,
@@ -333,6 +335,52 @@ async function checkSoloFlow() {
   );
 }
 
+// A role switch or another account's id between the read and the write:
+// the claim and the commit re-check both in the statement, so nothing is
+// saved.
+async function checkRoleAndOwnerAtWrite() {
+  console.log("\n== (e2) ROLE AND OWNER AT WRITE TIME ==");
+  const readingId = await rawReading(bId, "Switch mid-check");
+  const questions = await readyQuestions(bId, readingId);
+  // The account switches to teacher while the check runs.
+  const switching = async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+    await sql`update teachers set role = 'teacher' where id = ${bId}`;
+    return checker(true)(input);
+  };
+  const mid = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: switching });
+  const saved = await one<{ n: number }>(sql`select count(*)::int as n from self_attempts where reading_id = ${readingId}`);
+  check(mid.status === "check_failed" && saved.n === 0, `a switch to teacher mid-check saves no try (${mid.status}, ${saved.n} saved)`);
+  const asTeacher = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: checker(true) });
+  const claims = await one<{ n: number }>(
+    sql`select count(*)::int as n from self_effort_checks where reading_id = ${readingId} and finished_at is null and created_at > now() - interval '1 minute'`,
+  );
+  check(asTeacher.status === "not_found", `as a teacher the claim itself refuses: ${asTeacher.status} (${claims.n} live claim left from the switch)`);
+  await sql`update teachers set role = 'self_learner' where id = ${bId}`;
+
+  // A's id against B's reading, straight at the statements: no claim, and
+  // a commit with B's live claim id but A's account saves nothing.
+  const claimId = randomUUID();
+  const foreignClaim = claimOutcome(await neonExecutor(selfClaimCheckStatements(aId, readingId, claimId)));
+  check(foreignClaim === "not_found", `another account's claim on the reading: ${foreignClaim}`);
+  await sql`update self_effort_checks set finished_at = now(), outcome = 'error' where reading_id = ${readingId} and finished_at is null`;
+  const ownClaim = randomUUID();
+  const own = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, readingId, ownClaim)));
+  const foreignCommit = committedTry(
+    await neonExecutor(
+      selfCommitStatements({
+        studentId: aId,
+        readingId,
+        claimId: ownClaim,
+        attemptId: randomUUID(),
+        passed: true,
+        verdicts: questions.map((q) => ({ questionId: q.id, text: "x", pass: true, nudge: "" })),
+      }),
+    ),
+  );
+  const after = await one<{ n: number }>(sql`select count(*)::int as n from self_attempts where reading_id = ${readingId}`);
+  check(own === "claimed" && foreignCommit === null && after.n === 0, `a commit under another account's id saves nothing (${own}, ${foreignCommit}, ${after.n})`);
+}
+
 async function fullSelfLearner(prefix: string): Promise<string> {
   const id = await newAccount(prefix, "self_learner");
   const readingId = await rawReading(id, `${prefix} reading`);
@@ -402,6 +450,7 @@ async function main(): Promise<void> {
     await checkIsolation();
     await checkAllowance();
     await checkSoloFlow();
+    await checkRoleAndOwnerAtWrite();
     await checkDelete();
   } finally {
     await cleanup();

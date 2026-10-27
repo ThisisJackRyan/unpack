@@ -20,7 +20,8 @@
 //    request wins; the rest get pending (or rate_limited).
 // 3. The winner calls the model with no transaction open.
 // 4. Commit, in one statement: clear the claim and insert the set, only
-//    while this token still holds it. The unique (reading, position) is
+//    while this token still holds it and the account is still a
+//    self-learner (a role switch mid-write saves nothing). The unique (reading, position) is
 //    the backstop.
 // 5. On a model error, clear the claim (only if this token holds it), so
 //    the next open (Try again) can claim again. Every claim counted toward
@@ -176,12 +177,12 @@ order by q.position`,
   };
 }
 
-// The reading is the account's, has no questions, and no live claim.
-// $n: CLAIM_STALE_SECONDS.
+// The reading is the account's, the account is a self-learner now, and
+// the reading has no questions and no live claim. $n: CLAIM_STALE_SECONDS.
 function claimable(n: number): string {
   return `exists (
-  select 1 from self_readings r
-  where r.id = $2::uuid and r.account_id = $1::uuid
+  select 1 from self_readings r join teachers t on t.id = r.account_id
+  where r.id = $2::uuid and r.account_id = $1::uuid and t.role = 'self_learner'
     and not exists (select 1 from self_questions q where q.reading_id = r.id)
     and (r.questions_claim_token is null or r.questions_claimed_at < now() - make_interval(secs => $${n}::int))
 )`;
@@ -234,7 +235,10 @@ where teacher_id = $1::uuid
     {
       // $3 stale seconds, $4 window minutes.
       text: `select
-  exists (select 1 from self_readings where id = $2::uuid and account_id = $1::uuid) as owned,
+  exists (
+    select 1 from self_readings r join teachers t on t.id = r.account_id
+    where r.id = $2::uuid and r.account_id = $1::uuid and t.role = 'self_learner'
+  ) as owned,
   exists (
     select 1 from self_questions q join self_readings r on r.id = q.reading_id
     where q.reading_id = $2::uuid and r.account_id = $1::uuid
@@ -272,6 +276,7 @@ export function selfCommitStatement(accountId: string, readingId: string, token:
     text: `with held as (
   update self_readings set questions_claim_token = null, questions_claimed_at = null
   where id = $2::uuid and account_id = $1::uuid and questions_claim_token = $3::uuid
+    and exists (select 1 from teachers t where t.id = $1::uuid and t.role = 'self_learner')
   returning id
 )
 insert into self_questions (reading_id, position, prompt)

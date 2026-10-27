@@ -167,6 +167,14 @@ describe("self question statements", () => {
     assert.match(why.text, /as owned/);
   });
 
+  it("the claim, its report, and the commit re-check the self-learner role in the statement", () => {
+    const role = /join teachers t on t\.id = r\.account_id\n  where r\.id = \$2::uuid and r\.account_id = \$1::uuid and t\.role = 'self_learner'/;
+    assert.match(claim.text, role);
+    assert.match(why.text, /t\.role = 'self_learner'\n  \) as owned/);
+    const commit = selfCommitStatement(ACCOUNT, READING, "t1", PROMPTS);
+    assert.match(commit.text, /and exists \(select 1 from teachers t where t\.id = \$1::uuid and t\.role = 'self_learner'\)\n  returning id/);
+  });
+
   it("selfClaimOutcome says why", () => {
     assert.equal(selfClaimOutcome([[], [{ id: READING }], [], []]), "claimed");
     assert.equal(selfClaimOutcome([[], [], [], [{ owned: false }]]), "not_found");

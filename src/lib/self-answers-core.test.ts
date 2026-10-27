@@ -235,6 +235,19 @@ describe("self store statements", () => {
     }
   });
 
+  it("the claim, its report, and the commit check ownership and the self-learner role in the statement", () => {
+    const owned = "select 1 from self_readings r join teachers t on t.id = r.account_id\n  where r.id = $2::uuid and r.account_id = $1::uuid and t.role = 'self_learner'";
+    const [, insert, why] = selfClaimCheckStatements(ACCOUNT, READING, "c1");
+    assert.ok(insert.text.includes(`where exists (\n  ${owned}\n)`), insert.text);
+    assert.ok(why.text.includes(owned));
+    const [, commit] = selfCommitStatements(input);
+    // In the claim's update, so the attempt and its answers are only
+    // inserted for an owned reading of a self-learner.
+    const update = commit.text.slice(0, commit.text.indexOf("returning id"));
+    assert.ok(update.includes(owned), commit.text);
+    assert.match(update, /account_id = \$1::uuid and reading_id = \$2::uuid/);
+  });
+
   it("claim and commit take the reading's advisory lock first", () => {
     for (const batch of [selfClaimCheckStatements(ACCOUNT, READING, "c1"), selfCommitStatements(input), selfReleaseCheckStatements(ACCOUNT, READING, "c1")]) {
       assert.equal(batch[0].text, "select pg_advisory_xact_lock($1::int, hashtext($2::text))");
