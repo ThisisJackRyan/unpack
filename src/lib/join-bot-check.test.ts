@@ -175,7 +175,7 @@ describe("botCheckMessage", () => {
     assert.equal(botCheckMessage("unavailable"), BOT_CHECK_FAILED_MESSAGE);
     assert.equal(botCheckMessage("misconfigured"), BOT_CHECK_FAILED_MESSAGE);
     for (const m of [BOT_CHECK_MISSING_MESSAGE, BOT_CHECK_FAILED_MESSAGE]) {
-      assert.doesNotMatch(m, /'|—/);
+      assert.doesNotMatch(m, /'|\u2014/);
     }
   });
 });
