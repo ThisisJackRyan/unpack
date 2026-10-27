@@ -26,6 +26,7 @@ import {
 } from "@/lib/answer-drafts";
 import type { AnswerFormState } from "./answer-form-state";
 import { LimitNotice } from "./limit-notice";
+import { MaxLengthNote } from "./max-length-note";
 
 type Props = {
   action: (state: AnswerFormState, formData: FormData) => Promise<AnswerFormState>;
@@ -160,6 +161,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
                   {error}
                 </p>
                 <CharacterCount id={`${id}-count`} length={value.length} max={ANSWER_MAX_LENGTH} />
+                <MaxLengthNote id={`${id}-max`} length={value.length} max={ANSWER_MAX_LENGTH} />
               </div>
             </li>
           );

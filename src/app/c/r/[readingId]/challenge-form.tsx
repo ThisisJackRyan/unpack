@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useState, type FormEvent } from "react";
 import { PaperPlane } from "@/components/illustrations";
+import { MaxLengthNote } from "@/components/max-length-note";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { primaryButtonLarge } from "@/components/ui";
 import { answerBox, CharacterCount, fieldError, Spinner } from "@/components/answer-parts";
@@ -65,6 +66,7 @@ export function ChallengeForm({
           {state.error}
         </p>
         <CharacterCount id="challenge-note-count" length={note.length} max={CHALLENGE_NOTE_MAX_LENGTH} />
+        <MaxLengthNote id="challenge-note-max" length={note.length} max={CHALLENGE_NOTE_MAX_LENGTH} />
       </div>
       <button type="submit" disabled={pending} className={`${primaryButtonLarge} w-full sm:w-auto sm:self-start`}>
         {pending && <Spinner />}

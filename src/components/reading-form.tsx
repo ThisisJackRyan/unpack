@@ -10,6 +10,7 @@ import {
 } from "@/lib/question-modes";
 import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
+import { MaxLengthNote } from "@/components/max-length-note";
 import { field, primaryButton, secondaryButton } from "@/components/ui";
 import {
   BODY_TEXT_MAX_LENGTH,
@@ -307,6 +308,7 @@ export function ReadingForm({
                 {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
                 <span className="sr-only"> characters</span>
               </p>
+              <MaxLengthNote id="body-max" length={bodyLength} max={BODY_TEXT_MAX_LENGTH} large={false} />
             </div>
             <ErrorMessage id="body-error">
               {bodyError}
