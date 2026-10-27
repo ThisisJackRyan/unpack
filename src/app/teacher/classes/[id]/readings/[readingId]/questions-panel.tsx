@@ -3,6 +3,7 @@
 import {
   useActionState,
   useEffect,
+  startTransition,
   useRef,
   useState,
   type FormEvent,
@@ -35,6 +36,8 @@ type Props = {
   questionCount: number;
   gradeLabel: string;
   questions: Question[];
+  // Arrived from "Create & generate": write the set once on load.
+  autoGenerate?: boolean;
 };
 
 type Running = { intent: QuestionIntent; questionId?: string };
@@ -54,7 +57,7 @@ const ROLE_LABELS: Record<QuestionRole, string> = {
 // (modeled on the Google Gemini "Creating a quiz" flow), a friendly "Writing
 // questions…" card while writing, and a confirm step before Regenerate all, Publish, and
 // Delete.
-export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questions }: Props) {
+export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questions, autoGenerate = false }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [running, setRunning] = useState<Running | null>(null);
   // Where focus goes once an action finishes (the card's Edit button after
@@ -73,6 +76,19 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
     },
     {},
   );
+
+  // "Create & generate": run the Generate button's intent once, then drop
+  // the flag from the address so a reload doesn't ask again.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoGenerate || autoStarted.current) return;
+    autoStarted.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    const data = new FormData();
+    data.set("intent", "generate");
+    setRunning({ intent: "generate" });
+    startTransition(() => dispatch(data));
+  }, [autoGenerate, dispatch]);
 
   useEffect(() => {
     if (pending || !focusAfter.current) return;

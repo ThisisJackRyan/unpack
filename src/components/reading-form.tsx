@@ -107,6 +107,9 @@ export function ReadingForm({
     () => normalizeBodyText(values.bodyText).length,
   );
   const [tooLong, setTooLong] = useState(false);
+  // Which create button was pressed ("save" or "generate"), for its
+  // pending label.
+  const [then, setThen] = useState("save");
   const overLimit = bodyLength > BODY_TEXT_MAX_LENGTH;
   const bodyError = (tooLong && overLimit && BODY_TEXT_TOO_LONG_MESSAGE) || errors.bodyText;
 
@@ -119,6 +122,8 @@ export function ReadingForm({
     const length = normalizeBodyText(String(data.get("bodyText") ?? "")).length;
     setSource(submitted);
     setBodyLength(length);
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    setThen(submitter instanceof HTMLButtonElement ? submitter.value : "save");
     if (submitted === "text" && length > BODY_TEXT_MAX_LENGTH) {
       event.preventDefault();
       setTooLong(true);
@@ -133,6 +138,17 @@ export function ReadingForm({
     ? "hidden flex-col gap-2 group-has-[#source-text:checked]/form:flex"
     : "flex flex-col gap-2";
   const linkOnly = "group-has-[#source-text:checked]/form:hidden";
+  // A teacher's new reading: "Create & generate" (save, then write the
+  // shared set on the reading page) with "Save draft" beside it. A
+  // per-student reading has no set to write, so "Save draft" is the main
+  // button there. CSS follows the checked mode radio, like the panels.
+  const sharedOnly = "group-has-[#mode-per_student:checked]/form:hidden";
+  const perStudentPrimary = primaryButton.replace(
+    "inline-flex",
+    "hidden group-has-[#mode-per_student:checked]/form:inline-flex",
+  );
+  const teacherCreate = mode === "create";
+  const pendingLabel = create && !textMode ? "Getting the article…" : "Saving…";
 
   return (
     <form
@@ -374,6 +390,7 @@ export function ReadingForm({
                   <label key={m} className={`${option} flex-col justify-center gap-0.5 py-3`}>
                     <input
                       type="radio"
+                      id={`mode-${m}`}
                       name="questionMode"
                       value={m}
                       defaultChecked={values.questionMode === m}
@@ -406,19 +423,41 @@ export function ReadingForm({
         <Link href={cancelHref} className={secondaryButton}>
           Cancel
         </Link>
-        <button type="submit" disabled={pending} className={primaryButton}>
-          {pending
-            ? create && !textMode
-              ? "Getting the article…"
-              : solo
-                ? "Starting…"
-                : "Saving…"
-            : solo
-              ? "Start reading"
-              : create
-                ? "Save draft"
-                : "Save changes"}
-        </button>
+        {teacherCreate ? (
+          <>
+            <button
+              type="submit"
+              name="then"
+              value="save"
+              disabled={pending}
+              className={`${secondaryButton} ${sharedOnly}`}
+            >
+              {pending && then === "save" ? pendingLabel : "Save draft"}
+            </button>
+            <button
+              type="submit"
+              name="then"
+              value="save"
+              disabled={pending}
+              className={perStudentPrimary}
+            >
+              {pending && then === "save" ? pendingLabel : "Save draft"}
+            </button>
+            <button
+              type="submit"
+              name="then"
+              value="generate"
+              disabled={pending}
+              className={`${primaryButton} ${sharedOnly}`}
+            >
+              {pending && then === "generate" ? pendingLabel : "Create & generate"}
+            </button>
+          </>
+        ) : (
+          <button type="submit" disabled={pending} className={primaryButton}>
+            {pending ? (solo && textMode ? "Starting…" : pendingLabel) : solo ? "Start reading" : "Save changes"}
+          </button>
+        )}
       </div>
     </form>
   );

@@ -18,6 +18,7 @@ import { RaiseCapButton } from "./cap-raise";
 import { DeleteReadingButton } from "./delete-reading";
 import { deleteReadingAction, raiseCapAction } from "./reading-actions";
 import { questionAction } from "./question-actions";
+import { GENERATE_FLAG, shouldAutoGenerate } from "./question-state";
 import { QuestionNumber, QuestionsPanel, QuestionText } from "./questions-panel";
 
 // Server actions on this page call the model, which
@@ -26,7 +27,10 @@ import { QuestionNumber, QuestionsPanel, QuestionText } from "./questions-panel"
 // and the commit.
 export const maxDuration = 150;
 
-type Props = { params: Promise<{ id: string; readingId: string }> };
+type Props = {
+  params: Promise<{ id: string; readingId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id, readingId } = await params;
@@ -34,8 +38,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: reading.title };
 }
 
-export default async function ReadingPage({ params }: Props) {
+export default async function ReadingPage({ params, searchParams }: Props) {
   const { id, readingId } = await params;
+  const { [GENERATE_FLAG]: generateFlag } = await searchParams;
   const { reading, class: found } = await loadReading(id, readingId);
   const classHref = `/teacher/classes/${found.id}`;
   const host = sourceHost(reading.sourceUrl);
@@ -103,6 +108,12 @@ export default async function ReadingPage({ params }: Props) {
             questionCount={reading.questionCount}
             gradeLabel={gradeLabel}
             questions={questions}
+            autoGenerate={shouldAutoGenerate({
+              flag: generateFlag,
+              status: reading.status,
+              mode: reading.questionMode,
+              questionCount: questions.length,
+            })}
           />
         ) : (
           <div className="flex flex-col gap-6">

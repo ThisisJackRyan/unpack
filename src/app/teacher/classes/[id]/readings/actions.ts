@@ -18,6 +18,7 @@ import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { validateReadingForm } from "@/lib/validate-reading";
 import type { ReadingFormState } from "@/components/reading-form-state";
+import { GENERATE_FLAG } from "./[readingId]/question-state";
 
 function readForm(formData: FormData, source: unknown) {
   return validateReadingForm({
@@ -92,7 +93,11 @@ export async function createReading(
     };
   }
 
-  redirect(`/teacher/classes/${classId}/readings/${readingId}`);
+  // "Create & generate": the reading page starts writing the shared set
+  // with the same action as its Generate button (same checks and limits).
+  // A per-student reading has no set to write, so it just saves.
+  const generate = formData.get("then") === "generate" && draft.questionMode === "shared";
+  redirect(`/teacher/classes/${classId}/readings/${readingId}${generate ? `?${GENERATE_FLAG}=1` : ""}`);
 }
 
 export async function updateReading(
