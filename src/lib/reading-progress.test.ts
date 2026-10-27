@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   answerStage,
   latestChallenge,
+  lockedQuestionIds,
   passedCountLabel,
   progressStatements,
   readingListItems,
@@ -230,6 +231,22 @@ describe("stageAnnouncement", () => {
   it("counts passed answers", () => {
     assert.equal(passedCountLabel(pass(1)), "2 of 2 answers passed.");
     assert.equal(passedCountLabel({ tryNumber: 1, result: "fail", answers: { q: { text: "", pass: false, nudge: "x" } } }), "0 of 1 answer passed.");
+  });
+});
+
+describe("lockedQuestionIds", () => {
+  it("are the questions that passed on the latest try, none before a try", () => {
+    const latest = {
+      tryNumber: 2,
+      result: "fail" as const,
+      answers: {
+        q1: { text: "a", pass: true, nudge: "" },
+        q2: { text: "b", pass: false, nudge: "Say more." },
+        q3: { text: "c", pass: true, nudge: "" },
+      },
+    };
+    assert.deepEqual([...lockedQuestionIds(latest)].sort(), ["q1", "q3"]);
+    assert.equal(lockedQuestionIds(null).size, 0);
   });
 });
 

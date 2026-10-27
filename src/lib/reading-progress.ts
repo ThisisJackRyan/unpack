@@ -138,6 +138,12 @@ export function stageAnnouncement(stage: AnswerStage): string {
   }
 }
 
+// The questions locked as done: those that passed on the latest try (the
+// server only takes answers for the rest; see submit-answers-core.ts).
+export function lockedQuestionIds(latest: AttemptView | null): Set<string> {
+  return new Set(Object.entries(latest?.answers ?? {}).filter(([, a]) => a.pass).map(([id]) => id));
+}
+
 // "2 of 3 answers passed."
 export function passedCountLabel(attempt: AttemptView): string {
   const all = Object.values(attempt.answers);

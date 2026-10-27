@@ -76,6 +76,33 @@ export function QuestionNumber({ position }: { position: number }) {
   );
 }
 
+// A question that passed on an earlier try: locked as done (the server
+// won't take a new answer for it), shown read-only with its answer.
+export function LockedAnswer({ question, text }: { question: StudentQuestion; text: string }) {
+  return (
+    <li className={`${card} flex flex-col gap-4 p-5 sm:p-6`}>
+      <div className="flex gap-4">
+        <QuestionNumber position={question.position} />
+        <p className="pt-1.5 text-xl leading-relaxed font-semibold break-words text-ink-950">
+          <span className="sr-only">Question {question.position}: </span>
+          {question.prompt}
+        </p>
+      </div>
+      <div className="flex flex-col items-start gap-3 sm:pl-14">
+        <span className={`${pill} bg-success-50 px-3 py-1 text-lg text-success-800`}>
+          <CheckIcon />
+          Done
+        </span>
+        <p className="text-lg font-semibold text-ink-700">Your answer</p>
+        <p className="w-full rounded-2xl bg-ink-50 px-4 py-3 text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">
+          {text}
+        </p>
+        <p className="text-lg text-ink-700">This one passed, so it’s done. No need to change it.</p>
+      </div>
+    </li>
+  );
+}
+
 // The questions with a saved try's answers, read-only. `showResults` adds
 // each answer's result and nudge (for a try that didn't pass).
 export function AnswerReview({

@@ -3,12 +3,13 @@
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { card, pill, primaryButtonLarge } from "@/components/ui";
-import { passedCountLabel, type AttemptView } from "@/lib/reading-progress";
+import { lockedQuestionIds, passedCountLabel, type AttemptView } from "@/lib/reading-progress";
 import type { StudentQuestion } from "@/lib/student-questions-core";
 import {
   answerBox,
   CharacterCount,
   fieldError,
+  LockedAnswer,
   Nudge,
   QuestionNumber,
   ResultBadge,
@@ -36,8 +37,8 @@ type Props = {
   // The teacher denied the note but gave one more try: exactly 1 left.
   extraTry: boolean;
   // The last failed try: its answers prefill the boxes, with each one's
-  // result and nudge. Students answer every question each try; passed
-  // answers stay editable.
+  // result and nudge. A question that passed on it is locked as done
+  // (read-only, not posted): the server only takes answers for the rest.
   previous: AttemptView | null;
   // Whose unsent drafts these are (ids only, see answer-drafts.ts).
   drafts: DraftOwner;
@@ -63,7 +64,12 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
   }
   const errors = state.errors ?? {};
   const { mode, readingId, ownerId } = drafts;
-  const questionIds = questions.map((q) => q.id).join(",");
+  const locked = lockedQuestionIds(previous);
+  // Only the open questions have boxes, drafts, and posted answers.
+  const questionIds = questions
+    .filter((q) => !locked.has(q.id))
+    .map((q) => q.id)
+    .join(",");
 
   // After hydration (localStorage is browser only): this try's unsent
   // drafts go over the prefill, and older tries' drafts are dropped (that
@@ -111,13 +117,14 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
           <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-warning-700" />
           <div className="flex flex-col gap-1">
             <p className="text-lg font-semibold">Not yet. {passedCountLabel(previous)}</p>
-            <p className="text-lg">Read the tips under your answers. Then fix them and check again.</p>
+            <p className="text-lg">Answers that passed are done. Read the tips, then fix the others and check again.</p>
           </div>
         </div>
       )}
 
       <ol className="flex flex-col gap-4">
         {questions.map((q) => {
+          if (locked.has(q.id)) return <LockedAnswer key={q.id} question={q} text={previous?.answers[q.id]?.text ?? ""} />;
           const id = `answer-${q.id}`;
           const result = previous?.answers[q.id];
           const nudge = result && !result.pass && result.nudge ? result.nudge : "";
