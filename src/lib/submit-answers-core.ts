@@ -10,25 +10,45 @@
 // time, and at most EFFORT_CHECK_LIMIT checks ever per student per reading.
 // A teacher's "one more try" raises both limits for that student (see
 // reading-limits.ts); every rule below uses the student's own limits.
+//
+// Passed answers are locked (the v1 spec's rule): a question that passed
+// on the latest try stays passed, with its answer as it was. A later try
+// sends, checks, and saves only the questions that are not yet passed;
+// the commit copies the locked answers into the new try from the
+// database (never from the form), so every try holds every question and
+// the latest try always says where things stand. The try passes once its
+// own answers all pass (the locked ones already did). "Passed" is derived
+// from the saved answers, so there is no extra column: a question can
+// only stop being locked if the latest try lost it, and no try does.
 // A model call can't run inside a database transaction, so:
 //
 // 1. Load the reading (published, in the student's class), the student's
 //    questions, and their tries so far. Refuse early when they already
 //    passed or are out of tries, then validate the answers against exactly
-//    these questions. Nothing is written yet, so a bad form costs nothing.
+//    the questions that are not locked (a locked question's answer in the
+//    form, crafted or from an old tab, makes it "stale"). Nothing is
+//    written yet, so a bad form costs nothing.
 // 2. Claim, in ONE transaction under a transaction-scoped advisory lock on
 //    (student, reading), the join-rate-limit pattern: insert an
 //    effort_checks row only if the student has no passing attempt, fewer
 //    attempts and effort_checks rows than their limits, and no live claim
-//    (unfinished and younger than EFFORT_CLAIM_STALE_SECONDS). The lock makes those counts and the insert one
+//    (unfinished and younger than EFFORT_CLAIM_STALE_SECONDS), and still
+//    exactly the tries the answers were validated against (another tab
+//    may have saved a try since, which may have locked more questions:
+//    then "stale"). The lock makes those counts and the insert one
 //    step, so 20 parallel submits get exactly one claim; the rest are told
-//    "busy" (or the reason they can't go on).
+//    "busy" (or the reason they can't go on). While the claim is live no
+//    other claim or commit can happen, so the locked set can't change
+//    before this commit.
 // 3. Call the model with no transaction open.
 // 4. Commit, in ONE transaction under the same lock: finish the claim and
 //    insert the attempt (try_number = tries so far + 1) and its answers,
 //    only while the claim is still live and the student still has fewer
 //    attempts than their limit and no pass. The unique (student, reading,
-//    try_number) constraint is the backstop. A passing attempt also closes
+//    try_number) constraint is the backstop. The locked answers are copied
+//    from the previous try first, and the new answers are inserted with
+//    "on conflict do nothing", so a locked answer is never replaced. A
+//    passing attempt also closes
 //    an open challenge in the same transaction (status closed), so the
 //    teacher's queue never asks about a student who has since passed.
 // 5. On a model error or timeout, finish the claim with no attempt: the try
@@ -115,6 +135,8 @@ export type SubmitContext = {
   bodyText: string;
   gradeLevel: GradeLevel;
   questions: StudentQuestion[];
+  // The questions that passed on the latest try: locked (see above).
+  lockedQuestionIds: string[];
   tries: number;
   // MAX_TRIES, or more after a teacher's "one more try".
   triesAllowed: number;
@@ -130,6 +152,8 @@ export type ClaimOutcome =
   | "already_passed"
   | "out_of_tries"
   | "busy"
+  // Another try was saved since the answers were validated.
+  | "stale"
   | "too_many_checks"
   // EFFORT_GIVEN_BACK_WINDOW_LIMIT given-back checks in the window.
   | "paused";
@@ -145,7 +169,9 @@ export type SaveInput = {
 
 export type AttemptStore = {
   loadContext(studentId: string, readingId: string): Promise<SubmitLookup>;
-  claim(studentId: string, readingId: string, claimId: string): Promise<ClaimOutcome>;
+  // `expectedTries`: the tries the answers were validated against; any
+  // other count is "stale".
+  claim(studentId: string, readingId: string, claimId: string, expectedTries: number): Promise<ClaimOutcome>;
   // Finishes the claim with no attempt: outcome "given_back" when
   // givenBack (the model never replied), else "error".
   release(studentId: string, readingId: string, claimId: string, givenBack?: boolean): Promise<void>;
@@ -171,6 +197,7 @@ export type SubmitDeps = {
   onError?: (error: unknown) => void;
 };
 
+// Only the questions checked on this try (not the locked ones).
 export type AnswerResult = { questionId: string; pass: boolean; nudge: string };
 
 export type SubmitResult =
@@ -220,9 +247,14 @@ export async function submitAnswersWith(
   if (context.passed) return { status: "already_passed" };
   if (context.tries >= context.triesAllowed) return { status: "out_of_tries" };
   if (context.questions.length === 0) return { status: "not_found" };
+  const locked = new Set(context.lockedQuestionIds);
+  const open = context.questions.filter((q) => !locked.has(q.id));
+  // Every question locked without a passing try can't happen (a try whose
+  // answers all pass is a pass); refuse rather than check nothing.
+  if (open.length === 0) return { status: "stale" };
 
   const validation = validateAnswers(
-    context.questions.map((q) => q.id),
+    open.map((q) => q.id),
     entries,
   );
   if (!validation.ok) {
@@ -231,7 +263,7 @@ export async function submitAnswersWith(
   const { answers } = validation;
 
   const claimId = deps.newId();
-  const claim = await store.claim(studentId, readingId, claimId);
+  const claim = await store.claim(studentId, readingId, claimId, context.tries);
   if (claim === "paused") {
     return { status: "paused", retryAt: (await store.pausedUntil?.(studentId, readingId)) ?? null };
   }
@@ -259,6 +291,8 @@ export async function submitAnswersWith(
     return { status: "check_failed" };
   }
 
+  // The locked questions passed already, so the try passes when every
+  // question checked now does.
   const passed = results.every((r) => r.pass);
   const texts = new Map(answers.map((a) => [a.questionId, a.text]));
   let tryNumber: number | null;
@@ -323,7 +357,36 @@ order by q.position`,
 from attempts where student_id = $1::uuid and reading_id = $2::uuid`,
       params: [studentId, readingId],
     },
+    lockedStatement(studentId, readingId),
   ];
+}
+
+// Where a reader's tries and answers live: the class tables, or the
+// self-learner ones (owned by an account).
+export type AnswerTables = {
+  answers: "answers" | "self_answers";
+  attempts: "attempts" | "self_attempts";
+  owner: "student_id" | "account_id";
+};
+export const CLASS_ANSWER_TABLES: AnswerTables = { answers: "answers", attempts: "attempts", owner: "student_id" };
+export const SELF_ANSWER_TABLES: AnswerTables = { answers: "self_answers", attempts: "self_attempts", owner: "account_id" };
+
+// The locked questions: those that passed on the latest try. Shared with
+// the self-learner store. $1 owner, $2 reading.
+export function lockedStatement(
+  ownerId: string,
+  readingId: string,
+  tables: AnswerTables = CLASS_ANSWER_TABLES,
+): Statement {
+  return {
+    text: `select an.question_id from ${tables.answers} an
+where an.ai_pass and an.attempt_id = (
+  select a.id from ${tables.attempts} a
+  where a.${tables.owner} = $1::uuid and a.reading_id = $2::uuid
+  order by a.try_number desc limit 1
+)`,
+    params: [ownerId, readingId],
+  };
 }
 
 export function submitLookup(results: Record<string, unknown>[][]): SubmitLookup {
@@ -340,6 +403,7 @@ export function submitLookup(results: Record<string, unknown>[][]): SubmitLookup
         position: Number(q.position),
         prompt: String(q.prompt),
       })),
+      lockedQuestionIds: (results[3] ?? []).map((row) => String(row.question_id)),
       tries: Number(progress?.tries ?? 0),
       triesAllowed: limitsFromRow(progress).tries,
       passed: progress?.passed === true,
@@ -389,16 +453,18 @@ function givenBackRecent(n: number): string {
 //    snapshot, taken after the lock wait, sees every claim and attempt a
 //    previous holder committed, so the counts are exact.
 // 3. Say why when nothing was inserted.
-export function claimStatements(studentId: string, readingId: string, claimId: string): Statement[] {
+export function claimStatements(studentId: string, readingId: string, claimId: string, expectedTries: number): Statement[] {
   return [
     effortLockStatement(studentId, readingId),
     {
-      // $3 claim id, $4 stale seconds, $5 window minutes, $6 window limit.
+      // $3 claim id, $4 stale seconds, $5 window minutes, $6 window limit,
+      // $7 the tries the answers were validated against.
       text: `insert into effort_checks (id, student_id, reading_id)
 select $3::uuid, $1::uuid, $2::uuid
 where ${ELIGIBLE}
 and ${NOT_PASSED}
 and ${TRIES} < ${TRIES_ALLOWED}
+and ${TRIES} = $7::int
 and not ${liveClaim(4)}
 and ${CHECKS} < ${CHECKS_ALLOWED}
 and ${givenBackRecent(5)} < $6::int
@@ -410,6 +476,7 @@ returning id`,
         EFFORT_CLAIM_STALE_SECONDS,
         EFFORT_GIVEN_BACK_WINDOW_MINUTES,
         EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+        expectedTries,
       ],
     },
     {
@@ -429,8 +496,9 @@ returning id`,
 
 // Reads the claim batch's results. The order matters: a student who no
 // longer qualifies is "not_found"; a pass or the last try beats a busy
-// check; a running check is "busy" even at the limit (it may still pass).
-export function claimOutcome(results: Record<string, unknown>[][]): ClaimOutcome {
+// check; a running check is "busy" even at the limit (it may still pass);
+// then a try saved since the answers were validated is "stale".
+export function claimOutcome(results: Record<string, unknown>[][], expectedTries?: number): ClaimOutcome {
   if ((results[1]?.length ?? 0) > 0) return "claimed";
   const row = results[2]?.[0];
   if (row?.eligible !== true) return "not_found";
@@ -438,6 +506,7 @@ export function claimOutcome(results: Record<string, unknown>[][]): ClaimOutcome
   if (row.passed === true) return "already_passed";
   if (Number(row.tries ?? 0) >= limits.tries) return "out_of_tries";
   if (row.live === true) return "busy";
+  if (expectedTries !== undefined && Number(row.tries ?? 0) !== expectedTries) return "stale";
   if (Number(row.checks ?? 0) >= limits.checks) return "too_many_checks";
   if (Number(row.given_back_recent ?? 0) >= EFFORT_GIVEN_BACK_WINDOW_LIMIT) return "paused";
   return "busy";
@@ -483,9 +552,12 @@ export function retryAtFromRows(results: Record<string, unknown>[][]): Date | nu
 //    only matches while the claim is still live and the student still has
 //    fewer attempts than their limit and no pass, and the insert only runs
 //    for the row it returned.
-// 3. Insert the answers, only for the attempt just saved, and only for
-//    questions of this student's set.
-// 4. If that attempt passed, close any open challenge (status closed, no
+// 3. Copy the locked answers (passed on the previous try) into it, as they
+//    were (text, a pass, no nudge), from the database.
+// 4. Insert the answers, only for the attempt just saved, and only for
+//    questions of this student's set; never over a locked one (on
+//    conflict do nothing).
+// 5. If that attempt passed, close any open challenge (status closed, no
 //    resolved_by): Passed beats Challenged, and the teacher has nothing
 //    left to decide.
 export function commitStatements(input: SaveInput): Statement[] {
@@ -516,6 +588,7 @@ returning try_number`,
         EFFORT_CLAIM_STALE_SECONDS,
       ],
     },
+    carryLockedStatement(studentId, readingId, input.attemptId),
     {
       // $3 attempt id, $4 to $7 the answers' question ids, texts, passes,
       // and nudges.
@@ -525,6 +598,7 @@ from unnest($4::uuid[], $5::text[], $6::boolean[], $7::text[]) as a(question_id,
 join questions q on q.id = a.question_id and q.reading_id = $2::uuid
   and (q.student_id is null or q.student_id = $1::uuid)
 where exists (select 1 from attempts where id = $3::uuid)
+on conflict (attempt_id, question_id) do nothing
 returning id`,
       params: [
         studentId,
@@ -540,7 +614,31 @@ returning id`,
   ];
 }
 
-// Step 4 of the commit. $3 attempt id: only an attempt saved in this
+// Step 3 of the commit: the passing answers of the try before the one just
+// saved ($3), copied into it. Only runs for an attempt saved in this
+// transaction. Shared with the self-learner store (see lockedStatement).
+export function carryLockedStatement(
+  ownerId: string,
+  readingId: string,
+  attemptId: string,
+  tables: AnswerTables = CLASS_ANSWER_TABLES,
+): Statement {
+  return {
+    text: `insert into ${tables.answers} (attempt_id, question_id, text, ai_pass, ai_feedback)
+select $3::uuid, p.question_id, p.text, true, null
+from ${tables.answers} p
+where p.ai_pass and p.attempt_id = (
+  select a.id from ${tables.attempts} a
+  where a.${tables.owner} = $1::uuid and a.reading_id = $2::uuid and a.id <> $3::uuid
+  order by a.try_number desc limit 1
+)
+and exists (select 1 from ${tables.attempts} where id = $3::uuid and ${tables.owner} = $1::uuid and reading_id = $2::uuid)
+returning question_id`,
+    params: [ownerId, readingId, attemptId],
+  };
+}
+
+// Step 5 of the commit. $3 attempt id: only an attempt saved in this
 // transaction, and only a pass, closes the challenge.
 export function autoCloseStatement(studentId: string, readingId: string, attemptId: string): Statement {
   return {
@@ -565,8 +663,8 @@ export function postgresAttemptStore(execute: StatementExecutor): AttemptStore {
     async loadContext(studentId, readingId) {
       return submitLookup(await execute(submitContextStatements(studentId, readingId)));
     },
-    async claim(studentId, readingId, claimId) {
-      return claimOutcome(await execute(claimStatements(studentId, readingId, claimId)));
+    async claim(studentId, readingId, claimId, expectedTries) {
+      return claimOutcome(await execute(claimStatements(studentId, readingId, claimId, expectedTries)), expectedTries);
     },
     async release(studentId, readingId, claimId, givenBack) {
       await execute([releaseStatement(studentId, readingId, claimId, givenBack)]);

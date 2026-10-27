@@ -10,6 +10,8 @@
 //   also check, in the statement, that the account is a self-learner now.
 // - No challenges, no one more try: the limits are always MAX_TRIES and
 //   EFFORT_CHECK_LIMIT.
+// Passed answers are locked the same way (see submit-answers-core.ts):
+// lockedStatement and carryLockedStatement over the self_* tables.
 // - The reading's status is settled in the same transaction as the commit
 //   (or the release of a failed check): passed on a passing try, moved_on
 //   once every try (or every check) is used without a pass. The page then
@@ -28,11 +30,14 @@ import {
   CHECK_FAILED_MESSAGE,
   CHECKS_PAUSED_MESSAGE,
   claimOutcome,
+  carryLockedStatement,
   committedTry,
   EFFORT_CLAIM_STALE_SECONDS,
   EFFORT_GIVEN_BACK_WINDOW_LIMIT,
   EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+  lockedStatement,
   pausedUntilStatement,
+  SELF_ANSWER_TABLES,
   retryAtFromRows,
   OUT_OF_TRIES_MESSAGE,
   submitLookup,
@@ -109,22 +114,30 @@ export function selfSubmitContextStatements(accountId: string, readingId: string
 from self_attempts where reading_id = $2::uuid and account_id = $1::uuid`,
       params: [accountId, readingId, MAX_TRIES],
     },
+    lockedStatement(accountId, readingId, SELF_ANSWER_TABLES),
   ];
 }
 
 // The claim (same three steps and result shape as claimStatements in
 // submit-answers-core.ts, so claimOutcome reads it).
-export function selfClaimCheckStatements(accountId: string, readingId: string, claimId: string): Statement[] {
+export function selfClaimCheckStatements(
+  accountId: string,
+  readingId: string,
+  claimId: string,
+  expectedTries: number,
+): Statement[] {
   return [
     selfEffortLockStatement(readingId),
     {
       // $3 claim id, $4 stale seconds, $5 tries, $6 checks, $7 window
-      // minutes, $8 window limit.
+      // minutes, $8 window limit, $9 the tries the answers were validated
+      // against.
       text: `insert into self_effort_checks (id, account_id, reading_id)
 select $3::uuid, $1::uuid, $2::uuid
 where ${OWNED}
 and ${NOT_PASSED}
 and ${TRIES} < $5::int
+and ${TRIES} = $9::int
 and not ${liveCheck(4)}
 and ${CHECKS} < $6::int
 and ${givenBackRecent(7)} < $8::int
@@ -138,6 +151,7 @@ returning id`,
         EFFORT_CHECK_LIMIT,
         EFFORT_GIVEN_BACK_WINDOW_MINUTES,
         EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+        expectedTries,
       ],
     },
     {
@@ -198,7 +212,8 @@ where id = $3::uuid and account_id = $1::uuid and reading_id = $2::uuid and fini
 
 // The commit (same shape as commitStatements in submit-answers-core.ts, so
 // committedTry reads it): finish the live claim and insert the attempt in
-// one statement, then the answers (only for this reading's questions),
+// one statement, then the locked answers carried over, then the new
+// answers (only for this reading's questions, never over a locked one),
 // then settle the status. No challenge to close.
 export function selfCommitStatements(input: SaveInput): Statement[] {
   const { studentId: accountId, readingId } = input;
@@ -222,6 +237,7 @@ from claim
 returning try_number`,
       params: [accountId, readingId, input.claimId, input.attemptId, result, EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES],
     },
+    carryLockedStatement(accountId, readingId, input.attemptId, SELF_ANSWER_TABLES),
     {
       // $3 attempt id, $4 to $7 the answers' question ids, texts, passes,
       // and nudges.
@@ -230,6 +246,7 @@ select $3::uuid, a.question_id, a.text, a.pass, nullif(a.nudge, '')
 from unnest($4::uuid[], $5::text[], $6::boolean[], $7::text[]) as a(question_id, text, pass, nudge)
 join self_questions q on q.id = a.question_id and q.reading_id = $2::uuid
 where exists (select 1 from self_attempts where id = $3::uuid and account_id = $1::uuid)
+on conflict (attempt_id, question_id) do nothing
 returning id`,
       params: [
         accountId,
@@ -251,8 +268,8 @@ export function postgresSelfAttemptStore(execute: StatementExecutor): AttemptSto
     async loadContext(accountId, readingId) {
       return submitLookup(await execute(selfSubmitContextStatements(accountId, readingId)));
     },
-    async claim(accountId, readingId, claimId) {
-      return claimOutcome(await execute(selfClaimCheckStatements(accountId, readingId, claimId)));
+    async claim(accountId, readingId, claimId, expectedTries) {
+      return claimOutcome(await execute(selfClaimCheckStatements(accountId, readingId, claimId, expectedTries)), expectedTries);
     },
     async release(accountId, readingId, claimId, givenBack) {
       await execute(selfReleaseCheckStatements(accountId, readingId, claimId, givenBack));
