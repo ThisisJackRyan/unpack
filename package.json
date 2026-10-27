@@ -20,6 +20,7 @@
     "db:check-abuse-protection": "node --import ./scripts/ts-paths.mjs scripts/check-abuse-protection.ts",
     "db:check-teacher-gaps": "node --import ./scripts/ts-paths.mjs scripts/check-teacher-gaps.ts",
     "db:check-self-learner": "node --import ./scripts/ts-paths.mjs scripts/check-self-learner.ts",
+    "db:check-limiter-concurrency": "node --import ./scripts/ts-paths.mjs scripts/check-limiter-concurrency.ts",
     "db:recompute-name-keys": "node --import ./scripts/ts-paths.mjs scripts/recompute-name-keys.ts"
   },
   "dependencies": {
