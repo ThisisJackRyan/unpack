@@ -18,6 +18,12 @@ export const FIRST_NAME_INVALID_MESSAGE =
 export const CLASS_NOT_FOUND_MESSAGE =
   "We couldn’t find that class code. Check it with your teacher.";
 
+// The join's generic failure: a database error, or a server that isn't set
+// up (JOIN_IP_HASH_SECRET or the Turnstile keys missing in production).
+// Says nothing about why, so a student can't tell a broken deploy from a
+// blip.
+export const JOIN_FAILED_MESSAGE = "We couldn’t join you to the class. Please try again.";
+
 // Letters (any alphabet, with accents) plus spaces, hyphens, apostrophes,
 // and the Hawaiian ʻokina, e.g. "Mary Ann", "Jean-Luc", "D’Andre",
 // "Keʻala", "ʻIolani". Apostrophes may be straight ('), curly (’ or ‘,

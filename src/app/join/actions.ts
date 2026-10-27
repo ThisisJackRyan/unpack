@@ -8,10 +8,8 @@ import { JOIN_LIMITED_MESSAGE } from "@/lib/join-rate-limit";
 import { joinClass } from "@/lib/student-join";
 import { NAME_TAKEN_MESSAGE, type JoinOutcome } from "@/lib/student-join-core";
 import { setStudentSessionCookie } from "@/lib/student-session";
-import { CLASS_NOT_FOUND_MESSAGE, validateJoin } from "@/lib/validate-join";
+import { CLASS_NOT_FOUND_MESSAGE, JOIN_FAILED_MESSAGE, validateJoin } from "@/lib/validate-join";
 import type { JoinState } from "./form-state";
-
-const JOIN_FAILED_MESSAGE = "We couldn’t join you to the class. Please try again.";
 
 // Joins a class and starts the student's session. Joining while already in
 // a class (the form is still on /join for that) replaces the cookie: this
@@ -28,7 +26,10 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
 
   // The bot check comes before the rate limits (see join-bot-check.ts): a
   // refused check isn't counted, so a bot can't use up a code's tries. Off
-  // (no keys) it passes with no network call. It never throws.
+  // (no keys outside production, or TURNSTILE_DISABLED=1) it passes with no
+  // network call. In production with a key missing it refuses every join
+  // with the generic message and logs which variable is missing, like
+  // JOIN_IP_HASH_SECRET below. It never throws.
   const bot = await verifyJoinBotCheck(
     { token: formData.get(TURNSTILE_RESPONSE_FIELD) },
     { onFailure: (fields) => console.error("joinClassAction: bot check refused", fields) },
