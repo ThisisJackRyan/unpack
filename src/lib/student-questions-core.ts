@@ -80,14 +80,23 @@ export type StudentQuestionsResult =
   // No published per-student reading with that id.
   | { status: "not_found" }
   // The reading exists, but the student isn't in its class (or doesn't
-  // exist). Callers should show it like not_found, so a student can't
-  // probe another class's readings.
+  // exist). Never send this to a student as is: pass every result through
+  // studentFacingResult, which turns it into not_found.
   | { status: "not_allowed" }
   // The reading already has STUDENT_SETS_PER_READING_LIMIT sets and this
   // student has none. Show STUDENT_SETS_LIMITED_MESSAGE.
   | { status: "limit_reached" }
   // The model call failed; nothing was saved and the claim was released.
   | { status: "error"; kind: QuestionErrorKind; message: string };
+
+// What a student may be told: not_allowed becomes not_found, so a
+// response can't reveal whether a student id exists or is in another
+// class. Every student-facing caller should use this.
+export type StudentFacingResult = Exclude<StudentQuestionsResult, { status: "not_allowed" }>;
+
+export function studentFacingResult(result: StudentQuestionsResult): StudentFacingResult {
+  return result.status === "not_allowed" ? { status: "not_found" } : result;
+}
 
 export type ContextLookup =
   | { status: "ok"; context: StudentReadingContext }
@@ -228,7 +237,8 @@ order by position`,
 //    committed, so the cap is exact: 200 concurrent first opens get
 //    exactly 150. ON CONFLICT DO NOTHING keeps one claim per student.
 // 3. Say why when nothing was inserted: whether this student already has
-//    a claim, and how many the reading has.
+//    a claim, whether the student and reading still qualify, and how many
+//    claims the reading has.
 //
 // The model call happens after this commits, never under the lock.
 export function claimStatements(
@@ -260,6 +270,11 @@ returning claim_token`,
   exists (
     select 1 from question_generations where reading_id = $1::uuid and student_id = $2::uuid
   ) as has_claim,
+  exists (
+    select 1 from readings r join students s on s.class_id = r.class_id
+    where r.id = $1::uuid and s.id = $2::uuid
+      and r.status = 'published' and r.question_mode = 'per_student'
+  ) as eligible,
   (select count(*)::int from question_generations where reading_id = $1::uuid) as claims`,
       params: [readingId, studentId],
     },
@@ -271,6 +286,9 @@ export function claimOutcome(results: Record<string, unknown>[][], limit: number
   if ((results[1]?.length ?? 0) > 0) return "claimed";
   const row = results[2]?.[0];
   if (row?.has_claim) return "exists";
+  // Before the cap, so a student who doesn't qualify is refused, not told
+  // the reading is full.
+  if (row?.eligible !== true) return "refused";
   if (Number(row?.claims ?? 0) >= limit) return "limit_reached";
   return "refused";
 }

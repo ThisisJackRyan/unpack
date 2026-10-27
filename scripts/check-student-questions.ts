@@ -624,6 +624,10 @@ async function main(): Promise<void> {
     await checkFailureReleases(readingId, failStudent);
     await checkNotFound(readingId, draftId, otherStudent, spare);
     await checkCap();
+    // The local neon-proxy needs time for the Postgres backends from the cap
+    // race to exit; without this pause the burst below hit proxy connection
+    // churn (the earlier 33 errors), not the limiter.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
     await checkRateLimit();
     await checkShared();
     await checkClassGrade();

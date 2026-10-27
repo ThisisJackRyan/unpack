@@ -11,8 +11,10 @@ import {
   STUDENT_SETS_LIMITED_MESSAGE,
   STUDENT_SETS_PER_READING_LIMIT,
   studentContextStatement,
+  studentFacingResult,
   takeOverStatement,
   type StudentQuestion,
+  type StudentQuestionsResult,
   type StudentQuestionStore,
 } from "./student-questions-core";
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
@@ -286,6 +288,23 @@ describe("per-reading cap", () => {
   });
 });
 
+describe("studentFacingResult", () => {
+  it("shows not_allowed exactly like not_found", () => {
+    assert.deepEqual(studentFacingResult({ status: "not_allowed" }), { status: "not_found" });
+    assert.deepEqual(studentFacingResult({ status: "not_found" }), { status: "not_found" });
+  });
+
+  it("passes every other result through unchanged", () => {
+    const results: StudentQuestionsResult[] = [
+      { status: "ready", questions: [{ id: "q1", position: 1, prompt: "Why?" }] },
+      { status: "pending", retryAfterMs: 2_000 },
+      { status: "limit_reached" },
+      { status: "error", kind: "timeout", message: "m" },
+    ];
+    for (const r of results) assert.equal(studentFacingResult(r), r);
+  });
+});
+
 describe("stale claim timeout", () => {
   it("outlasts the write deadline, with margin", () => {
     assert.equal(QUESTION_WRITE_DEADLINE_MS, 110_000);
@@ -312,16 +331,22 @@ describe("student question statements", () => {
     assert.match(insert.text, /on conflict do nothing\s+returning claim_token$/);
     assert.deepEqual(insert.params, [READING, STUDENT, "t", 150]);
     assert.match(why.text, /as has_claim/);
+    assert.match(why.text, /r\.status = 'published' and r\.question_mode = 'per_student'\s+\) as eligible/);
     assert.match(why.text, /as claims/);
   });
 
   it("reads the claim outcome", () => {
     const claimed = [[{ id: READING }], [{ claim_token: "t" }], [{ has_claim: true, claims: 150 }]];
     assert.equal(claimOutcome(claimed, 150), "claimed");
-    assert.equal(claimOutcome([[{}], [], [{ has_claim: true, claims: 150 }]], 150), "exists");
-    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, claims: 150 }]], 150), "limit_reached");
-    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, claims: 149 }]], 150), "refused");
-    assert.equal(claimOutcome([[], [], [{ has_claim: false, claims: 0 }]], 150), "refused");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: true, eligible: false, claims: 150 }]], 150), "exists");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, eligible: true, claims: 150 }]], 150), "limit_reached");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, eligible: true, claims: 149 }]], 150), "refused");
+    assert.equal(claimOutcome([[], [], [{ has_claim: false, eligible: false, claims: 0 }]], 150), "refused");
+  });
+
+  it("refuses a student who doesn't qualify even at the cap", () => {
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, eligible: false, claims: 150 }]], 150), "refused");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, claims: 150 }]], 150), "refused");
   });
 
   it("takes over only pending claims older than the timeout", () => {

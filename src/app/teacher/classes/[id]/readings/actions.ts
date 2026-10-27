@@ -218,7 +218,12 @@ export async function updateReading(
       const again = await getReadingForTeacher(classId, readingId, teacher.id);
       return {
         errors: {
-          form: again ? PUBLISHED_TITLE_ONLY_MESSAGE : "We couldn’t find this reading.",
+          // Only blame publishing when the reading really is published now.
+          form: !again
+            ? "We couldn’t find this reading."
+            : again.reading.status === "published"
+              ? PUBLISHED_TITLE_ONLY_MESSAGE
+              : "We couldn’t save your changes. Please try again.",
         },
         values,
       };

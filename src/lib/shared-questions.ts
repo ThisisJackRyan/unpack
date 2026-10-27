@@ -304,7 +304,10 @@ returning r.id`,
 //
 // $1 class, $2 teacher, $3 new grade.
 //
-// 1. Lock the class row (owned), so two grade changes queue up.
+// 1. Lock the class row (owned), so two grade changes queue up. FOR NO
+//    KEY UPDATE, like the student claim: it still serializes grade
+//    changes, but doesn't block the FOR KEY SHARE lock that student joins
+//    and new readings take on the class.
 // 2. Lock the affected draft readings, with the same row lock every shared
 //    question write takes first (lockDraftStatement). A set being saved
 //    right now either commits before this (and step 3 deletes it) or waits
@@ -331,7 +334,7 @@ export function classGradeChangeStatements(
   )`;
   return [
     {
-      text: `select id from classes where id = $1::uuid and teacher_id = $2::uuid for update`,
+      text: `select id from classes where id = $1::uuid and teacher_id = $2::uuid for no key update`,
       params: [classId, teacherId],
     },
     {

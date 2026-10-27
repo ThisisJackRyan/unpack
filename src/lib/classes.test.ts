@@ -41,7 +41,7 @@ describe("classGradeChangeStatements", () => {
   it("locks the owned class, then the affected drafts", () => {
     assert.equal(
       lockClass.text,
-      "select id from classes where id = $1::uuid and teacher_id = $2::uuid for update",
+      "select id from classes where id = $1::uuid and teacher_id = $2::uuid for no key update",
     );
     assert.match(lockDrafts.text, /for update of r$/);
   });
