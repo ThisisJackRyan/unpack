@@ -14,6 +14,7 @@ import {
   selfCommitStatement,
   selfQuestionsView,
   selfQuestionWriter,
+  selfReleaseSlotStatement,
   selfReleaseStatement,
   type SelfQuestionStore,
 } from "./self-questions-core";
@@ -27,8 +28,9 @@ const PROMPTS = ["Why did Mia go out?", "What did the fox do?", "What do you thi
 const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
 
 // In-memory store: one reading owned by ACCOUNT, claim and commit atomic.
-function fakeStore(options: { limit?: number } = {}) {
-  const state = { questions: [] as string[], token: null as string | null, generations: 0, writes: 0 };
+// slotFree says whether a released reading could take a slot back.
+function fakeStore(options: { limit?: number; slotFree?: boolean } = {}) {
+  const state = { questions: [] as string[], token: null as string | null, generations: 0, writes: 0, released: false };
   const limit = options.limit ?? QUESTION_GENERATION_LIMIT;
   const store: SelfQuestionStore = {
     async loadContext(accountId) {
@@ -44,14 +46,26 @@ function fakeStore(options: { limit?: number } = {}) {
       if (accountId !== ACCOUNT) return "not_found";
       if (state.questions.length > 0) return "ready";
       if (state.token) return "pending";
+      if (state.released && options.slotFree === false) return "limit_reached";
       if (state.generations >= limit) return "rate_limited";
       state.generations++;
       state.token = token;
+      state.released = false;
       return "claimed";
     },
     async release(_a, _r, token) {
       await tick();
-      if (state.token === token) state.token = null;
+      if (state.token === token) {
+        state.token = null;
+        if (state.questions.length === 0) state.released = true;
+      }
+    },
+    async releaseSlot() {
+      await tick();
+      if (!state.token && state.questions.length === 0) state.released = true;
+    },
+    async allowanceState() {
+      return { used: 5, remaining: 0, nextFreeAt: new Date("2026-10-30T09:00:00Z") };
     },
     async commit(_a, _r, token, prompts) {
       await tick();
@@ -117,9 +131,29 @@ describe("getOrCreateSelfQuestionsWith", () => {
     assert.deepEqual(result, { status: "error", kind: "busy" });
     assert.equal(state.token, null);
     assert.equal(logs[0].kind, "busy");
+    // The failed write gave the weekly slot back...
+    assert.equal(state.released, true);
     const retry = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write: async () => PROMPTS, newToken });
     assert.equal(retry.status, "ready");
     assert.equal(state.generations, 2);
+    // ...and the Try again that wrote the set took it back.
+    assert.equal(state.released, false);
+  });
+
+  it("a Try again on a released reading with no free slot is limit_reached, with no model call", async () => {
+    const { store, state } = fakeStore({ slotFree: false });
+    const failing = async (): Promise<string[]> => {
+      throw new QuestionWriterError("failed", "500");
+    };
+    await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write: failing, newToken });
+    const write = async () => {
+      state.writes++;
+      return PROMPTS;
+    };
+    const result = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write, newToken });
+    assert.deepEqual(result, { status: "limit_reached", state: { used: 5, remaining: 0, nextFreeAt: new Date("2026-10-30T09:00:00Z") } });
+    assert.equal(state.writes, 0);
+    assert.equal(selfQuestionsView(result).kind, "limit_reached");
   });
 
   it("at the account's generation limit: rate_limited, no model call", async () => {
@@ -134,6 +168,7 @@ describe("getOrCreateSelfQuestionsWith", () => {
     });
     assert.deepEqual(result, { status: "rate_limited" });
     assert.equal(state.writes, 0);
+    assert.equal(state.released, true, "an open that can't write gives the slot back");
   });
 
   it("without a key: an error before any claim", async () => {
@@ -141,6 +176,7 @@ describe("getOrCreateSelfQuestionsWith", () => {
     const result = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write: async () => PROMPTS, newToken, configured: false });
     assert.deepEqual(result, { status: "error", kind: "not_configured" });
     assert.equal(state.generations, 0);
+    assert.equal(state.released, true, "not set up gives the slot back");
   });
 });
 
@@ -162,7 +198,7 @@ describe("self question statements", () => {
     assert.match(claim.text, /r\.id = \$2::uuid and r\.account_id = \$1::uuid/);
     assert.match(claim.text, /not exists \(select 1 from self_questions q where q\.reading_id = r\.id\)/);
     assert.match(claim.text, /update self_readings set questions_claim_token = \$3::uuid/);
-    assert.deepEqual(claim.params, [ACCOUNT, READING, "t1", CLAIM_STALE_SECONDS, QUESTION_GENERATION_WINDOW_MINUTES, QUESTION_GENERATION_LIMIT]);
+    assert.deepEqual(claim.params, [ACCOUNT, READING, "t1", CLAIM_STALE_SECONDS, QUESTION_GENERATION_WINDOW_MINUTES, QUESTION_GENERATION_LIMIT, 5, 7]);
     assert.match(prune.text, /^delete from question_generation_attempts/);
     assert.match(why.text, /as owned/);
   });
@@ -175,7 +211,29 @@ describe("self question statements", () => {
     assert.match(commit.text, /and exists \(select 1 from teachers t where t\.id = \$1::uuid and t\.role = 'self_learner'\)\n  returning id/);
   });
 
+  it("the claim takes a released slot back only while one is free, in the same statement", () => {
+    assert.match(claim.text, /set questions_claim_token = \$3::uuid, questions_claimed_at = now\(\), slot_released_at = null/);
+    assert.match(claim.text, /r\.slot_released_at is null or r\.created_at <= now\(\) - make_interval\(days => \$8::int\)/);
+    assert.match(claim.text, /where account_id = \$1::uuid and slot_released_at is null\n    and created_at > now\(\) - make_interval\(days => \$8::int\)\) < \$7::int/);
+    assert.match(why.text, /as slot_free$/);
+  });
+
+  it("the release gives the slot back only while there are no questions", () => {
+    const release = selfReleaseStatement(ACCOUNT, READING, "t1");
+    assert.match(release.text, /when exists \(select 1 from self_questions q where q\.reading_id = self_readings\.id\) then slot_released_at/);
+    assert.match(release.text, /else coalesce\(slot_released_at, now\(\)\)/);
+    const slot = selfReleaseSlotStatement(ACCOUNT, READING);
+    assert.match(slot.text, /^update self_readings set slot_released_at = now\(\)/);
+    assert.match(slot.text, /not exists \(select 1 from self_questions q/);
+    assert.match(slot.text, /questions_claim_token is null or questions_claimed_at < now\(\) - make_interval\(secs => \$3::int\)/);
+    assert.deepEqual(slot.params, [ACCOUNT, READING, CLAIM_STALE_SECONDS]);
+  });
+
   it("selfClaimOutcome says why", () => {
+    assert.equal(
+      selfClaimOutcome([[], [], [], [{ owned: true, has_questions: false, claimable: true, recent: 0, slot_free: false }]]),
+      "limit_reached",
+    );
     assert.equal(selfClaimOutcome([[], [{ id: READING }], [], []]), "claimed");
     assert.equal(selfClaimOutcome([[], [], [], [{ owned: false }]]), "not_found");
     assert.equal(selfClaimOutcome([[], [], [], [{ owned: true, has_questions: true }]]), "ready");

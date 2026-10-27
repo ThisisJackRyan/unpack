@@ -128,7 +128,9 @@ describe("createSelfReadingStatements", () => {
   it("inserts only for a self-learner under the allowance, counted in the rolling window", () => {
     assert.match(insert.text, /^insert into self_readings \(account_id, title, source_url, body_text, grade_level, question_count\)/);
     assert.match(insert.text, /where exists \(select 1 from teachers where id = \$1::uuid and role = 'self_learner'\)/);
-    assert.match(insert.text, /created_at > now\(\) - make_interval\(days => \$7::int\)\n\) < \$8::int/);
+    // Only readings that hold their slot count (a failed generation gives
+    // its slot back).
+    assert.match(insert.text, /where account_id = \$1::uuid and slot_released_at is null\n    and created_at > now\(\) - make_interval\(days => \$7::int\)\) < \$8::int/);
     assert.deepEqual(insert.params, [ID, "The fox", null, DRAFT.bodyText, "5", 3, 7, 5]);
     // Never class or student tables.
     assert.equal(/\b(classes|students|readings r|from readings)\b/.test(insert.text), false);
@@ -136,6 +138,7 @@ describe("createSelfReadingStatements", () => {
 
   it("then reads the window and the role for the outcome", () => {
     assert.match(after.text, /count\(\*\)::int as used, min\(created_at\) as oldest/);
+    assert.match(after.text, /slot_released_at is null/);
     assert.deepEqual(after.params, [ID, 7]);
   });
 });

@@ -9,6 +9,7 @@ import { QuestionSkeletons } from "@/components/question-skeletons";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
 import { backLink, card, primaryButton, secondaryButton } from "@/components/ui";
 import { requireSelfLearner } from "@/lib/account";
+import { requestTimeZone } from "@/lib/request-time-zone";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel } from "@/lib/question-modes";
 import { soloAnnouncement, soloStage, type SoloStage } from "@/lib/self-answers-core";
@@ -17,6 +18,7 @@ import { getOrCreateSelfQuestions, getSelfReading, loadSelfProgress } from "@/li
 import type { StudentQuestion } from "@/lib/student-questions-core";
 import { PENDING_MAX_REFRESHES, readingParagraphs, sourceHost } from "@/lib/student-reading-view";
 import { MAX_TRIES } from "@/lib/validate-answers";
+import { AllowanceLimit } from "../../allowance";
 import { submitSelfAnswersAction } from "./actions";
 
 // The first open writes the questions (QUESTION_WRITE_DEADLINE_MS, 110s,
@@ -44,8 +46,10 @@ export default async function SelfReadingPage({ params }: Props) {
   const reading = await getSelfReading(account.id, readingId);
   if (!reading) notFound();
 
-  const view = selfQuestionsView(await getOrCreateSelfQuestions(account.id, reading.id));
+  const result = await getOrCreateSelfQuestions(account.id, reading.id);
+  const view = selfQuestionsView(result);
   if (view.kind === "not_found") notFound();
+  const zone = result.status === "limit_reached" ? await requestTimeZone() : null;
   const stage = view.kind === "questions" ? soloStage(await loadSelfProgress(account.id, reading.id)) : null;
   const host = sourceHost(reading.sourceUrl);
 
@@ -102,6 +106,15 @@ export default async function SelfReadingPage({ params }: Props) {
           <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES}>
             <QuestionSkeletons count={reading.questionCount} />
           </PendingRefresh>
+        )}
+
+        {/* This reading's questions failed before, so it gave its weekly
+            slot back, and every slot is in use now. */}
+        {result.status === "limit_reached" && zone && (
+          <div className="flex flex-col items-start gap-5">
+            <AllowanceLimit state={result.state} now={new Date()} timeZone={zone.timeZone} utcLabel={zone.fallback} />
+            <RetryButton />
+          </div>
         )}
 
         {(view.kind === "throttled" || view.kind === "error") && (

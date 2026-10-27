@@ -26,11 +26,31 @@
 // 5. On a model error, clear the claim (only if this token holds it), so
 //    the next open (Try again) can claim again. Every claim counted toward
 //    the account's limit, so retries are bounded.
+//
+// The weekly allowance slot (see self-allowance.ts): a reading whose
+// questions never get written gives its slot back. The release in step 5
+// also sets slot_released_at while the reading has no questions, and so
+// does an open that can't start a write (not set up, or the account's
+// question limit). The claim in step 2 takes the slot back (clears
+// slot_released_at) in the same statement, only while the account has a
+// free slot (or the reading is already older than the window), under the
+// account lock the create takes, so creates and Try agains together never
+// hold more than the allowance. No free slot: "limit_reached", and the
+// page shows when the next one frees up.
 
 import type { QuestionErrorKind, QuestionModel } from "./ai/questions";
 import { questionErrorKind, questionErrorLogFields, writeQuestionSet } from "./ai/questions";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
+import {
+  allowanceFor,
+  allowanceFromRow,
+  allowanceStatement,
+  heldSlotsSql,
+  selfLearnerPlan,
+  type AllowanceState,
+  type ReadingAllowance,
+} from "./self-allowance";
 import {
   QUESTION_GENERATION_LIMIT,
   QUESTION_GENERATION_PRUNE_HOURS,
@@ -46,13 +66,19 @@ import { QUESTIONS_ERROR_MESSAGE, type StudentReadingView } from "./student-read
 
 export type SelfReadingContext = { bodyText: string; gradeLevel: GradeLevel; questionCount: number };
 
-export type SelfClaimOutcome = "claimed" | "ready" | "pending" | "rate_limited" | "not_found";
+export type SelfClaimOutcome = "claimed" | "ready" | "pending" | "rate_limited" | "limit_reached" | "not_found";
 
 export type SelfQuestionStore = {
   loadContext(accountId: string, readingId: string): Promise<SelfReadingContext | null>;
   readQuestions(accountId: string, readingId: string): Promise<StudentQuestion[]>;
-  claim(accountId: string, readingId: string, token: string): Promise<SelfClaimOutcome>;
+  claim(accountId: string, readingId: string, token: string, allowance: ReadingAllowance): Promise<SelfClaimOutcome>;
+  // Clears this token's claim, and releases the reading's slot if it has
+  // no questions.
   release(accountId: string, readingId: string, token: string): Promise<void>;
+  // Releases the slot of a reading with no questions and no live claim.
+  releaseSlot(accountId: string, readingId: string): Promise<void>;
+  // Where the allowance stands, for the limit_reached message.
+  allowanceState(accountId: string, allowance: ReadingAllowance): Promise<AllowanceState>;
   // False when the claim was lost (taken over after going stale).
   commit(accountId: string, readingId: string, token: string, prompts: string[]): Promise<boolean>;
 };
@@ -76,8 +102,10 @@ export type SelfQuestionDeps = {
   write: SelfQuestionWriter;
   newToken: () => string;
   // False without AI Gateway credentials: fail before claiming, so nothing
-  // is counted.
+  // is counted (and the reading's slot is released).
   configured?: boolean;
+  // The account's plan allowance; the free plan by default.
+  allowance?: ReadingAllowance;
   // Safe fields only (never the text or prompts).
   onError?: (fields: Record<string, unknown>) => void;
 };
@@ -86,6 +114,8 @@ export type SelfQuestionsResult =
   | { status: "ready"; questions: StudentQuestion[] }
   | { status: "pending"; retryAfterMs: number }
   | { status: "rate_limited" }
+  // A released reading's Try again with every slot in use.
+  | { status: "limit_reached"; state: AllowanceState }
   | { status: "not_found" }
   | { status: "error"; kind: QuestionErrorKind };
 
@@ -112,11 +142,20 @@ export async function getOrCreateSelfQuestionsWith(
   const cached = await store.readQuestions(accountId, readingId);
   if (cached.length > 0) return { status: "ready", questions: cached };
 
-  if (deps.configured === false) return { status: "error", kind: "not_configured" };
+  if (deps.configured === false) {
+    await store.releaseSlot(accountId, readingId);
+    return { status: "error", kind: "not_configured" };
+  }
 
+  const allowance = deps.allowance ?? allowanceFor(selfLearnerPlan());
   const token = deps.newToken();
-  const claim = await store.claim(accountId, readingId, token);
-  if (claim === "not_found" || claim === "rate_limited") return { status: claim };
+  const claim = await store.claim(accountId, readingId, token, allowance);
+  if (claim === "not_found") return { status: claim };
+  if (claim === "rate_limited") {
+    await store.releaseSlot(accountId, readingId);
+    return { status: claim };
+  }
+  if (claim === "limit_reached") return { status: claim, state: await store.allowanceState(accountId, allowance) };
   if (claim === "ready" || claim === "pending") return readyOrPending(store, accountId, readingId);
 
   let prompts: string[];
@@ -148,6 +187,9 @@ export function selfQuestionsView(result: SelfQuestionsResult): StudentReadingVi
       return { kind: "pending", retryAfterMs: result.retryAfterMs };
     case "rate_limited":
       return { kind: "throttled", message: STUDENT_GENERATION_THROTTLED_MESSAGE };
+    case "limit_reached":
+      // The page shows the allowance note (with the time) instead.
+      return { kind: "limit_reached", message: STUDENT_GENERATION_THROTTLED_MESSAGE };
     case "error":
       return { kind: "error", message: QUESTIONS_ERROR_MESSAGE };
     case "not_found":
@@ -194,27 +236,46 @@ function recentGenerations(n: number): string {
   where teacher_id = $1::uuid and created_at > now() - make_interval(mins => $${n}::int))`;
 }
 
+// The reading holds its slot, or can take one back: not released, already
+// older than the window ($w: window days), or fewer than the allowance
+// ($a) hold a slot. $1 account, $2 reading.
+function slotFree(w: number, a: number): string {
+  return `(
+  coalesce((select r.slot_released_at is null or r.created_at <= now() - make_interval(days => $${w}::int)
+    from self_readings r where r.id = $2::uuid and r.account_id = $1::uuid), false)
+  or ${heldSlotsSql(w)} < $${a}::int
+)`;
+}
+
 // The claim, as ONE READ COMMITTED transaction (see the top of this file):
-// 1. Lock the account row, so this account's claims and limiter counts
-//    queue up here (a few milliseconds).
-// 2. Count the generation and take the claim together, only when both
-//    hold (a fresh snapshot after the lock wait, so exact).
+// 1. Lock the account row, so this account's claims, creates, and limiter
+//    counts queue up here (a few milliseconds).
+// 2. Count the generation, take the claim, and take the slot back (if it
+//    was released) together, only when all of it holds (a fresh snapshot
+//    after the lock wait, so exact).
 // 3. Prune the account's generation rows older than the prune window, as
 //    the limiter does.
 // 4. Say why when nothing was claimed.
-export function selfClaimStatements(accountId: string, readingId: string, token: string): Statement[] {
+export function selfClaimStatements(
+  accountId: string,
+  readingId: string,
+  token: string,
+  allowance: ReadingAllowance = allowanceFor(selfLearnerPlan()),
+): Statement[] {
   return [
     { text: "select id from teachers where id = $1::uuid for update", params: [accountId] },
     {
-      // $3 token, $4 stale seconds, $5 window minutes, $6 limit.
+      // $3 token, $4 stale seconds, $5 window minutes, $6 limit, $7
+      // allowance readings, $8 allowance days.
       text: `with counted as (
   insert into question_generation_attempts (teacher_id)
   select $1::uuid
   where ${claimable(4)}
     and ${recentGenerations(5)} < $6::int
+    and ${slotFree(8, 7)}
   returning id
 )
-update self_readings set questions_claim_token = $3::uuid, questions_claimed_at = now()
+update self_readings set questions_claim_token = $3::uuid, questions_claimed_at = now(), slot_released_at = null
 where id = $2::uuid and account_id = $1::uuid and exists (select 1 from counted)
 returning id`,
       params: [
@@ -224,6 +285,8 @@ returning id`,
         CLAIM_STALE_SECONDS,
         QUESTION_GENERATION_WINDOW_MINUTES,
         QUESTION_GENERATION_LIMIT,
+        allowance.readings,
+        allowance.windowDays,
       ],
     },
     {
@@ -233,7 +296,8 @@ where teacher_id = $1::uuid
       params: [accountId, QUESTION_GENERATION_PRUNE_HOURS],
     },
     {
-      // $3 stale seconds, $4 window minutes.
+      // $3 stale seconds, $4 window minutes, $5 allowance readings, $6
+      // allowance days.
       text: `select
   exists (
     select 1 from self_readings r join teachers t on t.id = r.account_id
@@ -244,8 +308,9 @@ where teacher_id = $1::uuid
     where q.reading_id = $2::uuid and r.account_id = $1::uuid
   ) as has_questions,
   ${claimable(3)} as claimable,
-  ${recentGenerations(4)}::int as recent`,
-      params: [accountId, readingId, CLAIM_STALE_SECONDS, QUESTION_GENERATION_WINDOW_MINUTES],
+  ${recentGenerations(4)}::int as recent,
+  ${slotFree(6, 5)} as slot_free`,
+      params: [accountId, readingId, CLAIM_STALE_SECONDS, QUESTION_GENERATION_WINDOW_MINUTES, allowance.readings, allowance.windowDays],
     },
   ];
 }
@@ -257,15 +322,35 @@ export function selfClaimOutcome(results: Record<string, unknown>[][]): SelfClai
   if (row.has_questions === true) return "ready";
   // Someone else holds a live claim: wait for it.
   if (row.claimable !== true) return "pending";
+  // Before the question limit: after a break there would still be no slot.
+  if (row.slot_free === false) return "limit_reached";
   if (Number(row.recent ?? 0) >= QUESTION_GENERATION_LIMIT) return "rate_limited";
   return "pending";
 }
 
+// Clears this token's claim and, while the reading has no questions,
+// releases its slot.
 export function selfReleaseStatement(accountId: string, readingId: string, token: string): Statement {
   return {
-    text: `update self_readings set questions_claim_token = null, questions_claimed_at = null
+    text: `update self_readings set questions_claim_token = null, questions_claimed_at = null,
+  slot_released_at = case
+    when exists (select 1 from self_questions q where q.reading_id = self_readings.id) then slot_released_at
+    else coalesce(slot_released_at, now())
+  end
 where id = $2::uuid and account_id = $1::uuid and questions_claim_token = $3::uuid`,
     params: [accountId, readingId, token],
+  };
+}
+
+// Releases the slot of a reading with no questions and no live claim
+// (an open that couldn't start a write). $3 stale seconds.
+export function selfReleaseSlotStatement(accountId: string, readingId: string): Statement {
+  return {
+    text: `update self_readings set slot_released_at = now()
+where id = $2::uuid and account_id = $1::uuid and slot_released_at is null
+  and not exists (select 1 from self_questions q where q.reading_id = self_readings.id)
+  and (questions_claim_token is null or questions_claimed_at < now() - make_interval(secs => $3::int))`,
+    params: [accountId, readingId, CLAIM_STALE_SECONDS],
   };
 }
 
@@ -303,11 +388,18 @@ export function postgresSelfQuestionStore(execute: StatementExecutor): SelfQuest
       const rows = await one(selfQuestionsStatement(accountId, readingId));
       return rows.map((r) => ({ id: String(r.id), position: Number(r.position), prompt: String(r.prompt) }));
     },
-    async claim(accountId, readingId, token) {
-      return selfClaimOutcome(await execute(selfClaimStatements(accountId, readingId, token)));
+    async claim(accountId, readingId, token, allowance) {
+      return selfClaimOutcome(await execute(selfClaimStatements(accountId, readingId, token, allowance)));
     },
     async release(accountId, readingId, token) {
       await one(selfReleaseStatement(accountId, readingId, token));
+    },
+    async releaseSlot(accountId, readingId) {
+      await one(selfReleaseSlotStatement(accountId, readingId));
+    },
+    async allowanceState(accountId, allowance) {
+      const [row] = await one(allowanceStatement(accountId, allowance));
+      return allowanceFromRow(row, allowance);
     },
     async commit(accountId, readingId, token, prompts) {
       const rows = await one(selfCommitStatement(accountId, readingId, token, prompts));

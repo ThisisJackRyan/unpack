@@ -37,6 +37,7 @@ import { randomUUID } from "node:crypto";
 import { getSql } from "@/db";
 import { setRoleOutcome, setRoleStatements, type AccountRole, type SetRoleOutcome } from "@/lib/account-role";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
+import { QuestionWriterError } from "@/lib/ai/questions";
 import { deletedAccountRows, deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import { neonExecutor } from "@/lib/neon-executor";
 import { selfClaimCheckStatements, selfCommitStatements, soloStage } from "@/lib/self-answers-core";
@@ -72,7 +73,7 @@ const SUBMITS = intFlag("submits", 10);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
-const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_teacher", "test_self_gone", "test_self_kept"];
+const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_c", "test_self_teacher", "test_self_gone", "test_self_kept"];
 const FREE = allowanceFor("free");
 
 const sql = getSql();
@@ -296,6 +297,69 @@ async function checkAllowance() {
   check(inWindow.n === FREE.readings, `...leaving ${inWindow.n} in the window`);
 }
 
+// A reading whose questions never get written gives its weekly slot back;
+// its Try again takes one back only while one is free, and creates racing
+// Try agains never pass the allowance.
+async function checkFailedGenerations() {
+  console.log("\n== (c2) FAILED GENERATIONS DON'T USE A SLOT ==");
+  const cId = await newAccount("test_self_c", "self_learner");
+  const draft = (i: number) => ({ title: `Slot ${i}`, bodyText: BODY, sourceUrl: null, gradeLevel: "5" as const, questionCount: 3 });
+  const failing = async (): Promise<string[]> => {
+    throw new QuestionWriterError("failed", "a fake outage");
+  };
+  const failed: string[] = [];
+  for (let i = 0; i < FREE.readings; i++) {
+    const created = await createSelfReading(cId, draft(i));
+    if (created.status !== "created") break;
+    const opened = await getOrCreateSelfQuestions(cId, created.id, { write: failing });
+    if (opened.status === "error") failed.push(created.id);
+  }
+  const afterFail = await getAllowance(cId);
+  check(
+    failed.length === FREE.readings && afterFail.remaining === FREE.readings,
+    `${failed.length} readings whose questions failed leave all ${afterFail.remaining} of ${FREE.readings} slots free`,
+  );
+  const held: string[] = [];
+  const more = await Promise.all(Array.from({ length: FREE.readings + 3 }, (_, i) => createSelfReading(cId, draft(10 + i))));
+  for (const o of more) if (o.status === "created") held.push(o.id);
+  check(held.length === FREE.readings, `then ${FREE.readings + 3} creates at once make exactly ${FREE.readings} (${held.length})`);
+  for (const id of held) await readyQuestions(cId, id);
+  const full = await getAllowance(cId);
+  check(full.remaining === 0, `readings with questions hold their slots (${full.remaining} left)`);
+
+  let writes = 0;
+  const counting = async (): Promise<string[]> => {
+    writes++;
+    return PROMPTS;
+  };
+  const retry = await getOrCreateSelfQuestions(cId, failed[0], { write: counting });
+  check(
+    retry.status === "limit_reached" && writes === 0 && retry.state.nextFreeAt !== null,
+    `a Try again on a released reading with no free slot: ${retry.status}, ${writes} model calls`,
+  );
+
+  // Free exactly one slot (the oldest held reading leaves the window), then
+  // race 3 Try agains on released readings against 3 creates.
+  await sql`update self_readings set created_at = now() - interval '8 days' where id = ${held[0]}`;
+  const raced = await Promise.all([
+    ...failed.slice(0, 3).map((id) => getOrCreateSelfQuestions(cId, id, { write: counting })),
+    ...[1, 2, 3].map((i) => createSelfReading(cId, draft(100 + i))),
+  ]);
+  const won = raced.filter((r) => r.status === "ready" || r.status === "created").length;
+  const nowHeld = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings
+    where account_id = ${cId} and slot_released_at is null and created_at > now() - interval '7 days'`);
+  check(
+    won === 1 && nowHeld.n === FREE.readings,
+    `one free slot, 3 Try agains and 3 creates at once: exactly ${won} got it, ${nowHeld.n} slots held (${raced.map((r) => r.status).join(", ")})`,
+  );
+  const withQuestions = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings r
+    where r.account_id = ${cId} and r.slot_released_at is not null
+      and exists (select 1 from self_questions q where q.reading_id = r.id)`);
+  check(withQuestions.n === 0, `no reading with questions is ever marked released (${withQuestions.n})`);
+}
+
 async function checkSoloFlow() {
   console.log("\n== (e) SOLO FLOW ==");
   const challengesBefore = await one<{ n: number }>(sql`select count(*)::int as n from challenges`);
@@ -449,6 +513,7 @@ async function main(): Promise<void> {
     await checkRole();
     await checkIsolation();
     await checkAllowance();
+    await checkFailedGenerations();
     await checkSoloFlow();
     await checkRoleAndOwnerAtWrite();
     await checkDelete();
