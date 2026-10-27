@@ -23,7 +23,7 @@ Nothing we found ships this full loop. Actively Learn gates but doesn't use AI j
 - Teacher: paste a link or text, review/edit questions (optional), share a code.
 - Student: join with code + name, read view with copy-paste blocked, questionnaire, AI pass/fail with nudges, 3 tries, then a note to the teacher (Accept counts as Passed; Deny, optionally with one more try).
 - Teacher visibility: lightweight (who's done, who's stuck) plus a queue of student challenges, not a grade dashboard.
-- Cost protection: teacher-owned codes that can be turned on and off or replaced, a cap of 150 student question sets per reading, a "Try again" limit on each student's own question set (3 AI calls per 10 minutes, 6 in all), questions cached per reading, join rate limits per code and IP, one effort check per attempt with 6 per student per reading by default (+2 with each extra try a teacher gives), and a bot check on join (Cloudflare Turnstile; teacher sign-up uses Clerk's). No per-teacher AI budget.
+- Cost protection: teacher-owned codes that can be turned on and off or replaced, a cap of 150 student question sets per reading, a "Try again" limit on each student's own question set (3 AI calls per 10 minutes, 6 in all), questions cached per reading, join rate limits per code and IP, one effort check per attempt with 6 per student per reading by default (+2 with each extra try a teacher gives), and a bot check on join (Cloudflare Turnstile; teacher sign-up uses Clerk's own "Challenge suspicious sign-ups"). No per-teacher AI budget.
 
 ## Non-goals for v1
 Self-learner extension, district sales/rostering, quality grading, a fixed content library.

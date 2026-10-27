@@ -38,7 +38,7 @@ pnpm test      # unit tests (no network; the Anthropic SDK is mocked)
 
 Copy `.env.example` to `.env.local` and fill it in. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`. The question request (`output_config.effort`, strict tools, auto tool choice) targets current 5.x models; an older `ANTHROPIC_MODEL` may return a 400.
 
-The student join form's bot check (Cloudflare Turnstile) is on only when both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set; leave both empty for local dev, or use Cloudflare's public test keys (see `.env.example`). Teacher sign-up's bot check is Clerk's "Bot sign-up protection", turned on in the Clerk dashboard.
+The student join form's bot check (Cloudflare Turnstile) is on only when both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set; leave both empty for local dev, or use Cloudflare's public test keys (see `.env.example`). Teacher sign-up's bot check is Clerk's own "Challenge suspicious sign-ups" (Clerk Dashboard, Protect, Protections), on by default for new Clerk apps; see the v1 spec for exactly what it covers.
 
 ### Database checks
 
