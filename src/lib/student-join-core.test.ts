@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { hashJoinCode } from "./client-ip";
+import { JOIN_LIMITED_MESSAGE } from "./join-rate-limit";
 import type { Statement } from "./link-rate-limit";
 import {
   isNameTakenConflict,
   joinClassWith,
+  joinOutcomeErrors,
   joinStudentStatement,
   NAME_TAKEN_MESSAGE,
 } from "./student-join-core";
 import { hashSessionToken } from "./student-session-token";
+import { CLASS_NOT_FOUND_MESSAGE, JOIN_FAILED_MESSAGE, validateJoin } from "./validate-join";
 
 const DATA = { code: "ABC234", firstName: "Maya", lastInitials: "Ro" };
 const IP = "c".repeat(64);
@@ -109,5 +112,35 @@ describe("joinClassWith", () => {
       joinClassWith(DATA, { execute: fakeDb({ insertError: other }).execute, ipHash: IP }),
       /dup token/,
     );
+  });
+});
+
+describe("joinOutcomeErrors", () => {
+  it("puts an unknown or turned-off code on the code field, with the exact text", () => {
+    const errors = joinOutcomeErrors({ status: "class_not_found" });
+    assert.deepEqual(errors, { code: CLASS_NOT_FOUND_MESSAGE });
+    assert.equal(errors.code, "We couldn\u2019t find that class code. Check it with your teacher.");
+    assert.notEqual(errors.code, JOIN_FAILED_MESSAGE);
+  });
+
+  it("keeps the other outcomes on their own fields", () => {
+    assert.deepEqual(joinOutcomeErrors({ status: "limited" }), { form: JOIN_LIMITED_MESSAGE });
+    assert.deepEqual(joinOutcomeErrors({ status: "name_taken" }), { lastInitials: NAME_TAKEN_MESSAGE });
+  });
+
+  // Codes that pass validateJoin but match no class (or a class whose code
+  // is off): the lookup returns no row, never an error, so the student sees
+  // the code-field message and not the generic one.
+  it("shows the code-field message for every well-formed code that misses", async () => {
+    for (const code of ["ZZZZZZ", "abc-234", " a b c 2 3 4 ", "O0I1L0", "A", "ABCDEFGHJKMN"]) {
+      const result = validateJoin({ code, firstName: "Maya", lastInitials: "Ro" });
+      assert.ok(result.ok, code);
+      const db = fakeDb({ inserted: [] });
+      const outcome = await joinClassWith(result.data, { execute: db.execute, ipHash: IP });
+      assert.equal(outcome.status, "class_not_found", code);
+      if (outcome.status !== "class_not_found") continue;
+      assert.deepEqual(joinOutcomeErrors(outcome), { code: CLASS_NOT_FOUND_MESSAGE }, code);
+      assert.equal(db.calls[1][0].params[0], result.data.code, code);
+    }
   });
 });

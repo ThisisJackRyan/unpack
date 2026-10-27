@@ -5,12 +5,10 @@ import { redirect } from "next/navigation";
 import { clientIpFromHeaders, hashJoinIp } from "@/lib/client-ip";
 import { botCheckMessage, TURNSTILE_RESPONSE_FIELD, verifyJoinBotCheck } from "@/lib/join-bot-check";
 import { joinConfigBlock } from "@/lib/join-config";
-import { JOIN_LIMITED_MESSAGE } from "@/lib/join-rate-limit";
 import { joinClass } from "@/lib/student-join";
-import { NAME_TAKEN_MESSAGE, type JoinOutcome } from "@/lib/student-join-core";
+import { joinOutcomeErrors, type JoinOutcome } from "@/lib/student-join-core";
 import { setStudentSessionCookie } from "@/lib/student-session";
 import {
-  CLASS_NOT_FOUND_MESSAGE,
   JOIN_DISABLED_MESSAGE,
   JOIN_FAILED_MESSAGE,
   logJoinBlockedConfig,
@@ -69,14 +67,7 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
     return { errors: { form: JOIN_FAILED_MESSAGE }, values };
   }
 
-  switch (outcome.status) {
-    case "limited":
-      return { errors: { form: JOIN_LIMITED_MESSAGE }, values };
-    case "class_not_found":
-      return { errors: { code: CLASS_NOT_FOUND_MESSAGE }, values };
-    case "name_taken":
-      return { errors: { lastInitials: NAME_TAKEN_MESSAGE }, values };
-  }
+  if (outcome.status !== "joined") return { errors: joinOutcomeErrors(outcome), values };
 
   await setStudentSessionCookie(outcome.token);
   // redirect() throws, so it stays outside the try above.
