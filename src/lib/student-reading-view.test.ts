@@ -12,6 +12,7 @@ import {
   PENDING_MAX_REFRESHES,
   perStudentView,
   QUESTIONS_ERROR_MESSAGE,
+  QUESTIONS_UNAVAILABLE_MESSAGE,
   readingParagraphs,
   sharedView,
   sourceHost,
@@ -31,7 +32,11 @@ describe("perStudentView", () => {
       [{ status: "calls_used_up" }, { kind: "calls_used_up", message: STUDENT_GENERATION_USED_UP_MESSAGE }],
       [{ status: "throttled", retryAt: null }, { kind: "throttled", message: `${STUDENT_GENERATION_THROTTLED_MESSAGE} Try again in a few minutes.` }],
       [
-        { status: "error", kind: "not_configured", message: "Question writing isn’t set up yet." },
+        { status: "error", kind: "not_configured", message: "teacher text" },
+        { kind: "unavailable", message: QUESTIONS_UNAVAILABLE_MESSAGE },
+      ],
+      [
+        { status: "error", kind: "failed", message: "teacher text" },
         { kind: "error", message: QUESTIONS_ERROR_MESSAGE },
       ],
       [{ status: "not_found" }, { kind: "not_found" }],

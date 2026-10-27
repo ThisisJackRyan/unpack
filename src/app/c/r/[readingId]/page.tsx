@@ -122,6 +122,16 @@ export default async function StudentReadingPage({ params }: Props) {
             <RetryButton />
           </div>
         )}
+
+        {/* Question writing is unavailable: coming back later is the fix,
+            so no Try again. */}
+        {view.kind === "unavailable" && (
+          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
+            <p role="status" className="text-lg text-zinc-700">
+              {view.message}
+            </p>
+          </div>
+        )}
       </section>
     </div>
   );

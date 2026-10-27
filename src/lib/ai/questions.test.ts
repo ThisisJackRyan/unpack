@@ -425,7 +425,7 @@ describe("questionErrorKind", () => {
 
   it("has a short, plain message for every kind", () => {
     assert.deepEqual(QUESTION_ERROR_MESSAGES, {
-      not_configured: "Question writing isn’t set up yet.",
+      not_configured: "Question writing isn’t available right now. Trying again soon won’t help, so please check back later.",
       busy: "Question writing is busy right now. Try again in a minute.",
       timeout: "That took too long. Try again.",
       failed: "We couldn’t write questions this time. Try again.",

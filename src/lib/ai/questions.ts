@@ -28,8 +28,10 @@ import {
 export {
   QUESTION_ERROR_MESSAGES,
   QuestionWriterError,
+  questionErrorClass,
   questionErrorKind,
   questionErrorLogFields,
+  type QuestionErrorClass,
   type QuestionErrorKind,
 } from "./errors";
 export type { ModelCall, ModelReply, ModelRequest, QuestionModel } from "./model";

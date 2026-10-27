@@ -63,7 +63,7 @@ import {
   PENDING_RETRY_AFTER_MS,
   type StudentQuestion,
 } from "./student-questions-core";
-import { QUESTIONS_ERROR_MESSAGE, type StudentReadingView } from "./student-reading-view";
+import { questionErrorView, SELF_QUESTIONS_UNAVAILABLE_MESSAGE, type StudentReadingView } from "./student-reading-view";
 
 // At the account's question writing limit (the teacher limit, reused):
 // an amber note, then when the next one frees up.
@@ -202,7 +202,7 @@ export function selfQuestionsView(result: SelfQuestionsResult, clock: RetryClock
       // The page shows the allowance note (with the time) instead.
       return { kind: "limit_reached", message: SELF_QUESTIONS_LIMITED_MESSAGE };
     case "error":
-      return { kind: "error", message: QUESTIONS_ERROR_MESSAGE };
+      return questionErrorView(result.kind, SELF_QUESTIONS_UNAVAILABLE_MESSAGE);
     case "not_found":
       return { kind: "not_found" };
   }

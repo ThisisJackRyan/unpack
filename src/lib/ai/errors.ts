@@ -22,8 +22,32 @@ export type QuestionErrorKind =
   | "timeout"
   | "failed";
 
+// What a failure means for the person waiting, from its kind:
+// - unavailable: question writing can't work until someone fixes it
+//   (no credentials, a 401/403, an unknown model, or a 402: AI Gateway is
+//   out of credits). Retrying soon won't help, so the copy says to come
+//   back later and offers no Try again.
+// - transient: a timeout, a busy or overloaded model, or a one-off
+//   failure (400, other 5xx, a network error). Trying again may work.
+// A provider outage shows up as one of these too: a 529 or overloaded
+// reply is busy, a 5xx is failed (one request can't tell an outage from a
+// one-off error).
+export type QuestionErrorClass = "unavailable" | "transient";
+
+export const QUESTION_ERROR_CLASSES: Record<QuestionErrorKind, QuestionErrorClass> = {
+  not_configured: "unavailable",
+  busy: "transient",
+  timeout: "transient",
+  failed: "transient",
+};
+
+export function questionErrorClass(kind: QuestionErrorKind): QuestionErrorClass {
+  return QUESTION_ERROR_CLASSES[kind];
+}
+
+// Teacher-facing (a set, a sample, or a replacement question).
 export const QUESTION_ERROR_MESSAGES: Record<QuestionErrorKind, string> = {
-  not_configured: "Question writing isn’t set up yet.",
+  not_configured: "Question writing isn’t available right now. Trying again soon won’t help, so please check back later.",
   busy: "Question writing is busy right now. Try again in a minute.",
   timeout: "That took too long. Try again.",
   failed: "We couldn’t write questions this time. Try again.",
