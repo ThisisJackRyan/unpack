@@ -183,6 +183,24 @@ export type CreateOutcome =
   // No such account, or it isn't a self-learner (now).
   | { status: "not_allowed" };
 
+// Where createSelfReadingAction goes after the insert. Always a replace,
+// not a push (a server action's redirect pushes by default): Back from
+// the new reading then goes to /learn, not to the filled-in /learn/new.
+// At the allowance, /learn/new itself shows the calm limit note.
+export type CreateRedirect = { path: string; type: "replace" };
+
+export function createOutcomeRedirect(outcome: CreateOutcome): CreateRedirect {
+  switch (outcome.status) {
+    case "created":
+      return { path: `/learn/r/${outcome.id}`, type: "replace" };
+    case "limit_reached":
+      return { path: "/learn/new", type: "replace" };
+    case "not_allowed":
+      // Not a self-learner any more (switched in another tab).
+      return { path: "/home", type: "replace" };
+  }
+}
+
 export function allowanceFromRow(row: Record<string, unknown> | undefined, allowance: ReadingAllowance): AllowanceState {
   return allowanceState(Number(row?.used ?? 0), dateFromRow(row?.oldest), allowance);
 }

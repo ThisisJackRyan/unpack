@@ -9,6 +9,7 @@ import {
   allowanceState,
   countsAt,
   createOutcome,
+  createOutcomeRedirect,
   createSelfReadingStatements,
   formatNextFree,
   nextFreeAt,
@@ -162,5 +163,16 @@ describe("createOutcome", () => {
   it("not_allowed for a teacher or no account", () => {
     assert.deepEqual(createOutcome([[], [], [{ used: 0, oldest: null, role: "teacher" }]], FREE), { status: "not_allowed" });
     assert.deepEqual(createOutcome([[], [], [{ used: 0, oldest: null, role: null }]], FREE), { status: "not_allowed" });
+  });
+});
+
+describe("createOutcomeRedirect", () => {
+  it("replaces /learn/new in history, so Back from the new reading goes to /learn", () => {
+    assert.deepEqual(createOutcomeRedirect({ status: "created", id: "r1" }), { path: "/learn/r/r1", type: "replace" });
+    assert.deepEqual(createOutcomeRedirect({ status: "limit_reached", state: allowanceState(1, null, FREE) }), {
+      path: "/learn/new",
+      type: "replace",
+    });
+    assert.deepEqual(createOutcomeRedirect({ status: "not_allowed" }), { path: "/home", type: "replace" });
   });
 });
