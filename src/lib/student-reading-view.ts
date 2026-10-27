@@ -4,7 +4,9 @@
 // reading's class) renders exactly like "not_found" and a page can't
 // reveal that the reading exists.
 
+import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
 import {
+  PENDING_RETRY_AFTER_MS,
   STUDENT_SETS_LIMITED_MESSAGE,
   studentFacingResult,
   type StudentQuestion,
@@ -14,9 +16,11 @@ import {
 export const QUESTIONS_ERROR_MESSAGE = "We couldn’t get your questions ready. Try again in a moment.";
 
 // How many times the pending view refreshes itself before showing a Try
-// again button. With PENDING_RETRY_AFTER_MS (2s) that is about a minute,
-// longer than most question writes.
-export const PENDING_MAX_REFRESHES = 30;
+// again button: enough refreshes, PENDING_RETRY_AFTER_MS (2s) apart, to
+// cover the whole QUESTION_WRITE_DEADLINE_MS (110s), plus 5 more for the
+// commit and slow page loads: 60, about 2 minutes. A write still running
+// is never cut off by the Try again button showing early.
+export const PENDING_MAX_REFRESHES = Math.ceil(QUESTION_WRITE_DEADLINE_MS / PENDING_RETRY_AFTER_MS) + 5;
 
 export type StudentReadingView =
   | { kind: "questions"; questions: StudentQuestion[] }

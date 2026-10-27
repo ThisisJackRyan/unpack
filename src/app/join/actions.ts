@@ -27,12 +27,13 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
   const { data, values } = result;
 
   const requestHeaders = await headers();
-  const ipHash = hashJoinIp(clientIpFromHeaders((name) => requestHeaders.get(name)));
-  // A no-op until the abuse PR replaces it.
-  await verifyJoinBotCheck({ ipHash });
-
   let outcome: JoinOutcome;
   try {
+    // Throws in production when JOIN_IP_HASH_SECRET is missing or short, so
+    // the join fails closed with the generic message below.
+    const ipHash = hashJoinIp(clientIpFromHeaders((name) => requestHeaders.get(name)));
+    // A no-op until the abuse PR replaces it.
+    await verifyJoinBotCheck({ ipHash });
     outcome = await joinClass(data, ipHash);
   } catch (error) {
     // Name, code, and message only: a Postgres error's detail can echo the

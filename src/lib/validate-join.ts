@@ -15,9 +15,13 @@ const JOIN_CODE_MAX_LENGTH = 12;
 export const CLASS_NOT_FOUND_MESSAGE =
   "We couldn’t find that class code. Check it with your teacher.";
 
-// Letters (any alphabet, with accents) plus spaces, hyphens, and straight
-// or curly apostrophes, e.g. "Mary Ann", "Jean-Luc", "D’Andre".
-const FIRST_NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} '’-]*$/u;
+// Letters (any alphabet, with accents) plus spaces, hyphens, and
+// apostrophes, e.g. "Mary Ann", "Jean-Luc", "D’Andre". Apostrophes may be
+// straight ('), curly (’ or ‘, which phones type), or the modifier letter
+// (ʼ); studentNameKey treats them all alike. The name must start and end
+// with a letter (accents may follow it), so a lone accent, "Mia-", or
+// "Mia'" is refused.
+const FIRST_NAME_RE = /^\p{L}\p{M}*(?:[\p{L}\p{M} '’‘ʼ-]*\p{L}\p{M}*)?$/u;
 const INITIALS_RE = /^[\p{L}\p{M}]+$/u;
 
 export type JoinErrors = {

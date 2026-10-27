@@ -3,9 +3,11 @@
 // it then joins, hits an unknown code, or finds the name taken. (A form
 // that fails validation never touches the database and isn't counted.)
 //
-// Keys are SHA-256 hex digests (see client-ip.ts), so join_attempts never
-// holds a raw IP address. Rows are deleted once they are older than the
-// window, so a hashed IP is kept for about JOIN_WINDOW_MINUTES.
+// Keys are hex digests (see client-ip.ts): a keyed hash (HMAC-SHA256 with a
+// server secret) for an IP, plain SHA-256 for a code, so join_attempts never
+// holds a raw IP address. Rows are deleted by the next join after the
+// JOIN_WINDOW_MINUTES window, so after a quiet period a hashed IP can stay
+// longer than the window, until someone joins.
 //
 // Pure statements, so tests can check them with a fake executor. The
 // server-only runner is student-join.ts.

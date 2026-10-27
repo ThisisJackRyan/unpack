@@ -10,9 +10,10 @@ import { getPublishedReading, loadStudentReading } from "@/lib/student-readings"
 import { PendingRefresh, RetryButton } from "./refresh";
 import { QuestionSkeletons } from "./skeleton";
 
-// A student's first open of a unique per student reading writes their set:
-// up to 2 attempts, each with one SDK retry, at 30 seconds a try (see
-// src/lib/ai/settings.ts), the same budget as the teacher reading page.
+// A student's first open of a unique per student reading writes their set,
+// which QUESTION_WRITE_DEADLINE_MS (110s, in src/lib/ai/settings.ts) ends
+// at the latest, attempts and retries included. 150 leaves room for the
+// lookups and the commit, the same budget as the teacher reading page.
 export const maxDuration = 150;
 
 type Props = { params: Promise<{ readingId: string }> };

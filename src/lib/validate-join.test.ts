@@ -26,7 +26,20 @@ describe("validateJoin", () => {
   });
 
   it("accepts letters from any alphabet, hyphens, and apostrophes", () => {
-    for (const firstName of ["Zoë", "José", "Jean-Luc", "D’Andre", "O'Neil", "Søren", "明"]) {
+    for (const firstName of [
+      "Zoë",
+      "José",
+      "Jean-Luc",
+      "D’Andre",
+      "D‘Andre",
+      "DʼAndre",
+      "O'Neil",
+      "Søren",
+      "明",
+      "A",
+      "Zoe\u0301",
+      "Mary Ann",
+    ]) {
       assert.equal(validateJoin({ ...ok, firstName }).ok, true, firstName);
     }
     assert.equal(validateJoin({ ...ok, lastInitials: "Ø" }).ok, true);
@@ -50,8 +63,8 @@ describe("validateJoin", () => {
     });
   });
 
-  it("refuses digits, symbols, and names that start with punctuation", () => {
-    for (const firstName of ["Maya2", "M@ya", "-Maya", "'", "Maya!", "<b>"]) {
+  it("refuses digits, symbols, and names that start or end with punctuation", () => {
+    for (const firstName of ["Maya2", "M@ya", "-Maya", "'", "Maya!", "<b>", "\u0301", "Mia-", "Mia'", "Mia’", "'Mia", "Mia `Ann"]) {
       assert.deepEqual(errors({ firstName }), {
         firstName: "Use letters only. Spaces, hyphens, and apostrophes are OK.",
       }, firstName);

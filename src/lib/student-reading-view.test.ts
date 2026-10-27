@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { STUDENT_SETS_LIMITED_MESSAGE, type StudentQuestionsResult } from "./student-questions-core";
-import { perStudentView, QUESTIONS_ERROR_MESSAGE, sharedView } from "./student-reading-view";
+import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
+import {
+  PENDING_RETRY_AFTER_MS,
+  STUDENT_SETS_LIMITED_MESSAGE,
+  type StudentQuestionsResult,
+} from "./student-questions-core";
+import {
+  PENDING_MAX_REFRESHES,
+  perStudentView,
+  QUESTIONS_ERROR_MESSAGE,
+  sharedView,
+} from "./student-reading-view";
 
 const QUESTIONS = [
   { id: "q1", position: 1, prompt: "Why?" },
@@ -38,5 +48,12 @@ describe("sharedView", () => {
   it("shows the shared set, or the error view when it is empty", () => {
     assert.deepEqual(sharedView(QUESTIONS), { kind: "questions", questions: QUESTIONS });
     assert.deepEqual(sharedView([]), { kind: "error", message: QUESTIONS_ERROR_MESSAGE });
+  });
+});
+
+describe("PENDING_MAX_REFRESHES", () => {
+  it("keeps refreshing past the whole write deadline, with margin", () => {
+    assert.equal(PENDING_MAX_REFRESHES, 60);
+    assert.ok(PENDING_MAX_REFRESHES * PENDING_RETRY_AFTER_MS >= QUESTION_WRITE_DEADLINE_MS + 10_000);
   });
 });

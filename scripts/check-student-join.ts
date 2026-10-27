@@ -10,7 +10,8 @@
 // - Per-code limit race: 140 parallel joins from distinct IPs into one code
 //   -> exactly JOIN_CODE_LIMIT joined.
 // - Unknown and turned-off codes are refused alike; the session lookup works
-//   by hash; neither the raw token nor a raw IP is stored; expired attempt
+//   by hash; a straight and a curly apostrophe are the same name; neither
+//   the raw token nor a raw IP is stored; expired attempt
 //   rows are pruned; turning a code off keeps joined students in.
 // - Reading views: a per-student reading in the student's class is ready
 //   (mock model); a student from another class gets not_found; a shared
@@ -300,6 +301,12 @@ async function checkCodesAndSessions(): Promise<{ classId: string; code: string;
   const twoLetters = await join(code, "Maya", "R", ipKey("one-letter"));
   check(again.status === "name_taken", `same name again: ${again.status} (refused, never resumed)`);
   check(twoLetters.status === "joined", `"Maya R" next to "Maya Ro": ${twoLetters.status}`);
+  const straight = await join(code, "D'Andre", "Sm", ipKey("straight-apostrophe"));
+  const curly = await join(code, "D’Andre", "Sm", ipKey("curly-apostrophe"));
+  check(
+    straight.status === "joined" && curly.status === "name_taken",
+    `"D'Andre Sm" then "D’Andre Sm": ${straight.status}, ${curly.status} (want joined, name_taken)`,
+  );
 
   await sql`update classes set code_active = false where id = ${classId}`;
   const stillIn = await findStudentBySessionToken(joined.token);

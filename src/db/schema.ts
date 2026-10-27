@@ -99,7 +99,8 @@ export const students = pgTable(
     firstName: text("first_name").notNull(),
     lastInitials: text("last_initials").notNull(),
     // Normalized first_name + last_initials (see studentNameKey) so the
-    // per-class uniqueness check ignores case and extra whitespace.
+    // per-class uniqueness check ignores case, extra whitespace, and which
+    // apostrophe was typed.
     nameKey: text("name_key").notNull(),
     // SHA-256 hex of the raw session token; the raw token is only in the cookie.
     sessionTokenHash: text("session_token_hash").notNull().unique(),
@@ -281,9 +282,10 @@ export const questionGenerations = pgTable(
 
 // One row per counted join attempt per key, for the join rate limits (see
 // src/lib/join-rate-limit.ts): an allowed attempt writes an "ip" row and a
-// "code" row. key_hash is a SHA-256 hex digest, so no raw IP address (or
-// typed code) is stored. Rows older than the limit window are pruned as new
-// attempts are recorded, so a hashed IP is kept for about 10 minutes.
+// "code" row. key_hash is a hex digest, so no raw IP address (or typed
+// code) is stored: a keyed hash (HMAC-SHA256 with a server secret) for an
+// IP, plain SHA-256 for a code. Rows are deleted by the next join after the
+// 10-minute window, so after a quiet period they can stay a while longer.
 export const joinAttempts = pgTable(
   "join_attempts",
   {
