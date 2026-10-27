@@ -51,6 +51,7 @@ import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
 import { EFFORT_CHECK_LIMIT, type EffortCheckHooks } from "@/lib/submit-answers-core";
 import { MAX_TRIES, type AnswerEntry } from "@/lib/validate-answers";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
+import { openQuestionIds } from "./lib/open-questions";
 
 const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
 
@@ -150,12 +151,15 @@ async function setup() {
   questionIds = (rows as { id: string; position: number }[]).sort((a, b) => a.position - b.position).map((r) => r.id);
 }
 
-function answers(): AnswerEntry[] {
-  return questionIds.map((questionId) => ({ questionId, value: "Mia went to see the river after the storm." }));
+function answers(ids = questionIds): AnswerEntry[] {
+  return ids.map((questionId) => ({ questionId, value: "Mia went to see the river after the storm." }));
 }
 
-function submit(studentId: string, mode: Mode, delayMs?: number): Promise<SubmitResult> {
-  return submitAnswers(studentId, readingId, answers(), { check: fakeChecker(mode, delayMs), execute });
+// Like the answer form: only the questions that aren't locked yet (passed
+// on the latest try).
+async function submit(studentId: string, mode: Mode, delayMs?: number): Promise<SubmitResult> {
+  const open = await openQuestionIds(execute, studentId, readingId);
+  return submitAnswers(studentId, readingId, answers(open), { check: fakeChecker(mode, delayMs), execute });
 }
 
 function send(studentId: string, note = "I tried my best."): Promise<ChallengeResult> {

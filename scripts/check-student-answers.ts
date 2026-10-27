@@ -24,6 +24,17 @@
 //   (no answer form), is In progress, and --n parallel sends make exactly
 //   1 row; a student with 1 try and the limit used can send too; a student
 //   with 1 try and one check under the limit is refused ("not_ready").
+// - Passed answers are locked: q1 passes on try 1; try 2 sends only q2
+//   and q3 to the checker; a crafted form that still has q1 is "stale"
+//   with no claim and no model call; a crafted commit straight to the
+//   store can't replace q1 either (the SQL keeps it); a given-back check
+//   in between leaves the lock and the try; the reading passes on try 2
+//   with q1 carried over as it was; 2 counted checks, 2 model calls. A
+//   student out of tries with q1 locked can still send the note, and the
+//   teacher's queue shows every answer of the last try.
+//
+// Every submit here sends only the questions that aren't locked yet, as
+// the answer form does.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-student-answers [flags]
 //
@@ -47,16 +58,19 @@ import { neonExecutor } from "@/lib/neon-executor";
 import { answerStage } from "@/lib/reading-progress";
 import { doneLabel } from "@/lib/done-count";
 import { listReadingsWithStatus, loadReadingProgress } from "@/lib/reading-progress-db";
+import { queueItems, queueStatements } from "@/lib/challenge-queue-core";
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
 import {
   EFFORT_CHECK_LIMIT,
   EFFORT_CLAIM_STALE_SECONDS,
   EFFORT_GIVEN_BACK_WINDOW_LIMIT,
   EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+  postgresAttemptStore,
   type EffortCheckHooks,
 } from "@/lib/submit-answers-core";
 import { MAX_TRIES, type AnswerEntry } from "@/lib/validate-answers";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
+import { openQuestionIds } from "./lib/open-questions";
 
 const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
 
@@ -94,15 +108,18 @@ function throttled(limit: number): StatementExecutor {
 const execute = throttled(DB_CONCURRENCY);
 
 // The fake effort checker. "pass" passes every answer; "fail" fails the
-// last one with a nudge.
+// last one with a nudge; "first" passes only the first one.
 // "error": the model replied, but not usably (counts toward the check
 // limit). "outage": it never replied (given back; see
 // submit-answers-core.ts).
-type Mode = "pass" | "fail" | "error" | "outage";
+type Mode = "pass" | "fail" | "first" | "error" | "outage";
 let modelCalls = 0;
+// The question ids of the last check, in order.
+let lastChecked: string[] = [];
 function fakeChecker(mode: Mode, delayMs = DELAY_MS) {
   return async (input: EffortCheckInput, hooks?: EffortCheckHooks): Promise<EffortVerdict[]> => {
     modelCalls++;
+    lastChecked = input.items.map((item) => item.questionId);
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     if (mode === "outage") throw new Error("fake model outage");
     if (mode === "error") {
@@ -110,7 +127,7 @@ function fakeChecker(mode: Mode, delayMs = DELAY_MS) {
       throw new Error("fake unusable reply");
     }
     return input.items.map((item, i) => {
-      const pass = mode === "pass" || i < input.items.length - 1;
+      const pass = mode === "first" ? i === 0 : mode === "pass" || i < input.items.length - 1;
       return { questionId: item.questionId, pass, nudge: pass ? "" : "Look at the end of the story again." };
     });
   };
@@ -178,8 +195,10 @@ function answers(ids = questionIds, text = "Mia went to see the river after the 
   return ids.map((questionId) => ({ questionId, value: text }));
 }
 
-function submit(studentId: string, mode: Mode, opts: { reading?: string; entries?: AnswerEntry[]; delayMs?: number } = {}) {
-  return submitAnswers(studentId, opts.reading ?? readingId, opts.entries ?? answers(), {
+async function submit(studentId: string, mode: Mode, opts: { reading?: string; entries?: AnswerEntry[]; delayMs?: number } = {}) {
+  const reading = opts.reading ?? readingId;
+  const entries = opts.entries ?? (reading === readingId ? answers(await openQuestionIds(execute, studentId, readingId)) : answers());
+  return submitAnswers(studentId, reading, entries, {
     check: fakeChecker(mode, opts.delayMs),
     execute,
   });
@@ -234,6 +253,7 @@ async function checkNormalFlow() {
   );
   const second = await submit(student, "pass");
   check(second.status === "checked" && second.passed && second.tryNumber === 2, `try 2: ${second.status}`);
+  check(lastChecked.join(",") === questionIds[2], `try 2 checked only the question that wasn't passed (${lastChecked.length} of 3)`);
   const third = await submit(student, "pass");
   check(third.status === "already_passed", `after the pass: ${third.status}`);
   const c = await counts(student);
@@ -489,6 +509,104 @@ async function checkCheckLimit() {
   );
 }
 
+async function answerRows(studentId: string, tryNumber: number) {
+  return (await sql`
+    select an.question_id, an.text, an.ai_pass, an.ai_feedback
+    from answers an join attempts a on a.id = an.attempt_id
+    join questions q on q.id = an.question_id
+    where a.student_id = ${studentId} and a.reading_id = ${readingId} and a.try_number = ${tryNumber}
+    order by q.position`) as { question_id: string; text: string; ai_pass: boolean; ai_feedback: string | null }[];
+}
+
+async function checkLockedAnswers() {
+  console.log("\n== PASSED ANSWERS ARE LOCKED ==");
+  const student = await newStudent();
+  const calls = modelCalls;
+  const first = await submit(student, "first", { delayMs: 5, entries: answers(questionIds, "My first answer.") });
+  check(first.status === "checked" && !first.passed && lastChecked.length === 3, `try 1 checks all 3, q1 passes: ${first.status}`);
+  const row = (await listReadingsWithStatus(classId, student, execute)).find((r) => r.id === readingId);
+  check(row ? doneLabel(row.passedAnswers, row.questionCount) === "1 of 3 done" : false, `class list after try 1: ${row ? doneLabel(row.passedAnswers, row.questionCount) : "missing"}`);
+  check((await openQuestionIds(execute, student, readingId)).join(",") === questionIds.slice(1).join(","), "open after try 1: q2 and q3");
+
+  // A crafted form that still sends q1 (changed): refused before any claim.
+  const before = modelCalls;
+  const crafted = await submit(student, "pass", { delayMs: 5, entries: answers(questionIds, "Changed!") });
+  let c = await counts(student);
+  check(crafted.status === "stale" && modelCalls === before && c.checks === 1, `crafted form with q1: ${crafted.status}, no model call, checks ${c.checks}`);
+
+  // An outage in between: given back, the lock and the try stay.
+  const outage = await submit(student, "outage", { delayMs: 5 });
+  c = await counts(student);
+  check(outage.status === "check_failed" && c.attempts === 1 && lastChecked.join(",") === questionIds.slice(1).join(","), `outage on try 2 (checked q2, q3 only): ${outage.status}, attempts ${c.attempts}`);
+
+  // Try 2 sends only q2 and q3 and passes; q1 is carried over as it was.
+  const second = await submit(student, "pass", { delayMs: 5 });
+  check(
+    second.status === "checked" && second.passed && second.tryNumber === 2 && second.results.length === 2,
+    `try 2: ${second.status}, passed ${second.status === "checked" && second.passed}, results ${second.status === "checked" ? second.results.length : "-"}`,
+  );
+  check(lastChecked.join(",") === questionIds.slice(1).join(","), `try 2 checked ${lastChecked.length} questions (q2, q3)`);
+  const rows = await answerRows(student, 2);
+  check(
+    rows.length === 3 && rows[0].question_id === questionIds[0] && rows[0].text === "My first answer." && rows[0].ai_pass && rows[0].ai_feedback === null,
+    `try 2 holds all 3 answers, q1 as it was: ${rows.map((r) => `${r.ai_pass ? "pass" : "fail"}`).join(",")}`,
+  );
+  const counted = await one<{ counted: number; given_back: number }>(sql`
+    select count(*) filter (where outcome is distinct from 'given_back')::int as counted,
+      count(*) filter (where outcome = 'given_back')::int as given_back
+    from effort_checks where student_id = ${student} and reading_id = ${readingId}`);
+  check(
+    counted.counted === 2 && counted.given_back === 1 && modelCalls - calls === 3,
+    `counting: ${counted.counted} counted checks (want 2), ${counted.given_back} given back (want 1), model calls ${modelCalls - calls} (want 3)`,
+  );
+  check((await statusOf(student)) === "passed", "status: passed");
+  const stage = answerStage(await loadReadingProgress(student, readingId, execute));
+  check(stage.kind === "passed" && stage.attempt?.tryNumber === 2 && Object.keys(stage.attempt.answers).length === 3, `page: ${stage.kind}, try 2 with every answer`);
+
+  // A crafted commit straight to the store (past the form's checks) with a
+  // failing, changed q1: the SQL keeps the locked answer.
+  const direct = await newStudent();
+  await submit(direct, "first", { delayMs: 5, entries: answers(questionIds, "Kept answer.") });
+  const store = postgresAttemptStore(execute);
+  const claimId = crypto.randomUUID();
+  const claimed = await store.claim(direct, readingId, claimId, 1);
+  const saved = await store.commit({
+    studentId: direct,
+    readingId,
+    claimId,
+    attemptId: crypto.randomUUID(),
+    passed: false,
+    verdicts: questionIds.map((questionId) => ({ questionId, text: "Overwritten", pass: false, nudge: "No." })),
+  });
+  const kept = await answerRows(direct, 2);
+  check(
+    claimed === "claimed" && saved === 2 && kept[0].text === "Kept answer." && kept[0].ai_pass && kept[1].text === "Overwritten",
+    `crafted commit: q1 ${kept[0]?.ai_pass ? "still passed" : "CHANGED"} with its text ${kept[0]?.text === "Kept answer." ? "kept" : "CHANGED"}, q2 saved`,
+  );
+  const wrongTries = await store.claim(direct, readingId, crypto.randomUUID(), 1);
+  check(wrongTries === "stale", `a claim for an older try count: ${wrongTries}`);
+
+  // Out of tries with q1 locked: the note to the teacher still opens, and
+  // the teacher's queue shows every answer of the last try.
+  const stuck = await newStudent();
+  await submit(stuck, "first", { delayMs: 5 });
+  await submit(stuck, "fail", { delayMs: 5 });
+  await submit(stuck, "fail", { delayMs: 5 });
+  const last = await answerRows(stuck, 3);
+  check(
+    last.length === 3 && last.map((r) => r.ai_pass).join(",") === "true,true,false",
+    `3rd try holds q1 (locked on try 1), q2 (locked on try 2), q3 failing: ${last.map((r) => r.ai_pass).join(",")}`,
+  );
+  const note = await sendChallenge(stuck, readingId, "Please look.", execute);
+  check(note.status === "sent", `note after 3 tries with locked answers: ${note.status}`);
+  const queue = queueItems(await execute(queueStatements(classId, teacherId)));
+  const item = queue.find((q) => q.studentId === stuck);
+  check(
+    item?.questions.length === 3 && item.questions.every((q) => q.answer !== null) && item.questions.filter((q) => q.answer?.pass).length === 2,
+    `teacher's queue: ${item?.questions.filter((q) => q.answer?.pass).length ?? "-"} of ${item?.questions.length ?? "-"} answers passed, none missing`,
+  );
+}
+
 async function cleanup(): Promise<void> {
   const rows = await sql`
     delete from teachers where clerk_user_id = ${`test_answers_${RUN_ID}`} returning id`;
@@ -513,6 +631,7 @@ async function main(): Promise<void> {
     await checkRefusals();
     await checkChallenges(outOfTries);
     await checkCheckLimit();
+    await checkLockedAnswers();
   } finally {
     await cleanup();
   }

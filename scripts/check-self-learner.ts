@@ -18,6 +18,11 @@
 // (e) Solo flow: 3 failed tries, then moved on (a 4th is out_of_tries),
 //     with zero challenge rows anywhere for it; a passing answer marks
 //     another reading passed; --submits parallel submits save one try.
+// (e3) Passed answers are locked: q1 passes on try 1; try 2 sends only q2
+//     and q3; a crafted form with q1 is "stale" (no claim, no model call);
+//     a crafted commit straight at the statements can't replace q1; a
+//     given-back check in between keeps the lock and the try; the reading
+//     passes on try 2 with q1 as it was; 2 counted checks, 3 model calls.
 // (f) Delete: user.deleted through handleClerkEvent leaves zero rows of
 //     the account in every self-learner table (counted per table) and the
 //     other account's rows intact; a repeat is already_gone.
@@ -428,10 +433,98 @@ async function checkSoloFlow() {
   check(firstTry.status === "checked" && !firstTry.passed, `mixed try 1 saved, not passed: ${firstTry.status}`);
   const afterOne = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
   check(afterOne?.result === "in_progress" && afterOne.doneLabel === "2 of 3 done", `after 2 of 3 passed: ${afterOne?.doneLabel}`);
-  const secondTry = await submitSelfAnswers(bId, halfway, answersFor(halfQuestions), { check: checker(false) });
-  check(secondTry.status === "checked" && !secondTry.passed, `try 2 fails every answer: ${secondTry.status}`);
+  // Try 2 sends only the open question, and it fails: the passed ones stay
+  // done (locked), so the count never goes down.
+  const secondTry = await submitSelfAnswers(bId, halfway, answersFor(halfQuestions).slice(2), { check: checker(false) });
+  check(secondTry.status === "checked" && !secondTry.passed, `try 2 fails the open answer: ${secondTry.status}`);
   const afterTwo = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
-  check(afterTwo?.doneLabel === "0 of 3 done", `the latest try counts, not the best one: ${afterTwo?.doneLabel}`);
+  check(afterTwo?.doneLabel === "2 of 3 done", `passed answers stay done after a failing try: ${afterTwo?.doneLabel}`);
+}
+
+async function selfAnswerRows(readingId: string, tryNumber: number) {
+  return (await sql`
+    select an.question_id, an.text, an.ai_pass, an.ai_feedback
+    from self_answers an join self_attempts a on a.id = an.attempt_id
+    join self_questions q on q.id = an.question_id
+    where a.reading_id = ${readingId} and a.try_number = ${tryNumber}
+    order by q.position`) as { question_id: string; text: string; ai_pass: boolean; ai_feedback: string | null }[];
+}
+
+async function checkLockedAnswers() {
+  console.log("\n== (e3) PASSED ANSWERS ARE LOCKED ==");
+  const readingId = await rawReading(bId, "Locked answers");
+  const questions = await readyQuestions(bId, readingId);
+  const ids = questions.map((q) => q.id);
+  let calls = 0;
+  let seen: string[] = [];
+  // Passes only the first question (`first`, q1 by default), or everything.
+  const counting = (passAll: boolean, outage = false, first = ids[0]) => async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+    calls++;
+    seen = input.items.map((i) => i.questionId);
+    if (outage) throw new Error("fake model outage");
+    return input.items.map((i) => {
+      const pass = passAll || i.questionId === first;
+      return { questionId: i.questionId, pass, nudge: pass ? "" : "Name one detail from the text." };
+    });
+  };
+  const all = answersFor(questions);
+  const first = await submitSelfAnswers(bId, readingId, all, { check: counting(false) });
+  check(first.status === "checked" && !first.passed && seen.length === 3, `try 1 checks all 3, q1 passes: ${first.status}`);
+  const row = (await listSelfHistory(bId, "UTC")).find((h) => h.id === readingId);
+  check(row?.doneLabel === "1 of 3 done", `history after try 1: ${row?.doneLabel}`);
+
+  const crafted = await submitSelfAnswers(bId, readingId, all.map((a) => ({ ...a, value: "Changed!" })), { check: counting(true) });
+  check(crafted.status === "stale" && calls === 1, `crafted form with q1: ${crafted.status}, no model call (${calls} calls)`);
+
+  const outage = await submitSelfAnswers(bId, readingId, all.slice(1), { check: counting(true, true) });
+  const tries = await one<{ n: number }>(sql`select count(*)::int as n from self_attempts where reading_id = ${readingId}`);
+  check(outage.status === "check_failed" && tries.n === 1 && seen.join(",") === ids.slice(1).join(","), `outage on try 2 (checked q2, q3 only): ${outage.status}, ${tries.n} try saved`);
+
+  const second = await submitSelfAnswers(bId, readingId, all.slice(1), { check: counting(true) });
+  check(
+    second.status === "checked" && second.passed && second.tryNumber === 2 && seen.join(",") === ids.slice(1).join(","),
+    `try 2 checks only q2 and q3 and passes: ${second.status}, ${seen.length} checked`,
+  );
+  const rows = await selfAnswerRows(readingId, 2);
+  check(
+    rows.length === 3 && rows[0].question_id === ids[0] && rows[0].text === all[0].value && rows[0].ai_pass && rows[0].ai_feedback === null,
+    `try 2 holds all 3 answers, q1 as it was: ${rows.map((r) => (r.ai_pass ? "pass" : "fail")).join(",")}`,
+  );
+  const counted = await one<{ counted: number; given_back: number; status: string }>(sql`
+    select count(*) filter (where outcome is distinct from 'given_back')::int as counted,
+      count(*) filter (where outcome = 'given_back')::int as given_back,
+      (select status::text from self_readings where id = ${readingId}) as status
+    from self_effort_checks where reading_id = ${readingId}`);
+  check(
+    counted.counted === 2 && counted.given_back === 1 && calls === 3 && counted.status === "passed",
+    `counting: ${counted.counted} counted (want 2), ${counted.given_back} given back (want 1), ${calls} model calls (want 3), status ${counted.status}`,
+  );
+
+  // A crafted commit straight at the statements with a failing, changed q1.
+  const direct = await rawReading(bId, "Locked, crafted commit");
+  const directQuestions = await readyQuestions(bId, direct);
+  await submitSelfAnswers(bId, direct, answersFor(directQuestions), { check: counting(false, false, directQuestions[0].id) });
+  const claimId = randomUUID();
+  const claimed = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, direct, claimId, 1)), 1);
+  const saved = committedTry(
+    await neonExecutor(
+      selfCommitStatements({
+        studentId: bId,
+        readingId: direct,
+        claimId,
+        attemptId: randomUUID(),
+        passed: false,
+        verdicts: directQuestions.map((q) => ({ questionId: q.id, text: "Overwritten", pass: false, nudge: "No." })),
+      }),
+    ),
+  );
+  const kept = await selfAnswerRows(direct, 2);
+  check(
+    claimed === "claimed" && saved === 2 && kept[0]?.text === answersFor(directQuestions)[0].value && kept[0]?.ai_pass && kept[1]?.text === "Overwritten",
+    `crafted commit: ${claimed}, try ${saved}, q1 ${kept[0]?.ai_pass ? "still passed" : "CHANGED"}, text ${kept[0]?.text === "Overwritten" ? "CHANGED" : "kept"}`,
+  );
+  const older = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, direct, randomUUID(), 1)), 1);
+  check(older === "stale", `a claim for an older try count: ${older}`);
 }
 
 // A check with no model reply (an outage, not set up, out of credits) is
@@ -491,11 +584,11 @@ async function checkRoleAndOwnerAtWrite() {
   // A's id against B's reading, straight at the statements: no claim, and
   // a commit with B's live claim id but A's account saves nothing.
   const claimId = randomUUID();
-  const foreignClaim = claimOutcome(await neonExecutor(selfClaimCheckStatements(aId, readingId, claimId)));
+  const foreignClaim = claimOutcome(await neonExecutor(selfClaimCheckStatements(aId, readingId, claimId, 0)));
   check(foreignClaim === "not_found", `another account's claim on the reading: ${foreignClaim}`);
   await sql`update self_effort_checks set finished_at = now(), outcome = 'error' where reading_id = ${readingId} and finished_at is null`;
   const ownClaim = randomUUID();
-  const own = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, readingId, ownClaim)));
+  const own = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, readingId, ownClaim, 0)));
   const foreignCommit = committedTry(
     await neonExecutor(
       selfCommitStatements({
@@ -582,6 +675,7 @@ async function main(): Promise<void> {
     await checkAllowance();
     await checkFailedGenerations();
     await checkSoloFlow();
+    await checkLockedAnswers();
     await checkGivenBackChecks();
     await checkRoleAndOwnerAtWrite();
     await checkDelete();
