@@ -6,33 +6,23 @@ import {
   countClasses,
   insertClassIfAllowed,
 } from "@/lib/classes";
-import { isGradeLevel } from "@/lib/grade-levels";
 import { JoinCodeExhaustedError } from "@/lib/join-code";
 import { getOrCreateTeacher } from "@/lib/teacher";
-import { CLASS_NAME_MAX_LENGTH, type CreateClassState } from "./form-state";
+import { validateCreateClass } from "@/lib/validate-class";
+import type { CreateClassState } from "./form-state";
 
 export async function createClass(
   _prev: CreateClassState,
   formData: FormData,
 ): Promise<CreateClassState> {
-  const rawName = formData.get("name");
-  const rawGrade = formData.get("gradeLevel");
-  const name = typeof rawName === "string" ? rawName.trim() : "";
-  const gradeLevel = typeof rawGrade === "string" ? rawGrade : "";
-  const values = { name, gradeLevel };
-
-  const errors: NonNullable<CreateClassState["errors"]> = {};
-  if (!name) {
-    errors.name = "Enter a class name.";
-  } else if (name.length > CLASS_NAME_MAX_LENGTH) {
-    errors.name = `Keep the name to ${CLASS_NAME_MAX_LENGTH} characters or less.`;
+  const result = validateCreateClass({
+    name: formData.get("name"),
+    gradeLevel: formData.get("gradeLevel"),
+  });
+  if (!result.ok) {
+    return { errors: result.errors, values: result.values };
   }
-  if (!isGradeLevel(gradeLevel)) {
-    errors.gradeLevel = "Choose a grade level.";
-  }
-  if (errors.name || errors.gradeLevel || !isGradeLevel(gradeLevel)) {
-    return { errors, values };
-  }
+  const { data, values } = result;
 
   const limitState: CreateClassState = {
     errors: { form: "The free plan includes 1 class." },
@@ -45,9 +35,10 @@ export async function createClass(
     return limitState;
   }
 
+  // redirect() throws, so it stays outside this try.
   let classId: string;
   try {
-    const created = await insertClassIfAllowed(teacher.id, { name, gradeLevel });
+    const created = await insertClassIfAllowed(teacher.id, data);
     if (!created) return limitState;
     classId = created.id;
   } catch (error) {
@@ -57,7 +48,22 @@ export async function createClass(
         values,
       };
     }
-    throw error;
+    // Name, code, and message only: a Postgres error's detail can echo the
+    // row, including the class name the teacher typed.
+    const { name, code, message } = error as {
+      name?: unknown;
+      code?: unknown;
+      message?: unknown;
+    };
+    console.error("createClass: insertClassIfAllowed failed", {
+      name,
+      code,
+      message,
+    });
+    return {
+      errors: { form: "We couldn’t create the class. Please try again." },
+      values,
+    };
   }
 
   redirect(`/teacher/classes/${classId}`);
