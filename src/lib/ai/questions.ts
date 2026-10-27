@@ -230,8 +230,9 @@ export type WriteOptions = {
 };
 
 // Settles with the call, or rejects as soon as the signal fires, so the
-// deadline holds even if a call doesn't honor its signal.
-function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
+// deadline holds even if a call doesn't honor its signal. Also used by the
+// effort check (effort-check.ts).
+export function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(signal.reason);
     if (signal.aborted) return onAbort();

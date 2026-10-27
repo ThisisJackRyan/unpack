@@ -10,7 +10,9 @@ import {
   PENDING_MAX_REFRESHES,
   perStudentView,
   QUESTIONS_ERROR_MESSAGE,
+  readingParagraphs,
   sharedView,
+  sourceHost,
 } from "./student-reading-view";
 
 const QUESTIONS = [
@@ -55,5 +57,21 @@ describe("PENDING_MAX_REFRESHES", () => {
   it("keeps refreshing past the whole write deadline, with margin", () => {
     assert.equal(PENDING_MAX_REFRESHES, 60);
     assert.ok(PENDING_MAX_REFRESHES * PENDING_RETRY_AFTER_MS >= QUESTION_WRITE_DEADLINE_MS + 10_000);
+  });
+});
+
+describe("readingParagraphs", () => {
+  it("splits on blank lines and keeps single line breaks", () => {
+    assert.deepEqual(readingParagraphs("One.\nStill one.\n\n  Two.  \n \n\nThree."), ["One.\nStill one.", "Two.", "Three."]);
+    assert.deepEqual(readingParagraphs(""), []);
+  });
+});
+
+describe("sourceHost", () => {
+  it("shows the host without www, or nothing", () => {
+    assert.equal(sourceHost("https://www.example.com/a/b?c=1"), "example.com");
+    assert.equal(sourceHost("http://news.example.org"), "news.example.org");
+    assert.equal(sourceHost(null), null);
+    assert.equal(sourceHost("not a url"), null);
   });
 });

@@ -13,7 +13,9 @@
 //   by hash; a straight and a curly apostrophe are the same name; neither
 //   the raw token nor a raw IP is stored; expired attempt
 //   rows are pruned; turning a code off keeps joined students in.
-// - Reading views: a per-student reading in the student's class is ready
+// - Reading views: the class home (listReadingsWithStatus) lists the
+//   published readings, draft hidden, all Not started; a per-student
+//   reading in the student's class is ready
 //   (mock model); a student from another class gets not_found; a shared
 //   reading shows its shared questions; a draft is not_found; the teacher's
 //   student set list shows the new set.
@@ -39,12 +41,13 @@ import { hashJoinCode, hashJoinIp } from "@/lib/client-ip";
 import { JOIN_CODE_LIMIT, JOIN_IP_LIMIT, JOIN_WINDOW_MINUTES } from "@/lib/join-rate-limit";
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
+import { listReadingsWithStatus } from "@/lib/reading-progress-db";
 import { findStudentBySessionToken, type StudentSession } from "@/lib/student-lookup";
 import { joinClass } from "@/lib/student-join";
 import type { JoinOutcome } from "@/lib/student-join-core";
 import { getOrCreateStudentQuestions } from "@/lib/student-questions";
 import { perStudentView } from "@/lib/student-reading-view";
-import { listPublishedReadings, loadStudentReading } from "@/lib/student-readings";
+import { loadStudentReading } from "@/lib/student-readings";
 import { hashSessionToken } from "@/lib/student-session-token";
 import { listStudentSets } from "@/lib/student-sets-db";
 import { validateJoin } from "@/lib/validate-join";
@@ -348,10 +351,11 @@ async function checkReadings(classId: string, session: StudentSession) {
     return PROMPTS;
   };
 
-  const list = await listPublishedReadings(classId);
+  // What the class home shows.
+  const list = await listReadingsWithStatus(classId, session.student.id);
   check(
-    list.length === 2 && list.every((r) => r.id !== draft),
-    `home lists ${list.length} published readings (draft hidden)`,
+    list.length === 2 && list.every((r) => r.id !== draft) && list.every((r) => r.status === "not_started"),
+    `home lists ${list.length} published readings (draft hidden), all not_started`,
   );
 
   const mine = await loadStudentReading(session, perStudent, { write });

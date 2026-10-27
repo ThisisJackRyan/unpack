@@ -23,7 +23,7 @@ Nothing we found ships this full loop. Actively Learn gates but doesn't use AI j
 - Teacher: paste a link or text, review/edit questions (optional), share a code.
 - Student: join with code + name, read view with copy-paste blocked, questionnaire, AI pass/fail with nudges, 3 tries, then challenge to teacher.
 - Teacher visibility: lightweight (who's done, who's stuck) plus a queue of student challenges, not a grade dashboard.
-- Cost protection: teacher-owned codes that can be turned on and off, a cap of 150 student question sets per reading, questions cached per reading, join rate limits per code and IP, and a bot check on join (planned). No per-teacher AI budget.
+- Cost protection: teacher-owned codes that can be turned on and off, a cap of 150 student question sets per reading, questions cached per reading, join rate limits per code and IP, one effort check per attempt with at most 6 per student per reading, and a bot check on join (planned). No per-teacher AI budget.
 
 ## Non-goals for v1
 Self-learner extension, district sales/rostering, quality grading, a fixed content library.
@@ -43,7 +43,7 @@ Next.js 16 on **Vercel**, **Neon** Postgres (cloud, with a dev branch), and **Cl
 - Child privacy (COPPA/FERPA) because users are young.
 - AI cost per retry.
 - Incumbents adding a gate.
-- Pasted AI answers (lower priority for now; copy-paste blocked).
+- Pasted AI answers (lower priority for now; copy-paste blocked, which is a speed bump, not security).
 
 ## Open questions
 - What's the v1/demo date?

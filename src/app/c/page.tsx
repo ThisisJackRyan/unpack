@@ -1,21 +1,24 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
 import { card, focusRing } from "@/components/ui";
 import { questionCountLabel } from "@/lib/question-modes";
+import type { StudentReadingListItem } from "@/lib/reading-progress";
+import { listReadingsWithStatus } from "@/lib/reading-progress-db";
 import { getStudentSession, requireStudentSession } from "@/lib/student-auth";
-import { listPublishedReadings, type StudentReadingItem } from "@/lib/student-readings";
 
 export async function generateMetadata(): Promise<Metadata> {
   const session = await getStudentSession();
   return { title: session?.class.name ?? "Your class" };
 }
 
-// The student's class home: their published readings. Already-joined
+// The student's class home: their published readings, each with the
+// student's status (Not started, In progress, Passed, Challenged). Already-joined
 // students keep access even after the teacher turns the join code off;
 // the code only gates joining.
 export default async function StudentHomePage() {
   const session = await requireStudentSession();
-  const readings = await listPublishedReadings(session.class.id);
+  const readings = await listReadingsWithStatus(session.class.id, session.student.id);
 
   return (
     <div className="flex flex-col gap-10">
@@ -56,7 +59,7 @@ export default async function StudentHomePage() {
   );
 }
 
-function ReadingCard({ reading }: { reading: StudentReadingItem }) {
+function ReadingCard({ reading }: { reading: StudentReadingListItem }) {
   return (
     <li>
       <Link
@@ -65,7 +68,10 @@ function ReadingCard({ reading }: { reading: StudentReadingItem }) {
       >
         <span className="flex min-w-0 flex-col gap-1">
           <span className="text-xl font-semibold break-words text-zinc-950">{reading.title}</span>
-          <span className="text-base text-zinc-600">{questionCountLabel(reading.questionCount)}</span>
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <StudentReadingStatusBadge status={reading.status} />
+            <span className="text-base text-zinc-600">{questionCountLabel(reading.questionCount)}</span>
+          </span>
         </span>
         <span aria-hidden="true" className="text-2xl text-indigo-600">
           →

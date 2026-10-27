@@ -87,6 +87,8 @@ export function ipRateLimitKey(raw: string): string {
   if (!ip.includes(":")) return ip || UNKNOWN_IP;
 
   ip = ip.replace(/%.*$/, "");
+  // Junk such as "%eth0:1" is empty once the zone id goes: still one key.
+  if (!ip) return UNKNOWN_IP;
   const groups = ipv6Groups(ip);
   if (!groups) return ip;
   if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
@@ -101,18 +103,37 @@ export function ipRateLimitKey(raw: string): string {
 // production refuses to fall back to it.
 export const DEV_JOIN_IP_HASH_SECRET = "dev-only-join-ip-hash-secret-not-for-production";
 
+// The example value in .env.example. Long enough to pass the length
+// check, so production refuses it by name (a test keeps the two in step).
+export const JOIN_IP_HASH_SECRET_PLACEHOLDER = "replace_me_with_openssl_rand_base64_32";
+
 export const JOIN_IP_HASH_SECRET_MIN_LENGTH = 32;
 
+type Env = Partial<Record<string, string | undefined>>;
+
+// Production is NODE_ENV=production or, on Vercel, VERCEL_ENV=production
+// (so a production deployment is held to the rules even if NODE_ENV were
+// ever set otherwise).
+function isProduction(env: Env): boolean {
+  return env.NODE_ENV === "production" || env.VERCEL_ENV === "production";
+}
+
 // The key for hashJoinIp, from JOIN_IP_HASH_SECRET. In production a
-// missing or short secret throws, so a join fails closed (the action shows
-// its generic error) rather than storing weakly keyed hashes. The error
-// names the variable, never its value.
-export function joinIpHashSecret(env: Partial<Record<string, string | undefined>> = process.env): string {
+// missing or short secret, the .env.example placeholder, or the public dev
+// secret throws, so a join fails closed (the action shows its generic
+// error) rather than storing weakly keyed hashes. The error names the
+// variable, never its value.
+export function joinIpHashSecret(env: Env = process.env): string {
   const secret = env.JOIN_IP_HASH_SECRET;
-  if (env.NODE_ENV !== "production") return secret || DEV_JOIN_IP_HASH_SECRET;
+  if (!isProduction(env)) return secret || DEV_JOIN_IP_HASH_SECRET;
   if (!secret || secret.length < JOIN_IP_HASH_SECRET_MIN_LENGTH) {
     throw new Error(
       `JOIN_IP_HASH_SECRET is missing or shorter than ${JOIN_IP_HASH_SECRET_MIN_LENGTH} characters.`,
+    );
+  }
+  if (secret === JOIN_IP_HASH_SECRET_PLACEHOLDER || secret === DEV_JOIN_IP_HASH_SECRET) {
+    throw new Error(
+      "JOIN_IP_HASH_SECRET is still the example or dev-only value. Set a real secret (openssl rand -base64 32).",
     );
   }
   return secret;
