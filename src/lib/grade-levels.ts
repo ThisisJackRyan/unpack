@@ -25,3 +25,10 @@ export function isGradeLevel(value: unknown): value is GradeLevel {
     (GRADE_LEVELS as readonly string[]).includes(value)
   );
 }
+
+// Display label for a grade level: "Kindergarten", "Grade 4", "Adult".
+export function gradeLevelLabel(level: GradeLevel): string {
+  if (level === "K") return "Kindergarten";
+  if (level === "adult") return "Adult";
+  return `Grade ${level}`;
+}
