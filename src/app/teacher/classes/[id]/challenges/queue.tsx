@@ -4,6 +4,7 @@ import { startTransition, useActionState, useEffect, useState, type FormEvent } 
 import { pill, primaryButton, secondaryButton } from "@/components/ui";
 import { decisionMessage, parseDecisionChoice, type DecisionChoice, type QueueItem } from "@/lib/challenge-queue-core";
 import { ErrorMessage } from "@/components/error-message";
+import { MetaLine } from "@/components/meta-line";
 import type { DecideState } from "./state";
 
 type Action = (state: DecideState, formData: FormData) => Promise<DecideState>;
@@ -82,13 +83,7 @@ function ChallengeCard({
     <li aria-labelledby={headingId} className="flex flex-col gap-5 rounded-3xl border border-ink-200 bg-white p-5 sm:p-6">
       <div className="flex flex-col gap-2">
         <h2 id={headingId} className="text-xl font-semibold break-words text-ink-950">
-          {item.studentName}
-          <span className="text-ink-400" aria-hidden="true">
-            {" "}
-            ·{" "}
-          </span>
-          <span className="sr-only">, </span>
-          <span className="font-medium text-ink-700">{item.readingTitle}</span>
+          <MetaLine as="span" parts={[item.studentName, item.readingTitle]} />
         </h2>
         <p className="flex flex-wrap items-center gap-2 text-base text-ink-700">
           <span className={`${pill} bg-ink-100 text-ink-700 text-sm tabular-nums`}>

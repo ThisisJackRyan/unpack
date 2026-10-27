@@ -11,6 +11,7 @@ import type { CapBadge as CapBadgeData } from "@/lib/reading-cap";
 import { getClassCapBadges, listReadings, type ReadingListItem } from "@/lib/readings";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { CapBadge } from "@/components/cap-badge";
+import { MetaLine } from "@/components/meta-line";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { backLink, card, focusRing, primaryButton, primaryButtonLarge } from "@/components/ui";
 import { saveClassSettingsAction } from "./class-settings/actions";
@@ -241,12 +242,11 @@ function ReadingRow({
           <span className="truncate text-lg font-semibold text-ink-950">
             {reading.title}
           </span>
-          <span className="text-base text-ink-700">
-            {questionCountLabel(reading.questionCount)}
-            <span aria-hidden="true"> · </span>
-            <span className="sr-only">, </span>
-            {questionModeLabel(reading.questionMode)}
-          </span>
+          <MetaLine
+            as="span"
+            className="text-base text-ink-700"
+            parts={[questionCountLabel(reading.questionCount), questionModeLabel(reading.questionMode)]}
+          />
         </span>
         <span className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {capBadge && <CapBadge badge={capBadge} />}
