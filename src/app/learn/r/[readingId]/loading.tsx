@@ -1,4 +1,5 @@
-import { QuestionSkeletons } from "@/components/question-skeletons";
+import { WritingQuestions } from "@/components/writing-questions";
+import { GETTING_QUESTIONS_READY } from "@/components/writing-questions-text";
 
 // Shown while the page loads, which on the first open includes writing
 // the reading's questions.
@@ -9,10 +10,7 @@ export default function SelfReadingLoading() {
         <div className="h-5 w-32 rounded bg-ink-200" />
         <div className="h-10 w-3/4 rounded-lg bg-ink-200" />
       </div>
-      <p aria-live="polite" className="text-lg font-medium text-ink-700">
-        Getting your questions ready…
-      </p>
-      <QuestionSkeletons count={3} />
+      <WritingQuestions label={GETTING_QUESTIONS_READY} />
     </div>
   );
 }

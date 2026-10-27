@@ -20,7 +20,6 @@ import { Banner } from "@/components/banner";
 import { ChallengeForm } from "./challenge-form";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
 import { MetaLine } from "@/components/meta-line";
-import { QuestionSkeletons } from "@/components/question-skeletons";
 
 // A student's first open of a unique per student reading writes their set,
 // which QUESTION_WRITE_DEADLINE_MS (110s, in src/lib/ai/settings.ts) ends
@@ -92,9 +91,7 @@ export default async function StudentReadingPage({ params }: Props) {
         )}
 
         {view.kind === "pending" && (
-          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES}>
-            <QuestionSkeletons count={reading.questionCount} />
-          </PendingRefresh>
+          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES} />
         )}
 
         {/* Limits, not errors: amber notes. */}

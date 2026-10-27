@@ -103,6 +103,32 @@
   --shadow-lip-danger: 0 4px 0 0 #8c1820;
   --shadow-lip-sunny: 0 4px 0 0 #f5a524;
   --shadow-card: 0 3px 0 0 #e2dfee;
+
+  /* The "writing your questions" state: a pencil that bobs as it writes
+     and dots that hop. Used only with motion-safe:. */
+  --animate-pencil: pencil 1.4s ease-in-out infinite;
+  --animate-hop: hop 1.2s ease-in-out infinite;
+
+  @keyframes pencil {
+    0%,
+    100% {
+      transform: translate(0, 0) rotate(0deg);
+    }
+    50% {
+      transform: translate(4px, -3px) rotate(-6deg);
+    }
+  }
+
+  @keyframes hop {
+    0%,
+    60%,
+    100% {
+      transform: translateY(0);
+    }
+    30% {
+      transform: translateY(-6px);
+    }
+  }
 }
 
 @theme inline {

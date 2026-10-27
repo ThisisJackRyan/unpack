@@ -6,7 +6,6 @@ import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
 import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
-import { QuestionSkeletons } from "@/components/question-skeletons";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
 import { MetaLine } from "@/components/meta-line";
 import { backLink, card, primaryButtonLarge, secondaryButtonLarge } from "@/components/ui";
@@ -97,9 +96,7 @@ export default async function SelfReadingPage({ params }: Props) {
         )}
 
         {view.kind === "pending" && (
-          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES}>
-            <QuestionSkeletons count={reading.questionCount} />
-          </PendingRefresh>
+          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES} />
         )}
 
         {/* This reading's questions failed before, so it gave its weekly

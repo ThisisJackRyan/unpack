@@ -16,6 +16,8 @@ import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { MetaLine } from "@/components/meta-line";
 import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
+import { WritingQuestions } from "@/components/writing-questions";
+import { WRITING_A_SAMPLE, WRITING_ONE_QUESTION, WRITING_QUESTIONS_TEACHER } from "@/components/writing-questions-text";
 import {
   QUESTION_MAX_LENGTH,
   type QuestionActionState,
@@ -49,8 +51,8 @@ const ROLE_LABELS: Record<QuestionRole, string> = {
 };
 
 // Numbered, stacked question cards with inline edit and per-card actions
-// (modeled on the Google Gemini "Creating a quiz" flow), skeleton cards
-// while writing, and a confirm step before Regenerate all, Publish, and
+// (modeled on the Google Gemini "Creating a quiz" flow), a friendly "Writing
+// questions…" card while writing, and a confirm step before Regenerate all, Publish, and
 // Delete.
 export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questions }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -120,7 +122,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
         {shared && hasSet && (
           <ConfirmButton
             label="Regenerate all"
-            pendingLabel="Writing questions…"
+            pendingLabel={WRITING_QUESTIONS_TEACHER}
             isPending={busy("regenerate_all")}
             disabled={pending}
             title="Write a new set?"
@@ -137,7 +139,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
       <p role="status" aria-live="polite" className="sr-only">
         {pending
           ? writingSet || busy("regenerate_one")
-            ? "Writing questions…"
+            ? WRITING_QUESTIONS_TEACHER
             : "Saving…"
           : state.ok
             ? state.status
@@ -150,7 +152,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
 
       {shared ? (
         busy("generate") || busy("regenerate_all") ? (
-          <SkeletonList count={questionCount} />
+          <WritingQuestions label={WRITING_QUESTIONS_TEACHER} announce={false} />
         ) : hasSet ? (
           <ol className="flex flex-col gap-3" aria-label="Questions">
             {questions.map((q) => (
@@ -184,7 +186,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           >
             <IntentForm intent="generate" dispatch={dispatch} track={track}>
               <button type="submit" disabled={pending} className={primaryButton}>
-                {busy("generate") ? "Writing questions…" : "Generate questions"}
+                {busy("generate") ? WRITING_QUESTIONS_TEACHER : "Generate questions"}
               </button>
             </IntentForm>
           </EmptyState>
@@ -201,7 +203,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
             </button>
           </IntentForm>
           {busy("sample") ? (
-            <SkeletonList count={questionCount} />
+            <WritingQuestions label={WRITING_A_SAMPLE} announce={false} />
           ) : (
             state.sample && (
               <div className="flex flex-col gap-3">
@@ -428,11 +430,7 @@ function QuestionCard({
       <QuestionNumber n={question.position} />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {regenerating ? (
-          <div aria-hidden="true" className="flex animate-pulse flex-col gap-2 py-1 motion-reduce:animate-none">
-            <div className="h-3 w-24 rounded bg-ink-100" />
-            <div className="h-4 w-11/12 rounded bg-ink-200" />
-            <div className="h-4 w-2/3 rounded bg-ink-200" />
-          </div>
+          <WritingQuestions label={WRITING_ONE_QUESTION} announce={false} size="small" />
         ) : editing ? (
           <IntentForm
             intent="update"
@@ -553,24 +551,6 @@ export function QuestionNumber({ n }: { n: number }) {
     >
       {n}
     </span>
-  );
-}
-
-// Placeholder cards for the set being written, one per expected question.
-function SkeletonList({ count }: { count: number }) {
-  return (
-    <ol aria-hidden="true" className="flex animate-pulse flex-col gap-3 motion-reduce:animate-none">
-      {Array.from({ length: count }, (_, i) => (
-        <li key={i} className="flex gap-4 rounded-2xl border border-ink-200 bg-white p-4">
-          <div className="h-8 w-8 shrink-0 rounded-full bg-ink-200" />
-          <div className="flex flex-1 flex-col gap-2 py-1">
-            <div className="h-3 w-24 rounded bg-ink-100" />
-            <div className="h-4 w-11/12 rounded bg-ink-200" />
-            <div className="h-4 w-2/3 rounded bg-ink-200" />
-          </div>
-        </li>
-      ))}
-    </ol>
   );
 }
 

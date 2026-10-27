@@ -4,6 +4,7 @@ export { LogoMark } from "./logo-mark";
 export { Magnifier } from "./magnifier";
 export { OpenBook } from "./open-book";
 export { PaperPlane } from "./paper-plane";
+export { Pencil } from "./pencil";
 export { ReadingBuddy } from "./reading-buddy";
 export { Sparkle } from "./sparkle";
 export { StarBadge } from "./star-badge";
