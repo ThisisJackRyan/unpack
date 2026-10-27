@@ -163,6 +163,11 @@ describe("queue", () => {
     assert.match(list.text, /order by ch\.created_at, ch\.id$/);
     assert.match(questions.text, /q\.student_id is not distinct from \(case when r\.question_mode = 'per_student' then ch\.student_id end\)/);
     assert.match(questions.text, /order by a\.try_number desc limit 1/);
+    // Every join comes before the where clause.
+    for (const s of [list, questions]) {
+      const where = s.text.search(/^where /m);
+      assert.ok(where > 0 && !/\bjoin\b/.test(s.text.slice(where)), "no join after where");
+    }
   });
 
   it("maps rows to items with the last try's answers", () => {

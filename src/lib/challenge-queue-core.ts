@@ -154,11 +154,13 @@ export type QueueItem = {
   questions: QueueQuestion[];
 };
 
-const OPEN_IN_CLASS = `from challenges ch
+const OPEN_FROM = `from challenges ch
 join readings r on r.id = ch.reading_id
 join classes c on c.id = r.class_id
-join students s on s.id = ch.student_id
-where c.id = $1::uuid and c.teacher_id = $2::uuid and ch.status = 'open' and ${NOT_PASSED}`;
+join students s on s.id = ch.student_id`;
+const OPEN_WHERE = `where c.id = $1::uuid and c.teacher_id = $2::uuid and ch.status = 'open' and ${NOT_PASSED}`;
+const OPEN_IN_CLASS = `${OPEN_FROM}
+${OPEN_WHERE}`;
 
 // Oldest first: the student who has waited longest. $1 class, $2 teacher.
 export function queueStatements(classId: string, teacherId: string): Statement[] {
@@ -180,7 +182,7 @@ order by ch.created_at, ch.id`,
       // own in per-student mode) with the last try's answers.
       text: `select ch.id as challenge_id, q.id as question_id, q.position, q.prompt,
   an.text, an.ai_pass, an.ai_feedback
-${OPEN_IN_CLASS}
+${OPEN_FROM}
 join questions q on q.reading_id = ch.reading_id
   and q.student_id is not distinct from (case when r.question_mode = 'per_student' then ch.student_id end)
 left join lateral (
@@ -189,6 +191,7 @@ left join lateral (
   order by a.try_number desc limit 1
 ) la on true
 left join answers an on an.attempt_id = la.id and an.question_id = q.id
+${OPEN_WHERE}
 order by ch.id, q.position`,
       params: [classId, teacherId],
     },
