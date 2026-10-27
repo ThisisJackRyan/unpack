@@ -8,7 +8,17 @@
 //   after the window (rows moved back in time) exactly as many more, up to
 //   STUDENT_GENERATION_CALL_LIMIT; at that cap another burst makes no
 //   call ("calls_used_up"). A working model is called once, and cached
-//   opens add no call rows.
+//   opens add no call rows. The failing model answers with unusable
+//   output, which counts.
+// - Provider failures don't count: a model throwing a 529 overloaded, a
+//   503, a 401 bad key, or a network error leaves the call count where it
+//   was (0), over more opens than the cap, and the student then still
+//   gets a set.
+// - "Let them try again": at the cap, class status says Needs a reset;
+//   another teacher's reset is not_found with every call row intact; the
+//   owner's reset clears them, the student gets the full budget again
+//   (a burst makes STUDENT_GENERATION_WINDOW_LIMIT calls), and a repeat
+//   reset is a no-op success.
 // - New join code: --regen-n concurrent regenerates end with exactly one
 //   current code; it joins; the original and every other returned code
 //   refuse. Another teacher can't regenerate or toggle.
@@ -18,7 +28,9 @@
 // - Student delete: removes exactly that student's rows in every student
 //   table (counted per table before and after) and nothing of another
 //   student in the same class; another teacher gets not_found with every
-//   row intact; the deleted student's session no longer resolves.
+//   row intact; the deleted student's session no longer resolves; a
+//   second delete is a no-op success (already_gone), and another
+//   teacher's delete of the gone id is still not_found.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-abuse-protection [flags]
 //
@@ -31,9 +43,13 @@
 // teachers named test_abuse_<run> and test_abuse_other_<run> and deletes
 // them (and everything under them, by cascade) and this run's
 // join_attempts rows at the end. Never run against production.
+import Anthropic from "@anthropic-ai/sdk";
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
-import { deleteStudent, newJoinCode, setJoinCodeActive } from "@/lib/classes";
+import { QuestionWriterError } from "@/lib/ai/questions";
+import { loadClassStatus } from "@/lib/class-status-db";
+import { cellKey } from "@/lib/class-status";
+import { deleteStudent, newJoinCode, resetStudentQuestionCalls, setJoinCodeActive } from "@/lib/classes";
 import { hashJoinCode, hashJoinIp } from "@/lib/client-ip";
 import { findStudentBySessionToken } from "@/lib/student-lookup";
 import { joinClass } from "@/lib/student-join";
@@ -44,6 +60,7 @@ import {
   STUDENT_GENERATION_WINDOW_LIMIT,
   STUDENT_GENERATION_WINDOW_MINUTES,
   type StudentQuestionsResult,
+  type StudentQuestionWriter,
 } from "@/lib/student-questions-core";
 import { validateJoin } from "@/lib/validate-join";
 
@@ -136,6 +153,7 @@ let teacherId = "";
 let otherTeacherId = "";
 let classId = "";
 let readingId = "";
+let otherClassOfOther = "";
 let joinCode = "";
 
 async function setup() {
@@ -153,6 +171,10 @@ async function setup() {
     insert into classes (teacher_id, name, grade_level, join_code)
     values (${teacherId}, 'Abuse check', '4', ${joinCode})
     returning id`));
+  ({ id: otherClassOfOther } = await one<{ id: string }>(sql`
+    insert into classes (teacher_id, name, grade_level, join_code)
+    values (${otherTeacherId}, 'Other teacher class', '4', ${`C${RUN_ID}`.toUpperCase()})
+    returning id`));
   ({ id: readingId } = await one<{ id: string }>(sql`
     insert into readings (class_id, title, body_text, question_count, question_mode, status)
     values (${classId}, 'Per-student check', ${BODY}, ${PROMPTS.length}, 'per_student', 'published')
@@ -169,11 +191,21 @@ async function newStudent(firstName: string): Promise<{ id: string; token: strin
 // The Try again throttle
 
 let modelCalls = 0;
-const failingModel = async (): Promise<string[]> => {
+// The model answered, but not usably: counts toward the throttle.
+const failingModel: StudentQuestionWriter = async (_context, hooks) => {
   modelCalls++;
   await new Promise((resolve) => setTimeout(resolve, 50));
-  throw new Error("mock model failure");
+  hooks.onModelResponse();
+  throw new QuestionWriterError("failed", "invalid output: mock");
 };
+// No answer came back: doesn't count.
+function downModel(error: Error): StudentQuestionWriter {
+  return async () => {
+    modelCalls++;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    throw error;
+  };
+}
 const workingModel = async (): Promise<string[]> => {
   modelCalls++;
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -182,7 +214,7 @@ const workingModel = async (): Promise<string[]> => {
 
 // One Try again, retried while another request holds the claim, the way
 // the page refreshes itself while pending.
-async function tryUntilAnswered(studentId: string, write: () => Promise<string[]>): Promise<StudentQuestionsResult> {
+async function tryUntilAnswered(studentId: string, write: StudentQuestionWriter): Promise<StudentQuestionsResult> {
   for (let i = 0; i < 400; i++) {
     const result = await getOrCreateStudentQuestions(readingId, studentId, { write });
     if (result.status !== "pending") return result;
@@ -191,7 +223,7 @@ async function tryUntilAnswered(studentId: string, write: () => Promise<string[]
   throw new Error("still pending after 400 polls");
 }
 
-async function burst(studentId: string, write: () => Promise<string[]>) {
+async function burst(studentId: string, write: StudentQuestionWriter) {
   const before = modelCalls;
   const results = await Promise.all(Array.from({ length: BURST }, () => tryUntilAnswered(studentId, write)));
   const statuses: Record<string, number> = {};
@@ -252,11 +284,89 @@ async function checkThrottle() {
   );
   check((await callRows(student.id)) === STUDENT_GENERATION_CALL_LIMIT, "the cap writes no more call rows");
 
+  await checkReset(student.id);
+
   const fine = await newStudent("Smooth");
   const ok = await burst(fine.id, workingModel);
   check(ok.calls === 1 && ok.statuses.ready === BURST, `a working model: 1 call, all ready (${JSON.stringify(ok)})`);
   const again = await burst(fine.id, workingModel);
   check(again.calls === 0 && (await callRows(fine.id)) === 1, "cached opens make no call and add no call row");
+}
+
+async function needsReset(studentId: string, asTeacher = teacherId): Promise<boolean | undefined> {
+  const status = await loadClassStatus(classId, asTeacher);
+  return status.cells[cellKey(studentId, readingId)]?.needsReset;
+}
+
+// "Let them try again", on a student at the cap.
+async function checkReset(studentId: string) {
+  console.log("\n== LET THEM TRY AGAIN ==");
+  check((await needsReset(studentId)) === true, "class status: Needs a reset at the cap");
+
+  const intruder = await resetStudentQuestionCalls(classId, otherTeacherId, studentId, readingId);
+  check(intruder.status === "not_found", `another teacher's reset: ${intruder.status}`);
+  check((await callRows(studentId)) === STUDENT_GENERATION_CALL_LIMIT, "...and every call row is intact");
+  const { id: otherReading } = await one<{ id: string }>(sql`
+    insert into readings (class_id, title, body_text, question_count, question_mode, status)
+    select ${otherClassOfOther}, 'Other teacher reading', ${BODY}, 3, 'per_student', 'published' returning id`);
+  check(
+    (await resetStudentQuestionCalls(classId, teacherId, studentId, otherReading)).status === "not_found",
+    "the owner can't reset through another class's reading",
+  );
+
+  const reset = await resetStudentQuestionCalls(classId, teacherId, studentId, readingId);
+  check(reset.status === "reset" && reset.cleared === STUDENT_GENERATION_CALL_LIMIT, `the owner's reset: ${JSON.stringify(reset)}`);
+  check((await callRows(studentId)) === 0, "the call rows are gone");
+  check((await needsReset(studentId)) === false, "class status: no longer Needs a reset");
+  const again = await resetStudentQuestionCalls(classId, teacherId, studentId, readingId);
+  check(again.status === "reset" && again.cleared === 0, `a repeat reset is a no-op success: ${JSON.stringify(again)}`);
+
+  const after = await burst(studentId, failingModel);
+  check(
+    after.calls === STUDENT_GENERATION_WINDOW_LIMIT && after.statuses.throttled === BURST - after.calls,
+    `after the reset the full budget is back: ${STUDENT_GENERATION_WINDOW_LIMIT} calls, the rest throttled (${JSON.stringify(after)})`,
+  );
+  await passTheWindow(studentId);
+  const ok = await burst(studentId, workingModel);
+  check(ok.calls === 1 && ok.statuses.ready === BURST, `and the student can get a set: ${JSON.stringify(ok)}`);
+}
+
+// Provider failures leave the count alone.
+async function checkProviderFailures() {
+  console.log("\n== PROVIDER FAILURES DON'T COUNT ==");
+  const h = new Headers();
+  const errors: [string, Error][] = [
+    ["529 overloaded", new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error" } }, "overloaded", h)],
+    ["503 unavailable", new Anthropic.InternalServerError(503, {}, "unavailable", h)],
+    ["401 bad key", new Anthropic.AuthenticationError(401, {}, "invalid x-api-key", h)],
+    ["network error", new Anthropic.APIConnectionError({ message: "fetch failed" })],
+  ];
+  for (const [name, error] of errors) {
+    const student = await newStudent(`Outage${name.replace(/[^a-z]/gi, "").slice(0, 10)}`);
+    const before = modelCalls;
+    const statuses: string[] = [];
+    // More opens than the lifetime cap, all inside one window.
+    for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT + 2; i++) {
+      statuses.push((await tryUntilAnswered(student.id, downModel(error))).status);
+    }
+    check(
+      modelCalls - before === STUDENT_GENERATION_CALL_LIMIT + 2 && statuses.every((s) => s === "error"),
+      `${name}: every open reached the (failing) model, none throttled (${JSON.stringify(statuses)})`,
+    );
+    check((await callRows(student.id)) === 0, `${name}: the call count is unchanged (0)`);
+    const claims = await one<{ n: number }>(sql`
+      select count(*)::int as n from question_generations where reading_id = ${readingId} and student_id = ${student.id}`);
+    check(claims.n === 0, `${name}: no claim left behind`);
+    const ok = await tryUntilAnswered(student.id, workingModel);
+    check(ok.status === "ready" && (await callRows(student.id)) === 1, `${name}: the student can still get a set (${ok.status})`);
+  }
+
+  // A burst against an outage: the in-flight call holds the slot, so it's
+  // still one call at a time, and nothing is left counted.
+  const burster = await newStudent("Outageburst");
+  const b = await burst(burster.id, downModel(new Anthropic.InternalServerError(503, {}, "unavailable", h)));
+  check(b.statuses.error === BURST && b.calls === BURST, `a burst of ${BURST} against an outage: each answered once (${JSON.stringify(b)})`);
+  check((await callRows(burster.id)) === 0, "...and no call is counted");
 }
 
 // ---------------------------------------------------------------------------
@@ -385,8 +495,12 @@ async function checkStudentDelete() {
     insert into classes (teacher_id, name, grade_level, join_code)
     values (${teacherId}, 'Other class', '4', ${`B${RUN_ID}`.toUpperCase()}) returning id`);
   check(
-    (await deleteStudent(otherClass, teacherId, target.id)).status === "not_found",
-    "the owner can't delete through a class the student isn't in",
+    (await deleteStudent(otherClass, teacherId, target.id)).status === "already_gone",
+    "the owner deleting through a class the student isn't in: a no-op (already_gone)",
+  );
+  check(
+    JSON.stringify(await studentCounts(target.id)) === JSON.stringify(targetBefore),
+    "...and every row of the student is still intact",
   );
 
   const deleted = await deleteStudent(classId, teacherId, target.id);
@@ -399,7 +513,10 @@ async function checkStudentDelete() {
   }
   check((await findStudentBySessionToken(target.token)) === null, "the deleted student's session no longer resolves");
   check((await findStudentBySessionToken(neighbor.token))?.student.id === neighbor.id, "the neighbor's session still works");
-  check((await deleteStudent(classId, teacherId, target.id)).status === "not_found", "deleting again: not_found");
+  check((await deleteStudent(classId, teacherId, target.id)).status === "already_gone", "deleting again: a no-op success (already_gone)");
+  check((await deleteStudent(classId, otherTeacherId, target.id)).status === "not_found", "another teacher deleting the gone id: still not_found");
+  const neighborStill = await studentCounts(neighbor.id);
+  check(JSON.stringify(neighborStill) === JSON.stringify(neighborBefore), "...and the neighbor is still intact");
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +540,7 @@ async function main(): Promise<void> {
   try {
     await setup();
     await checkThrottle();
+    await checkProviderFailures();
     await checkJoinCode();
     await checkStudentDelete();
   } finally {
