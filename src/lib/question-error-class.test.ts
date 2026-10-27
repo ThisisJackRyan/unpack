@@ -115,7 +115,7 @@ describe("question error copy by class", () => {
       ...Object.values(QUESTION_ERROR_MESSAGES),
     ]) {
       assert.ok(!message.includes("'"), message);
-      assert.ok(!message.includes("—"), message);
+      assert.ok(!message.includes("\u2014"), message);
     }
   });
 });
