@@ -35,3 +35,21 @@ export const QUESTION_MAX_TOKENS = 8_000;
 // Question writing is a light task. Low effort keeps a call well inside
 // AI_TIMEOUT_MS. Raise it here if question quality needs it.
 export const QUESTION_EFFORT = "low" as const;
+
+// The effort check: one call per attempt covers every answer. Like question
+// writing, it gets one more call if its output fails validation.
+export const EFFORT_CHECK_ATTEMPTS = 2;
+
+// The most one effort check may take, end to end (both validation
+// attempts, SDK retries, and backoff), the same way as
+// QUESTION_WRITE_DEADLINE_MS. A student is waiting on the button, so it is
+// shorter: a stuck check ends and the student can try again (a failed check
+// doesn't use up a try). The stale claim timeout in submit-answers-core.ts
+// is built on it.
+export const EFFORT_CHECK_DEADLINE_MS = 60_000;
+
+// Room for thinking plus up to 10 short verdicts with nudges.
+export const EFFORT_CHECK_MAX_TOKENS = 6_000;
+
+// Judging effort is a light task, and a student is waiting.
+export const EFFORT_CHECK_EFFORT = "low" as const;

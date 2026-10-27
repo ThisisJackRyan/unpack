@@ -1,0 +1,136 @@
+"use client";
+
+import { startTransition, useActionState, useState, type FormEvent } from "react";
+import { NoCopyTextarea } from "@/components/no-copy";
+import { pill, primaryButton } from "@/components/ui";
+import { passedCountLabel, type AttemptView } from "@/lib/reading-progress";
+import type { StudentQuestion } from "@/lib/student-questions-core";
+import {
+  answerBox,
+  CharacterCount,
+  fieldError,
+  Nudge,
+  QuestionNumber,
+  ResultBadge,
+  RetryIcon,
+  Spinner,
+} from "./answer-parts";
+import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH, MAX_TRIES, type AnswerFormState } from "./form-state";
+
+type Props = {
+  action: (state: AnswerFormState, formData: FormData) => Promise<AnswerFormState>;
+  questions: StudentQuestion[];
+  tryNumber: number;
+  // The last failed try: its answers prefill the boxes, with each one's
+  // result and nudge. Students answer every question each try; passed
+  // answers stay editable.
+  previous: AttemptView | null;
+};
+
+const initialState: AnswerFormState = {};
+
+function prefill(questions: StudentQuestion[], previous: AttemptView | null): Record<string, string> {
+  return Object.fromEntries(questions.map((q) => [q.id, previous?.answers[q.id]?.text ?? ""]));
+}
+
+// Every question with an answer box, and one button that checks them all.
+// The form submits through a transition (not the form action prop), so
+// React doesn't reset the boxes after a check.
+export function AnswerForm({ action, questions, tryNumber, previous }: Props) {
+  const [state, dispatch, pending] = useActionState(action, initialState);
+  const [values, setValues] = useState(() => prefill(questions, previous));
+  // A new try (the page re-renders after a check): start from its answers.
+  const [shownTry, setShownTry] = useState(tryNumber);
+  if (shownTry !== tryNumber) {
+    setShownTry(tryNumber);
+    setValues(prefill(questions, previous));
+  }
+  const errors = state.errors ?? {};
+
+  function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (pending) return;
+    const data = new FormData(e.currentTarget);
+    startTransition(() => dispatch(data));
+  }
+
+  return (
+    <form onSubmit={onSubmit} noValidate aria-busy={pending} className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className={`${pill} bg-indigo-50 px-3 py-1 text-base font-semibold text-indigo-800`}>
+          Try {tryNumber} of {MAX_TRIES}
+        </span>
+        <span className="text-base text-zinc-600">Copy and paste are off. Use your own words.</span>
+      </div>
+
+      {previous && (
+        <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950">
+          <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-amber-700" />
+          <div className="flex flex-col gap-1">
+            <p className="text-lg font-semibold">Not yet. {passedCountLabel(previous)}</p>
+            <p className="text-lg">Read the tips under your answers. Then fix them and check again.</p>
+          </div>
+        </div>
+      )}
+
+      <ol className="flex flex-col gap-4">
+        {questions.map((q) => {
+          const id = `answer-${q.id}`;
+          const result = previous?.answers[q.id];
+          const nudge = result && !result.pass && result.nudge ? result.nudge : "";
+          const error = errors[q.id];
+          const value = values[q.id] ?? "";
+          const describedBy = [nudge && `${id}-nudge`, `${id}-count`, error && `${id}-error`].filter(Boolean).join(" ");
+          return (
+            <li key={q.id} className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6">
+              <div className="flex gap-4">
+                <QuestionNumber position={q.position} />
+                <label htmlFor={id} className="pt-1.5 text-lg leading-relaxed font-medium break-words text-zinc-900">
+                  <span className="sr-only">Question {q.position}: </span>
+                  {q.prompt}
+                </label>
+              </div>
+              {result && (
+                <div className="flex flex-col items-start gap-3">
+                  <ResultBadge pass={result.pass} />
+                  {nudge && <Nudge id={`${id}-nudge`} text={nudge} />}
+                </div>
+              )}
+              <NoCopyTextarea
+                id={id}
+                name={`${ANSWER_FIELD_PREFIX}${q.id}`}
+                rows={4}
+                maxLength={ANSWER_MAX_LENGTH}
+                value={value}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setValues((v) => ({ ...v, [q.id]: next }));
+                }}
+                readOnly={pending}
+                autoComplete="off"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={describedBy}
+                className={answerBox}
+              />
+              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                <p id={`${id}-error`} aria-live="polite" className={`${fieldError} empty:hidden`}>
+                  {error}
+                </p>
+                <CharacterCount id={`${id}-count`} length={value.length} max={ANSWER_MAX_LENGTH} />
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+
+      <p aria-live="polite" className="text-lg font-medium text-zinc-800 empty:hidden">
+        {state.message}
+      </p>
+
+      <button type="submit" disabled={pending} className={`${primaryButton} min-h-14 w-full px-8 text-lg sm:w-auto sm:self-start`}>
+        {pending && <Spinner />}
+        {pending ? "Checking your answers…" : "Check my answers"}
+      </button>
+    </form>
+  );
+}

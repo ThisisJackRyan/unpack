@@ -33,6 +33,7 @@ describe("validateJoin", () => {
       "D’Andre",
       "D‘Andre",
       "DʼAndre",
+      "Keʻala",
       "O'Neil",
       "Søren",
       "明",
@@ -64,7 +65,7 @@ describe("validateJoin", () => {
   });
 
   it("refuses digits, symbols, and names that start or end with punctuation", () => {
-    for (const firstName of ["Maya2", "M@ya", "-Maya", "'", "Maya!", "<b>", "\u0301", "Mia-", "Mia'", "Mia’", "'Mia", "Mia `Ann"]) {
+    for (const firstName of ["Maya2", "M@ya", "-Maya", "'", "Maya!", "<b>", "\u0301", "Mia-", "Mia'", "Mia’", "'Mia", "Mia `Ann", "ʼMia", "ʻMia", "Miaʼ", "Miaʻ", "ʼ", "ʻ", "Mia ʼ"]) {
       assert.deepEqual(errors({ firstName }), {
         firstName: "Use letters only. Spaces, hyphens, and apostrophes are OK.",
       }, firstName);

@@ -20,8 +20,13 @@ export const CLASS_NOT_FOUND_MESSAGE =
 // straight ('), curly (’ or ‘, which phones type), or the modifier letter
 // (ʼ); studentNameKey treats them all alike. The name must start and end
 // with a letter (accents may follow it), so a lone accent, "Mia-", or
-// "Mia'" is refused.
-const FIRST_NAME_RE = /^\p{L}\p{M}*(?:[\p{L}\p{M} '’‘ʼ-]*\p{L}\p{M}*)?$/u;
+// "Mia'" is refused. The modifier letters ʼ (U+02BC) and ʻ (U+02BB) count
+// as letters (\p{L}) but look like apostrophes, so they may not be the
+// first or last character either: "ʼMia" and "Miaʼ" are refused like
+// "'Mia" and "Mia'". (A name that starts with a Hawaiian ʻokina is refused
+// too; the student can type it without the mark.)
+const FIRST_NAME_RE =
+  /^(?![\u02BB\u02BC])\p{L}\p{M}*(?:[\p{L}\p{M} '’‘ʼ-]*(?![\u02BB\u02BC])\p{L}\p{M}*)?$/u;
 const INITIALS_RE = /^[\p{L}\p{M}]+$/u;
 
 export type JoinErrors = {

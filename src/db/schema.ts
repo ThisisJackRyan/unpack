@@ -201,8 +201,46 @@ export const challenges = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    index("challenges_student_id_reading_id_idx").on(t.studentId, t.readingId),
+    // One challenge per student per reading. The insert in
+    // src/lib/challenges-core.ts is conditional (3 failed tries, no pass);
+    // this is what makes 20 parallel sends save exactly one.
+    unique("challenges_student_id_reading_id_unique").on(t.studentId, t.readingId),
     index("challenges_reading_id_status_idx").on(t.readingId, t.status),
+  ],
+);
+
+// One row per effort check a student starts (see
+// src/lib/submit-answers-core.ts). It is two things at once:
+// - the in-flight claim: unfinished (finished_at null) while one request
+//   calls the model, so a second submit for the same student and reading
+//   is told to wait, and
+// - the cost guard: every row counts toward EFFORT_CHECK_LIMIT per student
+//   per reading, including checks the model failed (which don't use up a
+//   try). Rows are kept, so the limit is for all time.
+// Only ids and times: no answer text.
+export const effortChecks = pgTable(
+  "effort_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentId: uuid("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => readings.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    // Null while running; pass or fail when an attempt was saved; error
+    // when the model call failed and no attempt was saved.
+    outcome: text("outcome"),
+  },
+  (t) => [
+    index("effort_checks_student_id_reading_id_idx").on(t.studentId, t.readingId),
+    index("effort_checks_reading_id_idx").on(t.readingId),
+    check(
+      "effort_checks_outcome_check",
+      sql`${t.outcome} is null or ${t.outcome} in ('pass', 'fail', 'error')`,
+    ),
   ],
 );
 
@@ -324,3 +362,4 @@ export type Answer = typeof answers.$inferSelect;
 export type NewAnswer = typeof answers.$inferInsert;
 export type Challenge = typeof challenges.$inferSelect;
 export type NewChallenge = typeof challenges.$inferInsert;
+export type EffortCheck = typeof effortChecks.$inferSelect;

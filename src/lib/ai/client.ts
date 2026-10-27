@@ -42,3 +42,7 @@ export function getQuestionModel(): QuestionModel {
     create: (params, options) => client.messages.create(params, options),
   };
 }
+
+// The effort check uses the same client, key, and model as question
+// writing. A missing key throws the same not_configured error.
+export const getEffortCheckModel = getQuestionModel;

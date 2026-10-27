@@ -14,9 +14,14 @@ import { perStudentView, sharedView, type StudentReadingView } from "./student-r
 
 export type StudentReadingItem = Pick<Reading, "id" | "title" | "questionCount">;
 
-export type StudentReading = Pick<Reading, "id" | "title" | "questionCount" | "questionMode">;
+export type StudentReading = Pick<
+  Reading,
+  "id" | "title" | "questionCount" | "questionMode" | "bodyText" | "sourceUrl"
+>;
 
-// The class's published readings, newest first.
+// The class's published readings, newest first. The class home uses
+// listReadingsWithStatus (reading-progress-db.ts), which adds the
+// student's status to each.
 export function listPublishedReadings(classId: string): Promise<StudentReadingItem[]> {
   return db
     .select({
@@ -40,6 +45,8 @@ export async function getPublishedReading(
       title: schema.readings.title,
       questionCount: schema.readings.questionCount,
       questionMode: schema.readings.questionMode,
+      bodyText: schema.readings.bodyText,
+      sourceUrl: schema.readings.sourceUrl,
     })
     .from(schema.readings)
     .where(

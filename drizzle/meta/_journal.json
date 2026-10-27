@@ -29,6 +29,13 @@
       "when": 1793086527149,
       "tag": "0003_join_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793090825441,
+      "tag": "0004_effort_checks",
+      "breakpoints": true
     }
   ]
 }

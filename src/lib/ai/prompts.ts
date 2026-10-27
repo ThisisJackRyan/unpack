@@ -44,7 +44,7 @@ export function defuseTags(text: string): string {
   return text.replace(/<(\s*\/?\s*)(reading_text|other_questions)/gi, "‹$1$2");
 }
 
-function gradeDescription(grade: GradeLevel): string {
+export function gradeDescription(grade: GradeLevel): string {
   if (grade === "K") return "kindergarten";
   if (grade === "adult") return "adult learners";
   return `grade ${grade}`;

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   clientIpFromHeaders,
   DEV_JOIN_IP_HASH_SECRET,
   hashJoinCode,
+  JOIN_IP_HASH_SECRET_PLACEHOLDER,
   hashJoinIp,
   ipRateLimitKey,
   joinIpHashSecret,
@@ -79,6 +81,13 @@ describe("ipRateLimitKey", () => {
     assert.equal(ipRateLimitKey("0:0:0:0:0:ffff:203.0.113.7"), "203.0.113.7");
   });
 
+  it("falls back to the unknown key when junk is empty once the zone id goes", () => {
+    for (const junk of ["%eth0:1", "%:", "%25::1", " %x:y "]) {
+      assert.equal(ipRateLimitKey(junk), UNKNOWN_IP, junk);
+    }
+    assert.equal(clientIpFromHeaders(getter({ "x-real-ip": "%eth0:1" })), UNKNOWN_IP);
+  });
+
   it("keeps text that isn't an IP, lowercased", () => {
     assert.equal(ipRateLimitKey("Not-An-IP"), "not-an-ip");
     assert.equal(ipRateLimitKey("1:2:3"), "1:2:3");
@@ -101,6 +110,29 @@ describe("joinIpHashSecret", () => {
     );
     assert.throws(() => joinIpHashSecret({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: "x".repeat(31) }));
     assert.equal(joinIpHashSecret({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: "x".repeat(32) }), "x".repeat(32));
+  });
+
+  it("treats VERCEL_ENV=production as production", () => {
+    assert.throws(() => joinIpHashSecret({ NODE_ENV: "development", VERCEL_ENV: "production" }), /JOIN_IP_HASH_SECRET/);
+    assert.equal(joinIpHashSecret({ VERCEL_ENV: "production", JOIN_IP_HASH_SECRET: SECRET }), SECRET);
+    assert.equal(joinIpHashSecret({ NODE_ENV: "development", VERCEL_ENV: "preview" }), DEV_JOIN_IP_HASH_SECRET);
+  });
+
+  it("refuses the .env.example placeholder and the dev secret in production, by name only", () => {
+    for (const env of [{ NODE_ENV: "production" }, { VERCEL_ENV: "production" }]) {
+      for (const value of [JOIN_IP_HASH_SECRET_PLACEHOLDER, DEV_JOIN_IP_HASH_SECRET]) {
+        assert.throws(
+          () => joinIpHashSecret({ ...env, JOIN_IP_HASH_SECRET: value }),
+          (error: Error) => error.message.includes("JOIN_IP_HASH_SECRET") && !error.message.includes(value),
+        );
+      }
+    }
+  });
+
+  it("keeps the placeholder in step with .env.example", () => {
+    const example = readFileSync(new URL("../../.env.example", import.meta.url), "utf8");
+    const line = example.split("\n").find((l) => l.startsWith("JOIN_IP_HASH_SECRET="));
+    assert.equal(line, `JOIN_IP_HASH_SECRET=${JOIN_IP_HASH_SECRET_PLACEHOLDER}`);
   });
 
   it("falls back to the dev secret outside production", () => {

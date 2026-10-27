@@ -22,7 +22,7 @@
 3. Read in a clean view with copy and paste blocked.
 4. Answer the questions and submit. The AI returns pass or fail per answer, with a short nudge on each fail.
 5. Up to 3 tries. After the 3rd fail, they can submit a challenge note to the teacher.
-6. Passed readings are marked done.
+6. Passed readings are marked done, showing the passing answers. The class home shows each reading as Not started, In progress, Passed, or Challenged.
 
 **Later (not v1):** saved reading libraries (paid), unlimited classes (paid), billing, the self-learner extension, and export to Google Classroom.
 
@@ -38,13 +38,19 @@
 | join_attempts | id, key_kind (ip/code), key_hash, created_at. Per-IP keys are HMAC-SHA256, per-code keys SHA-256; pruned after the 10-minute window. |
 | attempts | id, student_id, reading_id, try_number (1–3), result (pass/fail), created_at |
 | answers | id, attempt_id, question_id, text, ai_pass (bool), ai_feedback |
-| challenges | id, student_id, reading_id, note, status (open/approved/denied), resolved_at |
+| challenges | id, student_id, reading_id, note, status (open/approved/denied), resolved_at. One per student per reading (unique). |
+| effort_checks | id, student_id, reading_id, created_at, finished_at, outcome (pass/fail/error). One row per effort check started: the in-flight claim while unfinished, and the per-student, per-reading check counter. Kept, no answer text. |
 
-Student status for a reading is derived from attempts and challenges: Passed if any attempt passed or a challenge was approved, Challenged if a challenge is open, and so on.
+Student status for a reading is derived from attempts and challenges: Passed if any attempt passed or a challenge was approved, Challenged if a challenge is open, In progress after any try (or a denied challenge), else Not started.
 
 ## Key rules
 - An attempt passes only when **every** answer passes the effort check.
 - Try 4 is blocked; only the challenge option appears.
+- Answers: each is trimmed and cleaned (control characters removed), then must be 1 to 1,000 characters. Every question is answered on every try, in one submit; after a failed try, the last answers are filled back in, with each answer's result and nudge.
+- One effort check (one AI call) per attempt covers every answer. At most 1 check runs at a time per student and reading; a second submit meanwhile is told to wait.
+- Effort checks are limited to 6 per student per reading, for all time: the 3 tries plus room for AI failures. If the AI call fails or times out (60 seconds), the try isn't used up, but the check still counts. Past 6, the student is asked to get their teacher.
+- Challenge note: 1 to 500 characters, cleaned like answers. Only after 3 failed tries and no pass, and only one per student per reading.
+- Copy and paste blocking (the reading text and the answer boxes: copy, cut, paste, drag and drop, the context menu, select all, and text selection) is a speed bump, not security. A determined student can get around it; the effort check is the real gate.
 - Shared mode: questions are cached per reading. Per-student mode: each student's set is generated once and cached, and it isn't regenerated on retries.
 - Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions.
 - Once published, only the title can be edited; the text, grade, question count, mode, and questions stay locked. This applies to both modes.
@@ -65,7 +71,8 @@ Student status for a reading is derived from attempts and challenges: Passed if 
 
 ## AI calls
 1. **Generate questions** (once per reading, or once per student in per-student mode): open-ended questions tied to specific details in the text, plus one "what do you think" question, written for the teacher-chosen grade level.
-2. **Effort check** (per attempt): given the text, a question, and an answer, return pass or fail and a one-line nudge. The bar is "did they try and engage with the text," not correctness.
+2. **Effort check** (per attempt): one call, given the text and every question with its answer, returns pass or fail per answer and a nudge on each fail. The bar is "did they try and engage with the text and the question," never quality, spelling, grammar, or correctness. Short but genuine answers and opinions pass; "idk", gibberish, a copy of the question, and off-topic answers fail. It writes for the reading's grade (the reading's own grade, else the class's), and treats the text and answers as data, never as instructions.
+   - Nudges: at most 140 characters, kind and specific (what to look at or add), never giving away an answer, never shaming. Dashes are removed and longer nudges are shortened before a student sees them.
 
 ## Decided
 - AI provider: **Claude** (Anthropic API) for both question generation and the effort check.

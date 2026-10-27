@@ -56,3 +56,23 @@ export function sharedView(questions: StudentQuestion[]): StudentReadingView {
     ? { kind: "questions", questions }
     : { kind: "error", message: QUESTIONS_ERROR_MESSAGE };
 }
+
+// The reading's paragraphs for the read view: split on blank lines, with
+// single line breaks kept inside a paragraph.
+export function readingParagraphs(bodyText: string): string[] {
+  return bodyText
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
+// "example.com" for a reading added from a link, without "www.", or null
+// for pasted text (or a link that doesn't parse).
+export function sourceHost(sourceUrl: string | null): string | null {
+  if (!sourceUrl) return null;
+  try {
+    return new URL(sourceUrl).hostname.replace(/^www\./, "") || null;
+  } catch {
+    return null;
+  }
+}
