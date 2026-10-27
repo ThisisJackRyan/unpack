@@ -11,6 +11,12 @@ export const FREE_PLAN_CLASS_LIMIT = 1;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// True for a well-formed uuid. Ids from the URL are checked first so a
+// malformed one is a 404, not a Postgres uuid syntax error.
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
 export function listClasses(teacherId: string): Promise<Class[]> {
   return db
     .select()
@@ -97,7 +103,7 @@ export async function getClassForTeacher(
   classId: string,
   teacherId: string,
 ): Promise<Class | undefined> {
-  if (!UUID_RE.test(classId)) return undefined;
+  if (!isUuid(classId)) return undefined;
   const [row] = await db
     .select()
     .from(schema.classes)

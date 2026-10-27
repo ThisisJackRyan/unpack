@@ -1,23 +1,16 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { cache } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { getClassForTeacher } from "@/lib/classes";
 import { gradeLevelLabel } from "@/lib/grade-levels";
+import { questionCountLabel, questionModeLabel } from "@/lib/question-modes";
+import { listReadings, type ReadingListItem } from "@/lib/readings";
 import { getOrCreateTeacher } from "@/lib/teacher";
-import { backLink, card } from "@/components/ui";
+import { ReadingStatusBadge } from "@/components/reading-status-badge";
+import { backLink, card, focusRing, primaryButton } from "@/components/ui";
 import { CopyButton } from "./copy-button";
+import { loadClass } from "./loaders";
 
 type Props = { params: Promise<{ id: string }> };
-
-// Cached so generateMetadata and the page share one query.
-const loadClass = cache(async (id: string) => {
-  const teacher = await getOrCreateTeacher();
-  const found = await getClassForTeacher(id, teacher.id);
-  if (!found) notFound();
-  return found;
-});
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
@@ -28,6 +21,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ClassDetailPage({ params }: Props) {
   const { id } = await params;
   const found = await loadClass(id);
+  const teacher = await getOrCreateTeacher();
+  const readings = await listReadings(found.id, teacher.id);
+  const newReadingHref = `/teacher/classes/${found.id}/readings/new`;
   const host = (await headers()).get("host");
   const joinUrl = host ? `${host}/join` : "/join";
 
@@ -79,6 +75,96 @@ export default async function ClassDetailPage({ params }: Props) {
           enter this code.
         </p>
       </section>
+
+      <section aria-labelledby="readings-heading" className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h2
+            id="readings-heading"
+            className="text-2xl font-semibold tracking-tight text-zinc-950"
+          >
+            Readings
+          </h2>
+          {readings.length > 0 && (
+            <Link href={newReadingHref} className={primaryButton}>
+              Add a reading
+            </Link>
+          )}
+        </div>
+        {readings.length === 0 ? (
+          <ReadingsEmptyState href={newReadingHref} />
+        ) : (
+          <ul className={`${card} divide-y divide-zinc-200 overflow-hidden`}>
+            {readings.map((r) => (
+              <ReadingRow key={r.id} classId={found.id} reading={r} />
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ReadingRow({
+  classId,
+  reading,
+}: {
+  classId: string;
+  reading: ReadingListItem;
+}) {
+  return (
+    <li>
+      <Link
+        href={`/teacher/classes/${classId}/readings/${reading.id}`}
+        className={`flex min-h-16 items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-zinc-50 focus-visible:-outline-offset-2 ${focusRing}`}
+      >
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-lg font-semibold text-zinc-950">
+            {reading.title}
+          </span>
+          <span className="text-base text-zinc-600">
+            {questionCountLabel(reading.questionCount)}
+            <span aria-hidden="true"> · </span>
+            <span className="sr-only">, </span>
+            {questionModeLabel(reading.questionMode)}
+          </span>
+        </span>
+        <ReadingStatusBadge status={reading.status} />
+      </Link>
+    </li>
+  );
+}
+
+function ReadingsEmptyState({ href }: { href: string }) {
+  return (
+    <div
+      className={`${card} flex flex-col items-center gap-4 px-6 py-14 text-center`}
+    >
+      <svg aria-hidden="true" viewBox="0 0 96 96" className="h-24 w-24" fill="none">
+        <circle cx="48" cy="48" r="44" fill="#eef2ff" />
+        <rect
+          x="28"
+          y="22"
+          width="40"
+          height="52"
+          rx="6"
+          fill="#fff"
+          stroke="#4f46e5"
+          strokeWidth="3"
+        />
+        <path
+          d="M36 36h24M36 45h24M36 54h16"
+          stroke="#a5b4fc"
+          strokeWidth="3"
+          strokeLinecap="round"
+        />
+      </svg>
+      <h3 className="text-xl font-semibold text-zinc-950">Add your first reading</h3>
+      <p className="max-w-sm text-base text-zinc-600">
+        Paste a link or some text. Students read it, then answer questions.
+      </p>
+      <Link href={href} className={`${primaryButton} mt-2 min-h-14 px-7 text-lg`}>
+        Add a reading
+      </Link>
     </div>
   );
 }

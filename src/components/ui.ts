@@ -11,3 +11,8 @@ export const secondaryButton = `inline-flex min-h-12 items-center justify-center
 export const backLink = `inline-flex min-h-12 items-center gap-1 rounded-lg text-base font-medium text-zinc-600 hover:text-zinc-900 ${focusRing}`;
 
 export const card = "rounded-xl border border-zinc-200 bg-white";
+
+export const field = `block min-h-12 w-full rounded-xl border bg-white border-zinc-300 px-4 text-lg text-zinc-950 aria-invalid:border-red-600 ${focusRing}`;
+
+export const pill =
+  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-medium";

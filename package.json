@@ -16,8 +16,10 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.21",
+    "@mozilla/readability": "^0.6.0",
     "@neondatabase/serverless": "^1.2.0",
     "drizzle-orm": "^0.45.4",
+    "linkedom": "^0.18.14",
     "next": "16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4"
@@ -35,6 +37,6 @@
   },
   "packageManager": "pnpm@10.34.6",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   }
 }
