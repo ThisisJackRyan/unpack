@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { field, primaryButton, secondaryButton } from "@/components/ui";
 import { joinClassAction } from "./actions";
@@ -11,8 +12,6 @@ const initialState: JoinState = {};
 
 const label = "text-xl font-bold text-ink-950";
 const hint = "text-lg text-ink-700";
-// Red, like every form error (red is for errors and destructive actions).
-const error = "text-base font-medium text-danger-700";
 
 // One big code field, then the two name fields, then the bot check (only
 // when it's on: `botCheckSiteKey` is set), then one full-width button.
@@ -50,9 +49,9 @@ export function JoinForm({
           aria-describedby="code-error"
           className={`${field} min-h-16 text-center font-mono text-3xl font-semibold tracking-[0.3em] uppercase`}
         />
-        <p id="code-error" aria-live="polite" className={error}>
+        <ErrorMessage id="code-error" large>
           {errors.code}
-        </p>
+        </ErrorMessage>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -76,9 +75,9 @@ export function JoinForm({
           aria-describedby="firstName-error"
           className={`${field} text-lg`}
         />
-        <p id="firstName-error" aria-live="polite" className={error}>
+        <ErrorMessage id="firstName-error" large>
           {errors.firstName}
-        </p>
+        </ErrorMessage>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -103,16 +102,14 @@ export function JoinForm({
           aria-describedby="lastInitials-hint lastInitials-error"
           className={`${field} max-w-32 text-lg`}
         />
-        <p id="lastInitials-error" aria-live="polite" className={error}>
+        <ErrorMessage id="lastInitials-error" large>
           {errors.lastInitials}
-        </p>
+        </ErrorMessage>
       </div>
 
       {botCheckSiteKey && <TurnstileWidget siteKey={botCheckSiteKey} resetKey={state} />}
 
-      <p aria-live="polite" className={`${error} empty:hidden`}>
-        {errors.form}
-      </p>
+      <ErrorMessage large>{errors.form}</ErrorMessage>
       {state.limit && <LimitNotice large>{state.limit}</LimitNotice>}
 
       <button

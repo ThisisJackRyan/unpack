@@ -3,6 +3,7 @@
 import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 import { TURNSTILE_ACTION, TURNSTILE_RESPONSE_FIELD, TURNSTILE_SCRIPT_URL } from "@/lib/join-bot-check";
+import { ErrorMessage } from "@/components/error-message";
 
 // The bot check on the join form: Cloudflare Turnstile, rendered only when
 // the check is on (the page passes a site key). It puts its token in a
@@ -65,9 +66,9 @@ export function TurnstileWidget({ siteKey, resetKey }: { siteKey: string; resetK
       <Script src={TURNSTILE_SCRIPT_URL} strategy="afterInteractive" onReady={() => setLoaded(true)} onError={() => setFailed(true)} />
       {/* Turnstile labels its own frame for screen readers. */}
       <div ref={container} className="min-h-[65px]" />
-      <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">
+      <ErrorMessage>
         {failed ? "The check didn’t load. Refresh the page and try again." : ""}
-      </p>
+      </ErrorMessage>
     </div>
   );
 }

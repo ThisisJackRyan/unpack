@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { GRADE_LEVELS, gradeLevelLabel } from "@/lib/grade-levels";
 import { field, primaryButton } from "@/components/ui";
+import { ErrorMessage } from "@/components/error-message";
 import { createClass } from "./actions";
 import { CLASS_NAME_MAX_LENGTH, type CreateClassState } from "./form-state";
 
@@ -33,9 +34,9 @@ export function NewClassForm() {
           aria-describedby={errors.name ? "name-error" : undefined}
           className={`${field} text-lg`}
         />
-        <p id="name-error" aria-live="polite" className="text-base text-danger-700">
+        <ErrorMessage id="name-error">
           {errors.name}
-        </p>
+        </ErrorMessage>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -65,18 +66,14 @@ export function NewClassForm() {
             </option>
           ))}
         </select>
-        <p
-          id="grade-error"
-          aria-live="polite"
-          className="text-base text-danger-700"
-        >
+        <ErrorMessage id="grade-error">
           {errors.gradeLevel}
-        </p>
+        </ErrorMessage>
       </div>
 
-      <p aria-live="polite" className="text-base text-danger-700 empty:hidden">
+      <ErrorMessage>
         {errors.form}
-      </p>
+      </ErrorMessage>
 
       <button type="submit" disabled={pending} className={primaryButton}>
         {pending ? "Creating…" : "Create class"}

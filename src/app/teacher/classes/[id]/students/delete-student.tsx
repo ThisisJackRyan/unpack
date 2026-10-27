@@ -3,6 +3,7 @@
 import { startTransition, useActionState, useId, useRef, type FormEvent } from "react";
 import { dangerButton, dangerGhostButton, secondaryButton } from "@/components/ui";
 import { studentDeletedMessage } from "@/lib/student-delete";
+import { ErrorMessage } from "@/components/error-message";
 import { announceProgress } from "./announcer";
 import type { DeleteStudentState } from "./state";
 
@@ -67,9 +68,9 @@ export function DeleteStudentButton({ action, studentId, name }: { action: Actio
             <p>If they open unpack again, they’ll need to join with the class code.</p>
             <p className="text-base text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
           </div>
-          <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">
+          <ErrorMessage>
             {state.error ?? ""}
-          </p>
+          </ErrorMessage>
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button ref={cancel} type="button" onClick={() => dialog.current?.close()} disabled={pending} className={`${secondaryButton} disabled:cursor-not-allowed disabled:opacity-60`}>
               Cancel

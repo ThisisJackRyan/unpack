@@ -5,6 +5,7 @@ import { CLASS_GRADE_HELP, gradeChangeWarning, warnsOnGradeChange } from "@/lib/
 import { GRADE_LEVELS, gradeLevelLabel, isGradeLevel, type GradeLevel } from "@/lib/grade-levels";
 import { CLASS_NAME_MAX_LENGTH } from "@/lib/validate-class";
 import { field, primaryButton } from "@/components/ui";
+import { ErrorBox, ErrorMessage } from "@/components/error-message";
 import type { ClassSettingsState } from "./state";
 
 type Action = (state: ClassSettingsState, formData: FormData) => Promise<ClassSettingsState>;
@@ -48,9 +49,9 @@ export function ClassSettingsForm({
           aria-describedby={errors.name ? "class-name-error" : undefined}
           className={`${field} text-lg`}
         />
-        <p id="class-name-error" aria-live="polite" className="text-base text-danger-700 empty:hidden">
+        <ErrorMessage id="class-name-error">
           {errors.name}
-        </p>
+        </ErrorMessage>
       </div>
 
       <div className="flex flex-col gap-2 py-5">
@@ -76,9 +77,9 @@ export function ClassSettingsForm({
             </option>
           ))}
         </select>
-        <p id="class-grade-error" aria-live="polite" className="text-base text-danger-700 empty:hidden">
+        <ErrorMessage id="class-grade-error">
           {errors.gradeLevel}
-        </p>
+        </ErrorMessage>
         {warn && isGradeLevel(picked) && (
           <p
             id="class-grade-warning"
@@ -91,12 +92,9 @@ export function ClassSettingsForm({
       </div>
 
       <div className="flex flex-col gap-4 pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <p
-          aria-live="polite"
-          className={`text-base font-medium empty:hidden ${state.error ? "text-danger-700" : "text-primary-900"}`}
-        >
-          {pending ? "" : (state.error ?? state.message ?? "")}
-        </p>
+        <div aria-live="polite" className="text-base font-medium text-primary-900 empty:hidden">
+          {pending ? "" : state.error ? <ErrorBox>{state.error}</ErrorBox> : (state.message ?? "")}
+        </div>
         <button type="submit" disabled={pending} className={`${primaryButton} sm:ml-auto`}>
           {pending ? "Saving…" : "Save changes"}
         </button>

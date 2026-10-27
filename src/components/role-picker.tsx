@@ -2,10 +2,9 @@
 
 import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { AGE_CONFIRMED_VALUE, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
+import { ErrorMessage } from "./error-message";
 import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, type RoleFormState } from "./role-form-state";
 import { primaryButtonLarge, secondaryButtonLarge } from "./ui";
-
-const errorText = "text-base text-danger-700";
 
 const CHOICES: { role: AccountRole; title: string; line: string }[] = [
   { role: "teacher", title: "I’m a teacher", line: "Make a class, share a code, and see who’s done." },
@@ -120,9 +119,9 @@ export function RolePicker({
             </label>
           ))}
         </div>
-        <p id="role-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+        <ErrorMessage id="role-error">
           {errors.role}
-        </p>
+        </ErrorMessage>
       </fieldset>
 
       {askAge && (
@@ -154,9 +153,9 @@ export function RolePicker({
               teacher.
             </p>
           )}
-          <p id={AGE_ERROR_ID} aria-live="polite" className={`${errorText} empty:hidden`}>
+          <ErrorMessage id={AGE_ERROR_ID}>
             {ageError}
-          </p>
+          </ErrorMessage>
         </div>
       )}
 
@@ -205,9 +204,9 @@ export function RolePicker({
         <input type="hidden" name="confirmSwitch" value={SWITCH_CONFIRM_VALUE} />
       )}
 
-      <p aria-live="polite" className={`${errorText} empty:hidden`}>
+      <ErrorMessage>
         {errors.form}
-      </p>
+      </ErrorMessage>
 
       {!warning && (
         <button type="submit" disabled={pending} className={`${primaryButtonLarge} sm:self-start`}>

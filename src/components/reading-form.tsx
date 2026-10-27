@@ -8,6 +8,7 @@ import {
   questionModeHint,
   questionModeLabel,
 } from "@/lib/question-modes";
+import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { field, primaryButton, secondaryButton } from "@/components/ui";
 import {
@@ -26,7 +27,6 @@ import {
 
 const label = "text-lg font-semibold text-ink-950";
 const hint = "text-base text-ink-700";
-const errorText = "text-base text-danger-700";
 
 // A pill segmented control: a light gray track, the chosen option white.
 // The radio inside each option is visually hidden but still focusable, so
@@ -166,9 +166,9 @@ export function ReadingForm({
                   </label>
                 ))}
               </div>
-              <p id="source-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="source-error">
                 {errors.source}
-              </p>
+              </ErrorMessage>
             </fieldset>
 
             <div className={linkPanel}>
@@ -192,7 +192,7 @@ export function ReadingForm({
               <p id="url-hint" className={hint}>
                 We’ll pull the article text from the page.
               </p>
-              <p id="url-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="url-error">
                 {errors.url}
                 {errors.url && state.suggestText && (
                   <>
@@ -205,7 +205,7 @@ export function ReadingForm({
                     </label>
                   </>
                 )}
-              </p>
+              </ErrorMessage>
               {state.limit && (
                 <LimitNotice>
                   {state.limit}
@@ -249,9 +249,9 @@ export function ReadingForm({
               Leave blank to use the page’s title.
             </p>
           )}
-          <p id="title-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+          <ErrorMessage id="title-error">
             {errors.title}
-          </p>
+          </ErrorMessage>
         </div>
 
         {!titleOnly && (
@@ -292,9 +292,9 @@ export function ReadingForm({
                 <span className="sr-only"> characters</span>
               </p>
             </div>
-            <p id="body-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+            <ErrorMessage id="body-error">
               {bodyError}
-            </p>
+            </ErrorMessage>
           </div>
         )}
       </div>
@@ -336,9 +336,9 @@ export function ReadingForm({
                   Questions are written for this level.
                 </p>
               )}
-              <p id="grade-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="grade-error">
                 {errors.gradeLevel}
-              </p>
+              </ErrorMessage>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -360,9 +360,9 @@ export function ReadingForm({
                   </option>
                 ))}
               </select>
-              <p id="count-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="count-error">
                 {errors.questionCount}
-              </p>
+              </ErrorMessage>
             </div>
           </div>
 
@@ -390,17 +390,17 @@ export function ReadingForm({
                   </label>
                 ))}
               </div>
-              <p id="mode-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="mode-error">
                 {errors.questionMode}
-              </p>
+              </ErrorMessage>
             </fieldset>
           )}
         </div>
       )}
 
-      <p aria-live="polite" className={`${errorText} empty:hidden`}>
+      <ErrorMessage>
         {errors.form}
-      </p>
+      </ErrorMessage>
 
       <div className="flex flex-col-reverse gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:justify-end">
         <Link href={cancelHref} className={secondaryButton}>

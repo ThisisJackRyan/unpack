@@ -69,6 +69,8 @@ const TEXT_PAIRS: [fg: string, bg: string][] = [
   ["danger-700", "danger-50"],
   ["danger-800", "danger-50"],
   ["danger-950", "danger-50"],
+  // A suggestion link inside the error box (the URL error's "paste the text").
+  ["primary-700", "danger-50"],
   ["white", "danger-600"],
   ["white", "danger-700"],
 ];
@@ -89,6 +91,8 @@ const LARGE_PAIRS: [fg: string, bg: string][] = [
   ["warning-700", "warning-50"],
   ["primary-700", "primary-50"],
   ["success-600", "success-50"],
+  // The error box's icon on the red tint (its border is decoration).
+  ["danger-700", "danger-50"],
   // The turned-off join code (6xl) and decorative separators.
   ["ink-400", "white"],
 ];

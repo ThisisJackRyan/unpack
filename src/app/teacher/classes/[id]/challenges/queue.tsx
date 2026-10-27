@@ -3,6 +3,7 @@
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { pill, primaryButton, secondaryButton } from "@/components/ui";
 import { decisionMessage, parseDecisionChoice, type DecisionChoice, type QueueItem } from "@/lib/challenge-queue-core";
+import { ErrorMessage } from "@/components/error-message";
 import type { DecideState } from "./state";
 
 type Action = (state: DecideState, formData: FormData) => Promise<DecideState>;
@@ -174,9 +175,9 @@ function ChallengeCard({
         <p id={`${headingId}-extra`} className="text-base text-ink-700">
           One more try: {item.studentName} gets exactly 1 try back, and can send a new note if it doesn’t pass.
         </p>
-        <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">
+        <ErrorMessage>
           {state.challengeId === item.id ? state.error : ""}
-        </p>
+        </ErrorMessage>
       </form>
     </li>
   );

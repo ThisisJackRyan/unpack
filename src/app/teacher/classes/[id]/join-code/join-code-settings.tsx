@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useOptimistic, useRef, useState } from "react";
 import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
+import { ErrorBox } from "@/components/error-message";
 import type { JoinCodeState } from "./state";
 
 type Action = (state: JoinCodeState, formData: FormData) => Promise<JoinCodeState>;
@@ -138,12 +139,9 @@ export function JoinCodeSettings({
         {newPending && <p className="text-base text-ink-700">Making a new code…</p>}
       </div>
 
-      <p
-        aria-live="polite"
-        className={`pt-5 text-base font-medium empty:hidden ${shown.error ? "text-danger-700" : "text-primary-900"}`}
-      >
-        {shown.error ?? shown.message ?? ""}
-      </p>
+      <div aria-live="polite" className="pt-5 text-base font-medium text-primary-900 empty:hidden">
+        {shown.error ? <ErrorBox>{shown.error}</ErrorBox> : (shown.message ?? "")}
+      </div>
     </div>
   );
 }

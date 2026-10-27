@@ -12,6 +12,7 @@ import {
 import { questionRole, type QuestionRole } from "@/lib/ai/prompts";
 import { questionCountLabel } from "@/lib/question-modes";
 import { LAST_QUESTION_MESSAGE } from "@/lib/shared-questions";
+import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { MetaLine } from "@/components/meta-line";
 import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
@@ -142,9 +143,9 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
             ? state.status
             : ""}
       </p>
-      <p role="alert" className="text-base text-danger-700 empty:hidden">
+      <ErrorMessage alert>
         {panelError}
-      </p>
+      </ErrorMessage>
       {!pending && state.limit && <LimitNotice>{state.limit}</LimitNotice>}
 
       {shared ? (
@@ -481,9 +482,9 @@ function QuestionCard({
         )}
 
         {error && (
-          <p id={errorId} role="alert" className="text-base text-danger-700">
+          <ErrorMessage id={errorId} alert>
             {error}
-          </p>
+          </ErrorMessage>
         )}
 
         {!editing && (

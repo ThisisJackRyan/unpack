@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { primaryButton } from "@/components/ui";
+import { ErrorBox } from "@/components/error-message";
 import type { RaiseCapState } from "./reading-state";
 
 type Action = () => Promise<RaiseCapState>;
@@ -16,12 +17,9 @@ export function RaiseCapButton({ action, raiseTo }: { action: Action; raiseTo: n
       <button type="submit" disabled={pending} className={primaryButton}>
         {pending ? "Raising…" : `Raise the limit to ${raiseTo}`}
       </button>
-      <p
-        aria-live="polite"
-        className={`text-base font-medium empty:hidden ${state.error ? "text-danger-700" : "text-primary-900"}`}
-      >
-        {pending ? "" : (state.error ?? state.message ?? "")}
-      </p>
+      <div aria-live="polite" className="text-base font-medium text-primary-900 empty:hidden">
+        {pending ? "" : state.error ? <ErrorBox>{state.error}</ErrorBox> : (state.message ?? "")}
+      </div>
     </form>
   );
 }

@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useRef, type FormEvent } from "react";
 import { dangerButton, dangerOutlineButton, secondaryButton } from "@/components/ui";
+import { ErrorMessage } from "@/components/error-message";
 import type { DeleteReadingState } from "./reading-state";
 
 type Action = () => Promise<DeleteReadingState>;
@@ -52,9 +53,9 @@ export function DeleteReadingButton({ action, title }: { action: Action; title: 
             <p>Students stay in the class, and their work on other readings is kept.</p>
             <p className="text-base text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
           </div>
-          <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">
+          <ErrorMessage>
             {state.error ?? ""}
-          </p>
+          </ErrorMessage>
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button
               ref={cancel}
