@@ -3,7 +3,7 @@ import Link from "next/link";
 import { RolePicker } from "@/components/role-picker";
 import { backLink, card } from "@/components/ui";
 import { requireArea } from "@/lib/account";
-import { homeFor } from "@/lib/account-role";
+import { settingsBackLink } from "@/lib/account-role";
 import { switchRoleAction } from "./actions";
 
 export const metadata: Metadata = {
@@ -14,10 +14,11 @@ export const metadata: Metadata = {
 // switchRoleAction).
 export default async function SettingsPage() {
   const account = await requireArea("settings");
+  const back = settingsBackLink(account.role);
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-      <Link href={homeFor(account.role)} className={`${backLink} self-start`}>
-        <span aria-hidden="true">←</span> Back home
+      <Link href={back.href} className={`${backLink} self-start`}>
+        <span aria-hidden="true">←</span> {back.label}
       </Link>
       <h1 className="text-4xl font-semibold tracking-tight text-zinc-950">Settings</h1>
       <div className={`${card} flex flex-col gap-6 rounded-2xl p-6 sm:p-8`}>

@@ -46,6 +46,15 @@ export function homeFor(role: AccountRole | null): string {
   return "/welcome";
 }
 
+// The /settings link back to the account's home, named for what is there:
+// a teacher's classes or a self-learner's reading (no role yet: the
+// first-run choice; /settings sends that account to /welcome anyway).
+export function settingsBackLink(role: AccountRole | null): { href: string; label: string } {
+  if (role === "teacher") return { href: homeFor(role), label: "Back to your classes" };
+  if (role === "self_learner") return { href: homeFor(role), label: "Back to your reading" };
+  return { href: homeFor(role), label: "Back home" };
+}
+
 // The guarded areas: /teacher/** (classes), /learn/** (self-learner),
 // /welcome (the first-run choice), and /settings (any role).
 export type Area = "teacher" | "learn" | "welcome" | "settings";

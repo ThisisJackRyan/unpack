@@ -12,6 +12,7 @@ import {
   roleRedirect,
   setRoleOutcome,
   setRoleStatements,
+  settingsBackLink,
   SWITCH_CONFIRM_VALUE,
 } from "./account-role";
 
@@ -219,5 +220,13 @@ describe("parseSettingsRoleChoice (the switch confirm)", () => {
     assert.equal(needsSwitchConfirm("self_learner", "teacher"), false);
     assert.equal(needsSwitchConfirm(null, "self_learner"), false);
     assert.equal(needsSwitchConfirm("teacher", null), false);
+  });
+});
+
+describe("settingsBackLink", () => {
+  it("sends a teacher back to their classes and a self-learner back to /learn", () => {
+    assert.deepEqual(settingsBackLink("teacher"), { href: "/teacher", label: "Back to your classes" });
+    assert.deepEqual(settingsBackLink("self_learner"), { href: "/learn", label: "Back to your reading" });
+    assert.deepEqual(settingsBackLink(null), { href: "/welcome", label: "Back home" });
   });
 });
