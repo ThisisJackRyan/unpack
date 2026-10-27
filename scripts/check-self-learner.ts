@@ -28,12 +28,11 @@
 //   --creates=20   concurrent creates for (c) (default 20)
 //   --submits=10   parallel submits for (e) (default 10)
 //
-// Same host guard and NEON_FETCH_ENDPOINT handling as check-class-limit.ts;
-// set CHECK_CLASS_LIMIT_HOST to opt in for one Neon dev branch. Writes
+// Same database guard, connection cap, and NEON_FETCH_ENDPOINT handling as
+// every check (scripts/lib/db-check.ts). Writes
 // accounts named test_self_*_<run> and deletes them (and everything under
 // them) at the end through the webhook's delete. Never run against
 // production.
-import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import { setRoleOutcome, setRoleStatements, type AccountRole, type SetRoleOutcome } from "@/lib/account-role";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
@@ -50,39 +49,9 @@ import {
   loadSelfProgress,
   submitSelfAnswers,
 } from "@/lib/self-readings";
+import { prepareDbCheck } from "./lib/db-check";
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is not set. Refusing to run.");
-  process.exit(2);
-}
-const LOCAL_DB_HOSTS = ["localhost", "127.0.0.1", "::1", "db.localtest.me"];
-let dbHost: string;
-try {
-  dbHost = new URL(process.env.DATABASE_URL).hostname.replace(/^\[|\]$/g, "");
-} catch {
-  console.error("DATABASE_URL is not a valid URL. Refusing to run.");
-  process.exit(2);
-}
-if (!LOCAL_DB_HOSTS.includes(dbHost) && process.env.CHECK_CLASS_LIMIT_HOST !== dbHost) {
-  console.error(
-    `Refusing to run against database host "${dbHost}". This script writes ` +
-      `and deletes rows, so it only runs against ${LOCAL_DB_HOSTS.join(", ")} ` +
-      `by default. To use a Neon dev branch, set CHECK_CLASS_LIMIT_HOST=${dbHost}. ` +
-      "Never use production.",
-  );
-  process.exit(2);
-}
-if (process.env.ALLOW_DB_WRITES !== "1") {
-  console.error("This script writes and deletes rows. Set ALLOW_DB_WRITES=1 to run it.");
-  process.exit(2);
-}
-// Belt and braces: the mock model is always injected, but make sure no
-// code path could reach the model with real credentials.
-for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
-const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
-if (fetchEndpoint) {
-  neonConfig.fetchEndpoint = () => fetchEndpoint;
-}
+const { fetchEndpoint } = prepareDbCheck();
 
 function intFlag(name: string, fallback: number): number {
   const arg = process.argv.find((a) => a.startsWith(`--${name}=`));

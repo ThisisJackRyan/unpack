@@ -31,14 +31,14 @@
 //   --n=20               parallel submits or sends per burst (default 20)
 //   --waves=5            race waves (default 5, at least 3)
 //   --delay-ms=300       fake checker delay (default 300)
-//   --db-concurrency=60  most DB requests in flight (default 60), so a
-//                        local Postgres isn't flooded.
+//   --db-concurrency=8   most DB requests in flight (default
+//                        DB_CHECK_CONCURRENCY, 8), so a local Postgres
+//                        isn't flooded.
 //
-// Same host guard and NEON_FETCH_ENDPOINT handling as check-class-limit.ts;
-// set CHECK_CLASS_LIMIT_HOST to opt in for one Neon dev branch. Writes a
+// Same database guard, connection cap, and NEON_FETCH_ENDPOINT handling as
+// every check (scripts/lib/db-check.ts). Writes a
 // teacher named test_answers_<run> and deletes it (and everything under it,
 // by cascade) at the end. Never run against production.
-import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
 import { sendChallenge, type ChallengeResult } from "@/lib/challenges";
@@ -49,44 +49,9 @@ import { listReadingsWithStatus, loadReadingProgress } from "@/lib/reading-progr
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
 import { EFFORT_CHECK_LIMIT, EFFORT_CLAIM_STALE_SECONDS } from "@/lib/submit-answers-core";
 import { MAX_TRIES, type AnswerEntry } from "@/lib/validate-answers";
+import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is not set. Refusing to run.");
-  process.exit(2);
-}
-const LOCAL_DB_HOSTS = ["localhost", "127.0.0.1", "::1", "db.localtest.me"];
-let dbHost: string;
-try {
-  dbHost = new URL(process.env.DATABASE_URL).hostname.replace(/^\[|\]$/g, "");
-} catch {
-  console.error("DATABASE_URL is not a valid URL. Refusing to run.");
-  process.exit(2);
-}
-if (
-  !LOCAL_DB_HOSTS.includes(dbHost) &&
-  process.env.CHECK_CLASS_LIMIT_HOST !== dbHost
-) {
-  console.error(
-    `Refusing to run against database host "${dbHost}". This script writes ` +
-      `and deletes rows, so it only runs against ${LOCAL_DB_HOSTS.join(", ")} ` +
-      `by default. To use a Neon dev branch, set CHECK_CLASS_LIMIT_HOST=${dbHost}. ` +
-      "Never use production.",
-  );
-  process.exit(2);
-}
-if (process.env.ALLOW_DB_WRITES !== "1") {
-  console.error(
-    "This script writes and deletes rows. Set ALLOW_DB_WRITES=1 to run it.",
-  );
-  process.exit(2);
-}
-// Belt and braces: the fake checker is always injected, but make sure no
-// code path could reach the model with real credentials.
-for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
-const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
-if (fetchEndpoint) {
-  neonConfig.fetchEndpoint = () => fetchEndpoint;
-}
+const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
 
 function intFlag(name: string, fallback: number): number {
   const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -104,7 +69,7 @@ const N = intFlag("n", 20);
 // challenge check needs one).
 const WAVES = Math.max(intFlag("waves", 5), MAX_TRIES);
 const DELAY_MS = intFlag("delay-ms", 300);
-const DB_CONCURRENCY = intFlag("db-concurrency", 60);
+const DB_CONCURRENCY = intFlag("db-concurrency", DB_CHECK_CONCURRENCY);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
@@ -116,20 +81,8 @@ function check(ok: boolean, message: string) {
   if (!ok) failures.push(message);
 }
 
-// neonExecutor with at most `limit` batches in flight.
 function throttled(limit: number): StatementExecutor {
-  let active = 0;
-  const waiting: (() => void)[] = [];
-  return async (statements) => {
-    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
-    active++;
-    try {
-      return await neonExecutor(statements);
-    } finally {
-      active--;
-      waiting.shift()?.();
-    }
-  };
+  return throttledExecutor(neonExecutor, limit);
 }
 const execute = throttled(DB_CONCURRENCY);
 
