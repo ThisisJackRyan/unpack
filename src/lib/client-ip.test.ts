@@ -10,6 +10,7 @@ import {
   hashJoinIp,
   ipRateLimitKey,
   joinIpHashSecret,
+  joinIpHashSecretProblem,
   UNKNOWN_IP,
 } from "./client-ip";
 
@@ -139,6 +140,37 @@ describe("joinIpHashSecret", () => {
     assert.equal(joinIpHashSecret({ NODE_ENV: "development" }), DEV_JOIN_IP_HASH_SECRET);
     assert.equal(joinIpHashSecret({ NODE_ENV: "test" }), DEV_JOIN_IP_HASH_SECRET);
     assert.equal(joinIpHashSecret({}), DEV_JOIN_IP_HASH_SECRET);
+  });
+});
+
+describe("joinIpHashSecretProblem", () => {
+  it("names the variable, never the value, for each unusable secret in production", () => {
+    for (const env of [{ NODE_ENV: "production" }, { VERCEL_ENV: "production" }]) {
+      for (const [value, message] of [
+        [undefined, /missing or shorter than 32/],
+        ["", /missing or shorter than 32/],
+        ["short-secret-value", /missing or shorter than 32/],
+        [JOIN_IP_HASH_SECRET_PLACEHOLDER, /example or dev-only value/],
+        [DEV_JOIN_IP_HASH_SECRET, /example or dev-only value/],
+      ] as const) {
+        const problem = joinIpHashSecretProblem({ ...env, JOIN_IP_HASH_SECRET: value });
+        assert.ok(problem, String(value));
+        assert.deepEqual(problem.missing, ["JOIN_IP_HASH_SECRET"]);
+        assert.match(problem.message, message);
+        if (value) assert.ok(!JSON.stringify(problem).includes(value));
+        // The throwing backstop says the same thing.
+        assert.throws(() => joinIpHashSecret({ ...env, JOIN_IP_HASH_SECRET: value }), { message: problem.message });
+      }
+    }
+  });
+
+  it("is null for a real secret in production, and always outside production", () => {
+    assert.equal(joinIpHashSecretProblem({ NODE_ENV: "production", JOIN_IP_HASH_SECRET: SECRET }), null);
+    for (const env of [{}, { NODE_ENV: "development" }, { NODE_ENV: "test" }, { NODE_ENV: "development", VERCEL_ENV: "preview" }]) {
+      for (const value of [undefined, "short", JOIN_IP_HASH_SECRET_PLACEHOLDER, DEV_JOIN_IP_HASH_SECRET]) {
+        assert.equal(joinIpHashSecretProblem({ ...env, JOIN_IP_HASH_SECRET: value }), null);
+      }
+    }
   });
 });
 

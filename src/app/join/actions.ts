@@ -4,11 +4,18 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { clientIpFromHeaders, hashJoinIp } from "@/lib/client-ip";
 import { botCheckMessage, TURNSTILE_RESPONSE_FIELD, verifyJoinBotCheck } from "@/lib/join-bot-check";
+import { joinConfigBlock } from "@/lib/join-config";
 import { JOIN_LIMITED_MESSAGE } from "@/lib/join-rate-limit";
 import { joinClass } from "@/lib/student-join";
 import { NAME_TAKEN_MESSAGE, type JoinOutcome } from "@/lib/student-join-core";
 import { setStudentSessionCookie } from "@/lib/student-session";
-import { CLASS_NOT_FOUND_MESSAGE, JOIN_FAILED_MESSAGE, validateJoin } from "@/lib/validate-join";
+import {
+  CLASS_NOT_FOUND_MESSAGE,
+  JOIN_DISABLED_MESSAGE,
+  JOIN_FAILED_MESSAGE,
+  logJoinBlockedConfig,
+  validateJoin,
+} from "@/lib/validate-join";
 import type { JoinState } from "./form-state";
 
 // Joins a class and starts the student's session. Joining while already in
@@ -24,12 +31,22 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
   if (!result.ok) return { errors: result.errors, values: result.values };
   const { data, values } = result;
 
+  // Server setup first, before any network call or database work: with a
+  // Turnstile key missing, or JOIN_IP_HASH_SECRET missing or unusable in
+  // production, no join can work, so the student is told joining is
+  // turned off and one "join_blocked_config" error names the missing
+  // variable(s), never a value (see join-config.ts).
+  const blocked = joinConfigBlock();
+  if (blocked) {
+    logJoinBlockedConfig(blocked);
+    return { errors: { form: JOIN_DISABLED_MESSAGE }, values };
+  }
+
   // The bot check comes before the rate limits (see join-bot-check.ts): a
   // refused check isn't counted, so a bot can't use up a code's tries. Off
   // (no keys outside production, or TURNSTILE_DISABLED=1) it passes with no
-  // network call. In production with a key missing it refuses every join
-  // with the generic message and logs which variable is missing, like
-  // JOIN_IP_HASH_SECRET below. It never throws.
+  // network call. Misconfigured was refused above; it refuses that too, as
+  // a backstop. It never throws.
   const bot = await verifyJoinBotCheck(
     { token: formData.get(TURNSTILE_RESPONSE_FIELD) },
     { onFailure: (fields) => console.error("joinClassAction: bot check refused", fields) },
@@ -39,8 +56,9 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
   const requestHeaders = await headers();
   let outcome: JoinOutcome;
   try {
-    // Throws in production when JOIN_IP_HASH_SECRET is missing or short, so
-    // the join fails closed with the generic message below.
+    // Throws in production when JOIN_IP_HASH_SECRET is missing or short.
+    // The setup check above already refused that; this is a backstop, so
+    // the join still fails closed (with the generic message below).
     const ipHash = hashJoinIp(clientIpFromHeaders((name) => requestHeaders.get(name)));
     outcome = await joinClass(data, ipHash);
   } catch (error) {

@@ -20,8 +20,10 @@ import { JOIN_DISABLED_MESSAGE, logJoinBlockedConfig, type JoinBlockedConfig } f
 //   join is refused with JOIN_DISABLED_MESSAGE ("Joining is turned off
 //   right now", as when JOIN_IP_HASH_SECRET is missing) and one
 //   console.error tagged "join_blocked_config" names the missing
-//   variable(s), never a value. Like JOIN_IP_HASH_SECRET, a production
-//   deploy fails closed instead of quietly running without it.
+//   variable(s), never a value. The join action checks this up front
+//   (join-config.ts); verifyJoinBotCheck refuses the same way as a
+//   backstop. Like JOIN_IP_HASH_SECRET, a production deploy fails closed
+//   instead of quietly running without it.
 // - Outside production, neither key: off (local dev, tests, the DB
 //   checks), with no widget and no network call; joins rely on the rate
 //   limits alone. Cloudflare's public test keys (see .env.example) turn it
