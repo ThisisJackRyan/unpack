@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import type { Statement } from "./link-rate-limit";
 import {
+  deleteTeacherStatements,
   handleClerkEvent,
   handleClerkWebhookRequest,
   teacherProfile,
@@ -97,20 +98,52 @@ describe("handleClerkEvent", () => {
     assert.equal(db.seen[0].text.includes("teacher@example.com"), false);
   });
 
-  it("user.updated upserts the new name and email", async () => {
+  it("user.updated only updates (never inserts), so a late one can't bring back a deleted teacher", async () => {
     const db = fakeDb();
     const updated = { ...USER, last_name: "Rossi", primary_email_address_id: "idn_1" };
-    assert.equal(await handleClerkEvent({ type: "user.updated", data: updated }, db.execute), "upserted");
+    assert.equal(await handleClerkEvent({ type: "user.updated", data: updated }, db.execute), "updated");
+    assert.equal(db.seen.length, 1);
+    assert.equal(
+      db.seen[0].text,
+      "update teachers set name = $2::text, email = $3::text\nwhere clerk_user_id = $1::text\nreturning id",
+    );
     assert.deepEqual(db.seen[0].params, ["user_test_1", "Maya Rossi", "old@example.com"]);
+    assert.equal(/insert/i.test(db.seen[0].text), false);
+    const gone = fakeDb(() => []);
+    assert.equal(await handleClerkEvent({ type: "user.updated", data: updated }, gone.execute), "no_teacher");
+    assert.equal(gone.seen.length, 1);
   });
 
-  it("user.deleted deletes the teacher row (everything cascades); a repeat is already_gone", async () => {
+  it("user.deleted deletes the classes, then the teacher, in one batch; a repeat is already_gone", async () => {
     const db = fakeDb();
     assert.equal(await handleClerkEvent({ type: "user.deleted", data: { id: "user_test_1", deleted: true } }, db.execute), "deleted");
-    assert.equal(db.seen[0].text, "delete from teachers where clerk_user_id = $1::text returning id");
-    assert.deepEqual(db.seen[0].params, ["user_test_1"]);
+    assert.deepEqual(
+      db.seen.map((s) => s.text),
+      deleteTeacherStatements("user_test_1").map((s) => s.text),
+    );
+    const [lock, classes, teacher] = db.seen;
+    assert.equal(db.seen.length, 3);
+    assert.equal(lock.text, "select id from teachers where clerk_user_id = $1::text for update");
+    assert.match(classes.text, /^delete from classes\nwhere teacher_id in \(select id from teachers where clerk_user_id = \$1::text\)$/);
+    assert.equal(teacher.text, "delete from teachers where clerk_user_id = $1::text returning id");
+    for (const s of db.seen) {
+      assert.deepEqual(s.params, ["user_test_1"]);
+      assert.equal(s.text.includes("user_test_1"), false);
+    }
     const gone = fakeDb(() => []);
     assert.equal(await handleClerkEvent({ type: "user.deleted", data: { id: "user_test_1", deleted: true } }, gone.execute), "already_gone");
+    // Only the teacher delete decides the outcome: the class delete
+    // returns nothing either way.
+    const onlyClasses = fakeDb((s) => (s.text.startsWith("delete from teachers") ? [] : [{ id: "x" }]));
+    assert.equal(await handleClerkEvent({ type: "user.deleted", data: { id: "user_test_1" } }, onlyClasses.execute), "already_gone");
+  });
+
+  it("deleteTeacherStatements removes the classes before the teacher row", () => {
+    const texts = deleteTeacherStatements("user_test_1").map((s) => s.text);
+    const classes = texts.findIndex((t) => t.startsWith("delete from classes"));
+    const teacher = texts.findIndex((t) => t.startsWith("delete from teachers"));
+    assert.ok(classes >= 0 && teacher > classes);
+    assert.equal(teacher, texts.length - 1);
   });
 
   it("skips a user with no email, or an event with no id, touching nothing", async () => {
@@ -192,5 +225,22 @@ describe("handleClerkWebhookRequest (with the real verifier)", () => {
     const res = await handleClerkWebhookRequest(signed(body("user.updated")), d);
     assert.equal(res.status, 500);
     assert.deepEqual(logs[0].fields, { type: "user.updated", name: "Error", code: "XX000" });
+  });
+
+  it("a user.updated for no teacher (say, after user.deleted) is a 200, logging only type and outcome", async () => {
+    const none = fakeDb(() => []);
+    const { d, logs } = deps({ execute: none.execute });
+    const res = await handleClerkWebhookRequest(signed(body("user.updated")), d);
+    assert.equal(res.status, 200);
+    assert.equal(none.seen.length, 1);
+    assert.deepEqual(logs, [{ level: "info", message: "clerk webhook", fields: { type: "user.updated", outcome: "no_teacher" } }]);
+  });
+
+  it("a user.deleted is a 200 with outcome deleted", async () => {
+    const { d, logs, db } = deps();
+    const res = await handleClerkWebhookRequest(signed(body("user.deleted", { id: "user_test_1", deleted: true })), d);
+    assert.equal(res.status, 200);
+    assert.equal(db.seen.length, 3);
+    assert.deepEqual(logs, [{ level: "info", message: "clerk webhook", fields: { type: "user.deleted", outcome: "deleted" } }]);
   });
 });

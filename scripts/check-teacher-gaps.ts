@@ -19,6 +19,14 @@
 //   --raises concurrent raises leave exactly one reading_cap_raises row
 //   and a limit of 300; a second raise is a no-op; then parallel opens
 //   past the new cap make exactly 300 in all.
+// - Teacher delete (the Clerk webhook's user.deleted, through
+//   handleClerkEvent): a teacher with a class, students, a published
+//   per-student reading with a row in every table under it, RESOLVED
+//   challenges (resolved_by set), a cap raise, and their own link and
+//   generation logs is deleted; every table has 0 rows of theirs
+//   (counted per table) and another teacher's rows are all intact. A
+//   repeat delete is already_gone, and a late user.updated after it
+//   brings no row back.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-teacher-gaps [flags]
 //
@@ -29,12 +37,13 @@
 //
 // Same host guard and NEON_FETCH_ENDPOINT handling as check-class-limit.ts;
 // set CHECK_CLASS_LIMIT_HOST to opt in for one Neon dev branch. Writes
-// teachers named test_gaps_<run> and test_gaps_other_<run> and deletes
-// them (and everything under them, by cascade) at the end. Never run
-// against production.
+// teachers named test_gaps_<run>, test_gaps_other_<run>,
+// test_gaps_gone_<run> and test_gaps_kept_<run> and deletes them (and
+// everything under them) at the end. Never run against production.
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import { countDraftsClearedByGradeChange, updateClassSettings } from "@/lib/classes";
+import { deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
 import { deleteReading, getReadingCap, raiseReadingCap } from "@/lib/readings";
@@ -126,12 +135,12 @@ async function setup() {
     returning id`));
 }
 
-async function newClass(name: string, grade = "4"): Promise<string> {
+async function newClass(name: string, grade = "4", owner = teacherId): Promise<string> {
   const code = `G${RUN_ID}${codeCount++}`.toUpperCase();
   return (
     await one<{ id: string }>(sql`
       insert into classes (teacher_id, name, grade_level, join_code)
-      values (${teacherId}, ${name}, ${grade}::grade_level, ${code})
+      values (${owner}, ${name}, ${grade}::grade_level, ${code})
       returning id`)
   ).id;
 }
@@ -238,7 +247,7 @@ async function readingCounts(readingId: string): Promise<Record<string, number>>
 // directly), each student's own set (through the app, mock model), a
 // failed try with answers, a finished effort check, an open challenge,
 // and a cap raise.
-async function fillReading(classId: string, readingId: string, students: string[]) {
+async function fillReading(classId: string, readingId: string, students: string[], owner = teacherId) {
   await sharedQuestions(readingId);
   for (const studentId of students) {
     const set = await getOrCreateStudentQuestions(readingId, studentId, { write });
@@ -257,7 +266,7 @@ async function fillReading(classId: string, readingId: string, students: string[
     await sql`
       insert into challenges (student_id, reading_id, note) values (${studentId}, ${readingId}, 'I really tried.')`;
   }
-  const raised = await raiseReadingCap(classId, teacherId, readingId);
+  const raised = await raiseReadingCap(classId, owner, readingId);
   if (raised.status !== "raised") throw new Error(`setup raise failed: ${raised.status}`);
 }
 
@@ -438,12 +447,139 @@ async function checkCap() {
 }
 
 // ---------------------------------------------------------------------------
+// Teacher delete (the Clerk webhook's user.deleted)
 
+const TEACHER_TABLES = [
+  "teachers",
+  "classes",
+  "students",
+  "readings",
+  "questions",
+  "attempts",
+  "answers",
+  "challenges",
+  "resolved_challenges",
+  "effort_checks",
+  "question_generations",
+  "student_question_calls",
+  "reading_cap_raises",
+  "link_fetch_attempts",
+  "question_generation_attempts",
+] as const;
+
+type Owned = { teacherId: string; classIds: string[]; readingIds: string[]; studentIds: string[] };
+
+// Counted by the ids taken before the delete, not through the classes
+// (which would read 0 once the classes are gone, whatever is left).
+async function teacherCounts(o: Owned): Promise<Record<string, number>> {
+  return one<Record<string, number>>(sql`
+    select
+      (select count(*)::int from teachers where id = ${o.teacherId}) as teachers,
+      (select count(*)::int from classes where id = any(${o.classIds}::uuid[]) or teacher_id = ${o.teacherId}) as classes,
+      (select count(*)::int from students where id = any(${o.studentIds}::uuid[]) or class_id = any(${o.classIds}::uuid[])) as students,
+      (select count(*)::int from readings where id = any(${o.readingIds}::uuid[]) or class_id = any(${o.classIds}::uuid[])) as readings,
+      (select count(*)::int from questions where reading_id = any(${o.readingIds}::uuid[]) or student_id = any(${o.studentIds}::uuid[])) as questions,
+      (select count(*)::int from attempts where reading_id = any(${o.readingIds}::uuid[]) or student_id = any(${o.studentIds}::uuid[])) as attempts,
+      (select count(*)::int from answers a join attempts t on t.id = a.attempt_id where t.student_id = any(${o.studentIds}::uuid[])) as answers,
+      (select count(*)::int from challenges where reading_id = any(${o.readingIds}::uuid[]) or student_id = any(${o.studentIds}::uuid[]) or resolved_by = ${o.teacherId}) as challenges,
+      (select count(*)::int from challenges where resolved_by = ${o.teacherId}) as resolved_challenges,
+      (select count(*)::int from effort_checks where reading_id = any(${o.readingIds}::uuid[]) or student_id = any(${o.studentIds}::uuid[])) as effort_checks,
+      (select count(*)::int from question_generations where reading_id = any(${o.readingIds}::uuid[]) or student_id = any(${o.studentIds}::uuid[])) as question_generations,
+      (select count(*)::int from student_question_calls where reading_id = any(${o.readingIds}::uuid[]) or student_id = any(${o.studentIds}::uuid[])) as student_question_calls,
+      (select count(*)::int from reading_cap_raises where reading_id = any(${o.readingIds}::uuid[]) or teacher_id = ${o.teacherId}) as reading_cap_raises,
+      (select count(*)::int from link_fetch_attempts where teacher_id = ${o.teacherId}) as link_fetch_attempts,
+      (select count(*)::int from question_generation_attempts where teacher_id = ${o.teacherId}) as question_generation_attempts`);
+}
+
+// A teacher with a class, students, a published per-student reading with
+// a row in every table under it, challenges they RESOLVED (resolved_by
+// set: the case a single "delete from teachers" fails on), a cap raise,
+// and their own link and generation logs.
+async function fullTeacher(clerkUserId: string, prefix: string): Promise<Owned> {
+  const { id } = await one<{ id: string }>(sql`
+    insert into teachers (clerk_user_id, email, plan)
+    values (${clerkUserId}, 'gone@example.invalid', 'paid')
+    returning id`);
+  const classId = await newClass(`${prefix} class`, "4", id);
+  const studentIds = await newStudents(classId, prefix, 2);
+  const readingId = await newReading(classId, `${prefix} reading`, "per_student", "published");
+  await fillReading(classId, readingId, studentIds, id);
+  await sql`
+    update challenges set status = 'approved', resolved_at = now(), resolved_by = ${id}
+    where reading_id = ${readingId}`;
+  await sql`insert into link_fetch_attempts (teacher_id) values (${id})`;
+  await sql`insert into question_generation_attempts (teacher_id) values (${id})`;
+  return { teacherId: id, classIds: [classId], readingIds: [readingId], studentIds };
+}
+
+async function checkTeacherDelete() {
+  console.log("\n== TEACHER DELETE (Clerk user.deleted) ==");
+  const goneClerkId = `test_gaps_gone_${RUN_ID}`;
+  const keptClerkId = `test_gaps_kept_${RUN_ID}`;
+  const gone = await fullTeacher(goneClerkId, "Gone");
+  const kept = await fullTeacher(keptClerkId, "Kept");
+
+  const goneBefore = await teacherCounts(gone);
+  const keptBefore = await teacherCounts(kept);
+  console.log(`before: ${JSON.stringify(goneBefore)}`);
+  check(TEACHER_TABLES.every((t) => goneBefore[t] > 0), "the teacher has rows in every table, resolved challenges included");
+  check(TEACHER_TABLES.every((t) => keptBefore[t] > 0), "so does the other teacher");
+
+  let outcome: string;
+  try {
+    outcome = await handleClerkEvent({ type: "user.deleted", data: { id: goneClerkId, deleted: true } }, neonExecutor);
+  } catch (error) {
+    const { code } = error as { code?: unknown };
+    outcome = `threw ${String(code)}`;
+  }
+  check(outcome === "deleted", `user.deleted: ${outcome}`);
+  const goneAfter = await teacherCounts(gone);
+  const keptAfter = await teacherCounts(kept);
+  for (const t of TEACHER_TABLES) {
+    check(goneAfter[t] === 0, `${t}: the deleted teacher's ${goneBefore[t]} rows are gone (now ${goneAfter[t]})`);
+    check(keptAfter[t] === keptBefore[t], `${t}: the other teacher still has ${keptBefore[t]} (now ${keptAfter[t]})`);
+  }
+
+  const again = await Promise.all([
+    handleClerkEvent({ type: "user.deleted", data: { id: goneClerkId, deleted: true } }, neonExecutor),
+    handleClerkEvent({ type: "user.deleted", data: { id: goneClerkId, deleted: true } }, neonExecutor),
+  ]);
+  check(again.every((r) => r === "already_gone"), `a repeat delete (twice at once): ${again.join(", ")}`);
+
+  const late = await handleClerkEvent(
+    {
+      type: "user.updated",
+      data: { id: goneClerkId, first_name: "Late", email_addresses: [{ id: "idn_1", email_address: "late@example.invalid" }] },
+    },
+    neonExecutor,
+  );
+  check(late === "no_teacher", `a late user.updated after user.deleted: ${late}`);
+  const rows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${goneClerkId}`);
+  check(rows.n === 0, `...and no teacher row came back (${rows.n})`);
+  check(JSON.stringify(await teacherCounts(kept)) === JSON.stringify(keptBefore), "...and the other teacher is still intact");
+
+  const renamed = await handleClerkEvent(
+    { type: "user.updated", data: { id: keptClerkId, first_name: "Kept", last_name: "Fake", email_addresses: [{ id: "idn_1", email_address: "kept@example.invalid" }] } },
+    neonExecutor,
+  );
+  const keptRow = await one<{ name: string; email: string }>(sql`select name, email from teachers where id = ${kept.teacherId}`);
+  check(
+    renamed === "updated" && keptRow.name === "Kept Fake" && keptRow.email === "kept@example.invalid",
+    `user.updated for a live teacher updates the row: ${renamed}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+// Through the webhook's delete (classes first), so a resolved challenge
+// left by a failed run can't block it.
 async function cleanup(): Promise<void> {
-  const rows = await sql`
-    delete from teachers where clerk_user_id = any(${[`test_gaps_${RUN_ID}`, `test_gaps_other_${RUN_ID}`]}::text[])
-    returning id`;
-  console.log(`\ncleanup: deleted ${rows.length} test teachers (and everything under them)`);
+  let deleted = 0;
+  for (const prefix of ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept"]) {
+    const results = await neonExecutor(deleteTeacherStatements(`${prefix}_${RUN_ID}`));
+    deleted += results[2]?.length ?? 0;
+  }
+  console.log(`\ncleanup: deleted ${deleted} test teachers (and everything under them)`);
 }
 
 async function main(): Promise<void> {
@@ -455,6 +591,7 @@ async function main(): Promise<void> {
     await checkReadingDelete();
     await checkClassSettings();
     await checkCap();
+    await checkTeacherDelete();
   } finally {
     await cleanup();
   }

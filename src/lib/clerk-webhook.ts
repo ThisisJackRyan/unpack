@@ -10,20 +10,26 @@
 // notices. A missing or bad signature is a 400 with no detail.
 //
 // Events:
-// - user.created, user.updated: upsert the teachers row by
-//   clerk_user_id (name from first and last name, else the username;
-//   email the primary address, else the first one, the same as the lazy
-//   creation in teacher.ts). ON CONFLICT (clerk_user_id) DO UPDATE, so it
-//   is race-safe with that lazy creation (a first visit and the webhook
-//   at the same moment end with one row), and a redelivery is harmless.
-//   A user with no email address at all is skipped (email is required);
-//   the lazy creation refuses such a user too.
-// - user.deleted: deletes the teachers row, which cascades to their
-//   classes, readings, students, and all student work (see
-//   docs/privacy.md). The Clerk account is gone, so they can never sign
-//   in to see it again; keeping the children's data would only keep it
-//   longer than needed. A repeat (or a user who never visited) deletes
-//   nothing and is still a 200.
+// - user.created: upsert the teachers row by clerk_user_id (name from
+//   first and last name, else the username; email the primary address,
+//   else the first one, the same as the lazy creation in teacher.ts).
+//   ON CONFLICT (clerk_user_id) DO UPDATE, so it is race-safe with that
+//   lazy creation (a first visit and the webhook at the same moment end
+//   with one row), and a redelivery is harmless.
+// - user.updated: update only (update teachers ... where clerk_user_id),
+//   never an insert. Svix doesn't promise delivery order, so a late
+//   user.updated can arrive after user.deleted; an upsert would bring the
+//   deleted teacher's row (and email) back. No row is a 200 ("no_teacher"):
+//   a teacher who never visited gets their row from the lazy creation.
+//   A user with no email address at all is skipped on either event (email
+//   is required); the lazy creation refuses such a user too.
+// - user.deleted: deletes the teacher's classes, then the teachers row,
+//   in one transaction (deleteTeacherStatements). The classes cascade to
+//   their readings, students, and all student work; the teacher row then
+//   cascades to the teacher's own logs (see docs/privacy.md). The Clerk
+//   account is gone, so they can never sign in to see it again; keeping
+//   the children's data would only keep it longer than needed. A repeat
+//   (or a user who never visited) deletes nothing and is still a 200.
 // - Anything else: ignored with a 200, so Clerk doesn't retry it.
 //
 // Logs: only the event type and the outcome. Never a name, an email, or
@@ -70,27 +76,74 @@ returning id`,
   };
 }
 
-export function deleteTeacherStatement(clerkUserId: string): Statement {
+export function updateTeacherStatement(profile: TeacherProfile): Statement {
   return {
-    text: `delete from teachers where clerk_user_id = $1::text returning id`,
-    params: [clerkUserId],
+    text: `update teachers set name = $2::text, email = $3::text
+where clerk_user_id = $1::text
+returning id`,
+    params: [profile.clerkUserId, profile.name, profile.email],
   };
 }
 
-export type WebhookOutcome = "upserted" | "deleted" | "already_gone" | "skipped_no_id" | "skipped_no_email" | "ignored";
+// Deletes a teacher and everything they own, as one transaction. Not a
+// single "delete from teachers": that statement would also run
+// challenges.resolved_by's ON DELETE SET NULL on challenges the same
+// statement is removing through their student or reading, and Postgres
+// fails it with 23503 (the set null update re-checks the challenge's
+// student_id foreign key after the student is gone). So:
+//
+// 1. Lock the teacher row, so a class created right now (insertClassIfAllowed
+//    takes the same lock) either commits first and is deleted in step 2,
+//    or waits and then finds no teacher.
+// 2. Delete their classes. That cascades to students and readings, and
+//    under them questions, attempts, answers, challenges (resolved ones
+//    too: resolved_by is only ever the class's own teacher), effort
+//    checks, question generations, student question calls, and cap raises.
+// 3. Delete the teacher row: with the classes gone, what's left under it
+//    is the teacher's own logs (link_fetch_attempts,
+//    question_generation_attempts, and any reading_cap_raises left), all
+//    ON DELETE CASCADE. Applied when this returns the row.
+//
+// With no such teacher every statement matches nothing.
+export function deleteTeacherStatements(clerkUserId: string): Statement[] {
+  const params = [clerkUserId];
+  return [
+    { text: `select id from teachers where clerk_user_id = $1::text for update`, params },
+    {
+      text: `delete from classes
+where teacher_id in (select id from teachers where clerk_user_id = $1::text)`,
+      params,
+    },
+    { text: `delete from teachers where clerk_user_id = $1::text returning id`, params },
+  ];
+}
+
+export type WebhookOutcome =
+  | "upserted"
+  | "updated"
+  | "no_teacher"
+  | "deleted"
+  | "already_gone"
+  | "skipped_no_id"
+  | "skipped_no_email"
+  | "ignored";
 
 export async function handleClerkEvent(event: ClerkEvent, execute: StatementExecutor): Promise<WebhookOutcome> {
   const data = (event.data ?? {}) as ClerkUserData;
   if (event.type === "user.created" || event.type === "user.updated") {
     const profile = teacherProfile(data);
     if ("missing" in profile) return profile.missing === "id" ? "skipped_no_id" : "skipped_no_email";
-    await execute([upsertTeacherStatement(profile)]);
-    return "upserted";
+    if (event.type === "user.created") {
+      await execute([upsertTeacherStatement(profile)]);
+      return "upserted";
+    }
+    const [rows = []] = await execute([updateTeacherStatement(profile)]);
+    return rows.length > 0 ? "updated" : "no_teacher";
   }
   if (event.type === "user.deleted") {
     if (typeof data.id !== "string" || !data.id) return "skipped_no_id";
-    const [rows = []] = await execute([deleteTeacherStatement(data.id)]);
-    return rows.length > 0 ? "deleted" : "already_gone";
+    const results = await execute(deleteTeacherStatements(data.id));
+    return (results[2]?.length ?? 0) > 0 ? "deleted" : "already_gone";
   }
   return "ignored";
 }
