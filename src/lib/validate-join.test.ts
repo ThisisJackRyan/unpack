@@ -5,6 +5,10 @@ import {
   FIRST_NAME_INVALID_MESSAGE,
   FIRST_NAME_MAX_LENGTH,
   formatInitials,
+  JOIN_BLOCKED_CONFIG_TAG,
+  JOIN_DISABLED_MESSAGE,
+  JOIN_FAILED_MESSAGE,
+  logJoinBlockedConfig,
   validateJoin,
 } from "./validate-join";
 
@@ -127,5 +131,20 @@ describe("formatInitials", () => {
     assert.equal(formatInitials("ro"), "Ro");
     assert.equal(formatInitials("RO"), "Ro");
     assert.equal(formatInitials("r"), "R");
+  });
+});
+
+describe("join blocked by server setup", () => {
+  it("has its own message, distinct from the generic failure", () => {
+    assert.equal(JOIN_DISABLED_MESSAGE, "Joining is turned off right now. Ask your teacher.");
+    assert.notEqual(JOIN_DISABLED_MESSAGE, JOIN_FAILED_MESSAGE);
+    assert.doesNotMatch(JOIN_DISABLED_MESSAGE, /'|\u2014/);
+  });
+
+  it("logs one tagged line with the names and the message only", () => {
+    const calls: unknown[][] = [];
+    logJoinBlockedConfig({ missing: ["JOIN_IP_HASH_SECRET"], message: "why" }, (...args) => calls.push(args));
+    assert.deepEqual(calls, [[JOIN_BLOCKED_CONFIG_TAG, { missing: ["JOIN_IP_HASH_SECRET"], message: "why" }]]);
+    assert.equal(JOIN_BLOCKED_CONFIG_TAG, "join_blocked_config");
   });
 });

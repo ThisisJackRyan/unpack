@@ -13,7 +13,7 @@ import {
   TURNSTILE_VERIFY_URL,
   verifyJoinBotCheck,
 } from "./join-bot-check";
-import { JOIN_FAILED_MESSAGE } from "./validate-join";
+import { JOIN_BLOCKED_CONFIG_TAG, JOIN_DISABLED_MESSAGE, JOIN_FAILED_MESSAGE, type JoinBlockedConfig } from "./validate-join";
 
 // Cloudflare's public always-pass test keys (documented by Cloudflare for
 // local testing; not secrets).
@@ -195,32 +195,48 @@ describe("verifyJoinBotCheck", () => {
     assert.equal(calls.length, 0);
   });
 
-  it("misconfigured: refuses with no network call and one loud error naming the variable", async () => {
-    for (const [env, missing] of [
-      [{ TURNSTILE_SECRET_KEY: "s" }, /NEXT_PUBLIC_TURNSTILE_SITE_KEY is not set/],
-      [{ ...PROD, ...SITE_ONLY }, /TURNSTILE_SECRET_KEY is not set/],
-      [PROD, /NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are not set/],
+  it("misconfigured: refuses with no network call and one tagged error naming the variable", async () => {
+    const SECRET_VALUE = "1x0000000000000000000000000000000AA";
+    for (const [env, names, message] of [
+      [{ TURNSTILE_SECRET_KEY: SECRET_VALUE }, ["NEXT_PUBLIC_TURNSTILE_SITE_KEY"], /NEXT_PUBLIC_TURNSTILE_SITE_KEY is not set/],
+      [{ ...PROD, ...SITE_ONLY }, ["TURNSTILE_SECRET_KEY"], /TURNSTILE_SECRET_KEY is not set/],
+      [PROD, ["NEXT_PUBLIC_TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"], /NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are not set/],
     ] as const) {
       const { fetchFn, calls } = fakeFetch(() => json({ success: true }));
-      const errors: string[] = [];
+      const errors: [string, JoinBlockedConfig][] = [];
       const refused: Record<string, unknown>[] = [];
       const result = await verifyJoinBotCheck(
         { token: "tok" },
-        { env, fetch: fetchFn, logError: (m) => errors.push(m), onFailure: (f) => refused.push(f) },
+        { env, fetch: fetchFn, logError: (tag, fields) => errors.push([tag, fields]), onFailure: (f) => refused.push(f) },
       );
       assert.deepEqual(result, { ok: false, reason: "misconfigured" });
       assert.equal(calls.length, 0);
       assert.equal(errors.length, 1);
-      assert.match(errors[0], missing);
-      assert.doesNotMatch(errors[0], /1x0000/);
+      const [tag, fields] = errors[0];
+      assert.equal(tag, JOIN_BLOCKED_CONFIG_TAG);
+      assert.deepEqual(Object.keys(fields).sort(), ["message", "missing"]);
+      assert.deepEqual(fields.missing, names);
+      assert.match(fields.message, message);
+      assert.doesNotMatch(JSON.stringify(errors), /1x0000/);
       assert.deepEqual(refused, []);
     }
   });
 
-  it("production, no keys: the student gets the join's generic message", async () => {
+  it("misconfigured: logs to console.error by default, once, with no key value", async (t) => {
+    const logged = t.mock.method(console, "error", () => {});
+    const site = "site-key-value-should-not-be-logged";
+    await verifyJoinBotCheck({ token: "tok" }, { env: { ...PROD, NEXT_PUBLIC_TURNSTILE_SITE_KEY: site } });
+    assert.equal(logged.mock.callCount(), 1);
+    const args = logged.mock.calls[0].arguments;
+    assert.equal(args[0], JOIN_BLOCKED_CONFIG_TAG);
+    assert.deepEqual((args[1] as JoinBlockedConfig).missing, ["TURNSTILE_SECRET_KEY"]);
+    assert.ok(!JSON.stringify(args).includes(site));
+  });
+
+  it("production, no keys: the student is told joining is turned off", async () => {
     const result = await verifyJoinBotCheck({ token: "tok" }, { env: PROD, logError: () => {} });
     assert.ok(!result.ok);
-    assert.equal(botCheckMessage(result.reason), JOIN_FAILED_MESSAGE);
+    assert.equal(botCheckMessage(result.reason), JOIN_DISABLED_MESSAGE);
   });
 
   it("TURNSTILE_DISABLED=1 in production: passes, warns every time, no network call", async () => {
@@ -391,12 +407,15 @@ describe("verifyJoinBotCheck", () => {
 });
 
 describe("botCheckMessage", () => {
-  it("asks to finish the check when there was no token, gives the generic join message when misconfigured, else to try again", () => {
+  it("asks to finish the check when there was no token, says joining is off when misconfigured, else to try again", () => {
     assert.equal(botCheckMessage("missing_token"), BOT_CHECK_MISSING_MESSAGE);
     assert.equal(botCheckMessage("rejected"), BOT_CHECK_FAILED_MESSAGE);
     assert.equal(botCheckMessage("unavailable"), BOT_CHECK_FAILED_MESSAGE);
-    assert.equal(botCheckMessage("misconfigured"), JOIN_FAILED_MESSAGE);
-    for (const m of [BOT_CHECK_MISSING_MESSAGE, BOT_CHECK_FAILED_MESSAGE]) {
+    assert.equal(botCheckMessage("misconfigured"), JOIN_DISABLED_MESSAGE);
+    for (const reason of ["missing_token", "rejected", "unavailable", "misconfigured"] as const) {
+      assert.notEqual(botCheckMessage(reason), JOIN_FAILED_MESSAGE, reason);
+    }
+    for (const m of [BOT_CHECK_MISSING_MESSAGE, BOT_CHECK_FAILED_MESSAGE, JOIN_DISABLED_MESSAGE]) {
       assert.doesNotMatch(m, /'|\u2014/);
     }
   });
