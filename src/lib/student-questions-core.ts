@@ -32,10 +32,12 @@
 // Backstops, since students trigger these calls and not the teacher:
 // - Only a student whose class is the reading's class gets a set
 //   ("not_allowed" otherwise), checked on load and again in the claim.
-// - At most STUDENT_SETS_PER_READING_LIMIT sets per reading. Every claim
-//   row, pending or done, holds a slot, so the cap counts claims, not
-//   saved sets. A released claim frees its slot; a stale takeover reuses
-//   one and is never blocked.
+// - At most STUDENT_SETS_PER_READING_LIMIT sets per reading, or
+//   STUDENT_SETS_RAISED_LIMIT once its teacher has raised the cap (the
+//   reading_cap_raises row, see reading-cap.ts). Every claim row, pending
+//   or done, holds a slot, so the cap counts claims, not saved sets. A
+//   released claim frees its slot; a stale takeover reuses one and is
+//   never blocked.
 // - Student sets don't count toward the teacher's 30 per 10 minutes (see
 //   question-rate-limit.ts); the cap above bounds them instead.
 // - The "Try again" throttle: a failed call releases its claim, so every
@@ -51,11 +53,11 @@
 //   the same reading lock as the claim, so a burst of Try agains makes
 //   exactly the limit of calls.
 //
-// What counts as a call (failureCounts): only a call that reached the
-// model and got a response back, including a response we then reject as
-// unusable output (no tool call, wrong count, a refusal). A failure where
-// no response came back is the provider's or our setup's fault, not the
-// student's, so it gives the try back: no API key, a 400/401/403/404 (bad
+// What counts toward the lifetime limit (failureCounts): only a call that
+// reached the model and got a response back, including a response we then
+// reject as unusable output (no tool call, wrong count, a refusal). A
+// failure where no response came back is the provider's or our setup's
+// fault, not the student's, so it is given back: a 400/401/403/404 (bad
 // request, bad key, no permission, unknown model), 429 or 529 (busy or
 // overloaded), any other 5xx, a network error, or a timeout (the SDK's or
 // our write deadline). "Got a response" is reported by the writer
@@ -63,15 +65,22 @@
 // first reply was unusable and whose second try then hit a 5xx still
 // counts.
 //
+// A given-back call still counts toward the window: every call row does,
+// so during an outage a student (or a script) pressing Try again still
+// makes at most STUDENT_GENERATION_WINDOW_LIMIT calls per window, but the
+// outage never uses up their STUDENT_GENERATION_CALL_LIMIT. With no API
+// key at all, the open fails before any claim, so no row is written and
+// nothing is called.
+//
 // Giving it back stays race-safe: the call row is written before the call
 // (so an in-flight call holds its slot and a burst can't get past the
 // limit), stamped with its claim's claimed_at. On an uncounted failure,
-// the release deletes the claim and, in the same statement, that one row,
-// and only while this token still holds the claim. Rows are only ever
-// removed for calls that are over and never reached the model, so the
-// rows left are never fewer than the calls the model answered: the limit
-// on answered calls is exact. If the claim was lost to a stale takeover,
-// the row stays counted (the safe side).
+// the release deletes the claim and, in the same statement, marks that
+// one row given_back, and only while this token still holds the claim.
+// Rows are only ever marked for calls that are over and never reached the
+// model, so the unmarked rows are never fewer than the calls the model
+// answered: the lifetime limit on answered calls is exact. If the claim
+// was lost to a stale takeover, the row stays counted (the safe side).
 
 import type { GradeLevel } from "./grade-levels";
 import type { Statement } from "./link-rate-limit";
@@ -94,13 +103,17 @@ export const CLAIM_STALE_SECONDS = Math.ceil(QUESTION_WRITE_DEADLINE_MS / 1000) 
 // code can't run up model calls without limit.
 export const STUDENT_SETS_PER_READING_LIMIT = 150;
 
+// The cap after the teacher's one-time "Raise the limit" (reading-cap.ts).
+export const STUDENT_SETS_RAISED_LIMIT = 300;
+
 // What the student reading page shows on "limit_reached".
 export const STUDENT_SETS_LIMITED_MESSAGE = "Ask your teacher for help with this one.";
 
 // The "Try again" throttle (see the top of this file). A set normally
 // takes 1 call (the SDK's own retries happen inside it), so 3 calls in 10
-// minutes is room for two failures in a row, and 6 in all bounds what one
-// student can cost on one reading however long the model keeps failing.
+// minutes is room for two failures in a row (given back or not), and 6
+// answered calls in all bound what one student can cost on one reading
+// however long the model keeps failing.
 export const STUDENT_GENERATION_WINDOW_LIMIT = 3;
 export const STUDENT_GENERATION_WINDOW_MINUTES = 10;
 export const STUDENT_GENERATION_CALL_LIMIT = 6;
@@ -136,12 +149,15 @@ export type StudentQuestionsResult =
   // exist). Never send this to a student as is: pass every result through
   // studentFacingResult, which turns it into not_found.
   | { status: "not_allowed" }
-  // The reading already has STUDENT_SETS_PER_READING_LIMIT sets and this
-  // student has none. Show STUDENT_SETS_LIMITED_MESSAGE.
+  // The reading is at its cap (STUDENT_SETS_PER_READING_LIMIT, or the
+  // raised limit) and this student has none. Show
+  // STUDENT_SETS_LIMITED_MESSAGE.
   | { status: "limit_reached" }
-  // STUDENT_GENERATION_WINDOW_LIMIT calls in the window: try again later.
+  // STUDENT_GENERATION_WINDOW_LIMIT calls in the window (given back or
+  // not): try again later.
   | { status: "throttled" }
-  // STUDENT_GENERATION_CALL_LIMIT calls for all time: ask the teacher.
+  // STUDENT_GENERATION_CALL_LIMIT answered calls for all time: ask the
+  // teacher.
   | { status: "calls_used_up" }
   // The model call failed; nothing was saved and the claim was released.
   | { status: "error"; kind: QuestionErrorKind; message: string };
@@ -163,8 +179,8 @@ export type ContextLookup =
 // What a claim attempt found:
 // - "claimed": this token holds a new claim.
 // - "exists": the student already has a claim (pending or done).
-// - "limit_reached": no claim for this student, and the reading is at
-//   STUDENT_SETS_PER_READING_LIMIT.
+// - "limit_reached": no claim for this student, and the reading is at its
+//   cap.
 // - "refused": the reading or student no longer qualifies (deleted, say).
 // - "throttled" / "calls_used_up": no claim for this student, and the
 //   "Try again" throttle refuses another model call.
@@ -182,8 +198,9 @@ export type StudentQuestionStore = {
   // Takes over a stale pending claim, under the throttle.
   takeOverStale(readingId: string, studentId: string, token: string, staleSeconds: number): Promise<TakeOverOutcome>;
   // Deletes the claim if this token still holds it and it is pending.
-  // With refundCall, also deletes the call row that claim recorded, so the
-  // failed call doesn't count toward the throttle.
+  // With refundCall, also marks the call row that claim recorded given
+  // back, so the failed call counts toward the window but not toward the
+  // lifetime limit.
   release(readingId: string, studentId: string, token: string, refundCall: boolean): Promise<void>;
   // Marks the claim done and saves the set, in one transaction, only if
   // this token still holds it. False when the claim was lost.
@@ -212,8 +229,9 @@ export type StudentQuestionDeps = {
   onError?: (fields: Record<string, unknown>) => void;
 };
 
-// Whether a failed write counts toward the "Try again" throttle (see the
-// top of this file): only when the model replied at least once. Unusable
+// Whether a failed write counts toward the lifetime "Try again" limit
+// (see the top of this file): only when the model replied at least once.
+// Every call counts toward the window either way. Unusable
 // output is only ever thrown after a reply, so it counts even from a
 // writer that doesn't report replies.
 export function failureCounts(error: unknown, modelResponded: boolean): boolean {
@@ -254,6 +272,8 @@ export async function getOrCreateStudentQuestionsWith(
   }
 
   const token = deps.newToken();
+  // The default cap; the claim uses the raised one where the teacher
+  // raised it.
   const claim = await store.claim(readingId, studentId, token, STUDENT_SETS_PER_READING_LIMIT);
   if (claim === "limit_reached" || claim === "throttled" || claim === "calls_used_up") return { status: claim };
   if (claim === "refused") return { status: "not_found" };
@@ -326,31 +346,37 @@ order by position`,
 //    student's answers), so those never wait on a claim.
 // 2. Insert the claim only if the student is in the reading's class, the
 //    reading is still published per-student, and the reading has fewer
-//    than $4 claims (pending or done). This statement's fresh snapshot,
+//    claims (pending or done) than its cap: the to_limit of its
+//    reading_cap_raises row, else $4. This statement's fresh snapshot,
 //    taken after the lock wait, sees every claim a previous holder
-//    committed, so the cap is exact: 200 concurrent first opens get
-//    exactly 150. ON CONFLICT DO NOTHING keeps one claim per student.
+//    committed (and a raise committed before it), so the cap is exact:
+//    200 concurrent first opens get exactly 150, or 300 after a raise.
+//    ON CONFLICT DO NOTHING keeps one claim per student.
 //    It is also refused when the student is at the "Try again" throttle
-//    (their student_question_calls rows for this reading, in the window
-//    and in all), counted in the same fresh snapshot, so exact too.
+//    (their student_question_calls rows for this reading: all of them in
+//    the window, and those not given back in all), counted in the same
+//    fresh snapshot, so exact too.
 // 3. Record the model call this claim is about to make, only if step 2
 //    inserted this token's claim, stamped with the claim's claimed_at so
 //    an uncounted failure can find and delete exactly this row (see
 //    releaseStatement).
 // 4. Say why when nothing was inserted: whether this student already has
 //    a claim, whether the student and reading still qualify, how many
-//    claims the reading has, and the student's calls.
+//    claims the reading has and its cap, and the student's calls.
 //
 // The model call happens after this commits, never under the lock.
 // The student's calls for this reading in the window ($n: the window's
-// minutes), and for all time.
+// minutes), given back or not, and the ones not given back for all time.
 function recentCalls(n: number): string {
   return `(select count(*) from student_question_calls
   where reading_id = $1::uuid and student_id = $2::uuid
     and created_at > now() - make_interval(mins => $${n}::int))`;
 }
 const ALL_CALLS = `(select count(*) from student_question_calls
-  where reading_id = $1::uuid and student_id = $2::uuid)`;
+  where reading_id = $1::uuid and student_id = $2::uuid and not given_back)`;
+// The reading's cap: the raised limit where its teacher raised it, else
+// the default passed as $4.
+const READING_CAP = `coalesce((select to_limit from reading_cap_raises where reading_id = $1::uuid), $4::int)`;
 const THROTTLE_PARAMS = [
   STUDENT_GENERATION_WINDOW_MINUTES,
   STUDENT_GENERATION_WINDOW_LIMIT,
@@ -376,7 +402,7 @@ where exists (
   where r.id = $1::uuid and s.id = $2::uuid
     and r.status = 'published' and r.question_mode = 'per_student'
 )
-and (select count(*) from question_generations where reading_id = $1::uuid) < $4::int
+and (select count(*) from question_generations where reading_id = $1::uuid) < ${READING_CAP}
 and ${recentCalls(5)} < $6::int
 and ${ALL_CALLS} < $7::int
 on conflict do nothing
@@ -402,9 +428,10 @@ returning id`,
       and r.status = 'published' and r.question_mode = 'per_student'
   ) as eligible,
   (select count(*)::int from question_generations where reading_id = $1::uuid) as claims,
+  ${READING_CAP}::int as cap,
   ${recentCalls(3)}::int as recent_calls,
   ${ALL_CALLS}::int as all_calls`,
-      params: [readingId, studentId, STUDENT_GENERATION_WINDOW_MINUTES],
+      params: [readingId, studentId, STUDENT_GENERATION_WINDOW_MINUTES, limit],
     },
   ];
 }
@@ -417,7 +444,8 @@ function throttleFromRow(row: Record<string, unknown> | undefined): "throttled" 
   return null;
 }
 
-// Reads the claim batch's results.
+// Reads the claim batch's results. `limit` is the default cap, for a
+// result without the reading's own (cap).
 export function claimOutcome(results: Record<string, unknown>[][], limit: number): ClaimOutcome {
   if ((results[1]?.length ?? 0) > 0) return "claimed";
   const row = results[3]?.[0];
@@ -426,7 +454,8 @@ export function claimOutcome(results: Record<string, unknown>[][], limit: number
   // the reading is full.
   if (row?.eligible !== true) return "refused";
   // The reading's cap first: after a break it would still be full.
-  if (Number(row?.claims ?? 0) >= limit) return "limit_reached";
+  const cap = Number(row?.cap);
+  if (Number(row?.claims ?? 0) >= (Number.isInteger(cap) && cap > 0 ? cap : limit)) return "limit_reached";
   // Eligible, under the cap and the throttle, yet nothing inserted: the
   // insert hit another request's pending claim, which that request then
   // released (its model call failed; release doesn't take the reading
@@ -501,10 +530,11 @@ export function takeOverOutcome(results: Record<string, unknown>[][]): TakeOverO
 }
 
 // One statement: delete this token's pending claim and, with refundCall
-// ($4), the one call row it recorded (same reading and student, created_at
-// equal to the claim's claimed_at). Nothing happens if the token no longer
-// holds a pending claim, so a call whose claim was taken over stays
-// counted.
+// ($4), mark the one call row it recorded given back (same reading and
+// student, created_at equal to the claim's claimed_at): it keeps counting
+// toward the window, not toward the lifetime limit. Nothing happens if
+// the token no longer holds a pending claim, so a call whose claim was
+// taken over stays counted.
 export function releaseStatement(
   readingId: string,
   studentId: string,
@@ -518,10 +548,10 @@ export function releaseStatement(
     and claim_token = $3::uuid and status = 'pending'
   returning claimed_at
 )
-delete from student_question_calls
+update student_question_calls set given_back = true
 where $4::boolean and id = (
   select c.id from student_question_calls c join released on c.created_at = released.claimed_at
-  where c.reading_id = $1::uuid and c.student_id = $2::uuid
+  where c.reading_id = $1::uuid and c.student_id = $2::uuid and not c.given_back
   limit 1
 )`,
     params: [readingId, studentId, token, refundCall],

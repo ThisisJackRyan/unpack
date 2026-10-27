@@ -15,8 +15,9 @@ export type ClassStatusCell = {
   triesAllowed: number;
   checks: number;
   checksAllowed: number;
-  // Used every "Try again" model call for this reading's own questions
-  // (STUDENT_GENERATION_CALL_LIMIT) without getting a set, and no call is
+  // Used every answered "Try again" model call for this reading's own
+  // questions (STUDENT_GENERATION_CALL_LIMIT; calls given back after an
+  // outage don't count) without getting a set, and no call is
   // running: the student is stuck until the teacher uses "Let them try
   // again". Only possible on a per-student reading, and only while the
   // status is Not started (no questions means no tries).
@@ -77,7 +78,7 @@ order by lower(s.first_name), lower(s.last_initials), s.created_at, s.id`,
       select 1 from question_generations g
       where g.reading_id = r.id and g.student_id = s.id and g.status = 'pending'
     )
-    and (select count(*) from student_question_calls k where k.reading_id = r.id and k.student_id = s.id) >= $3::int
+    and (select count(*) from student_question_calls k where k.reading_id = r.id and k.student_id = s.id and not k.given_back) >= $3::int
   ) as needs_reset
 from classes c
 join students s on s.class_id = c.id

@@ -41,7 +41,7 @@ reading_id, student_id, status (pending/done), claim_token (a random UUID), clai
 
 ### `student_question_calls` (added in PR 11)
 
-id, reading_id, student_id, created_at: one row per counted AI call made for a student's own question set, for the "Try again" limit. No text. A call that fails without a response from the model (outage, bad key, timeout) has its row deleted when it ends. Kept until the student or reading is deleted (the all-time limit needs them), or until the teacher uses "Let them try again", which deletes that student's rows for that reading. Cascade from `students` and `readings`.
+id, reading_id, student_id, created_at, given_back (added in PR 12): one row per AI call made for a student's own question set, for the "Try again" limit. No text. A call that fails without a response from the model (outage, bad key, timeout) has its row marked given_back when it ends: it still counts toward the 10-minute window, not toward the all-time limit. Kept until the student or reading is deleted (the all-time limit needs them), or until the teacher uses "Let them try again", which deletes that student's rows for that reading. Cascade from `students` and `readings`.
 
 ### `attempts` (one row per try)
 
