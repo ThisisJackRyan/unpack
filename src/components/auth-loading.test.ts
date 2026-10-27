@@ -7,6 +7,7 @@ describe("sign-in and sign-up loading state", () => {
   it("has friendly copy with a real ellipsis, curly apostrophes and no em dash", () => {
     assert.equal(AUTH_LOADING_COPY.signIn, "Getting sign-in ready\u2026");
     assert.equal(AUTH_LOADING_COPY.signUp, "Getting sign-up ready\u2026");
+    assert.equal(AUTH_LOADING_COPY.afterAuth, "Getting your account ready\u2026");
     for (const text of Object.values(AUTH_LOADING_COPY)) {
       assert.ok(!text.includes("'"), text);
       assert.ok(!text.includes("..."), text);
@@ -33,5 +34,15 @@ describe("sign-in and sign-up loading state", () => {
       const before = source.slice(Math.max(0, m.index - 12), m.index);
       assert.ok(before.endsWith("motion-safe:"), m[0]);
     }
+  });
+
+  it("covers the wait after the email code: /home and /welcome show the same card", () => {
+    for (const path of ["../app/home/loading.tsx", "../app/welcome/loading.tsx"]) {
+      const source = readFileSync(new URL(path, import.meta.url), "utf8");
+      assert.match(source, /<LoadingCard title=\{AUTH_LOADING_COPY\.afterAuth\} \/>/, path);
+    }
+    const card = readFileSync(new URL("./auth-loading.tsx", import.meta.url), "utf8");
+    assert.match(card, /<ClerkLoading>\s*<LoadingCard /);
+    assert.match(card, /export function LoadingCard[\s\S]*role="status"/);
   });
 });

@@ -1,9 +1,11 @@
-// The words on /sign-in and /sign-up while Clerk loads, or if it can't.
+// The words on /sign-in and /sign-up while Clerk loads, or if it can't,
+// and on /home and /welcome while the account is set up after sign-in.
 // No imports, so tests can check the copy.
 
 export const AUTH_LOADING_COPY = {
   signIn: "Getting sign-in ready…",
   signUp: "Getting sign-up ready…",
+  afterAuth: "Getting your account ready…",
   hint: "This only takes a moment.",
   failedTitle: "This page didn’t load.",
   failedBody: "Check your connection, then reload the page to try again.",
