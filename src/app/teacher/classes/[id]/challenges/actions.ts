@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { decideChallenge, type DecideResult } from "@/lib/challenge-queue";
-import { DECIDE_FAILED_MESSAGE, isChallengeDecision } from "@/lib/challenge-queue-core";
+import { DECIDE_FAILED_MESSAGE, parseDecisionChoice } from "@/lib/challenge-queue-core";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import type { DecideState } from "./state";
 
-// Accept or Deny one challenge. Ownership (the class is this teacher's,
+// Accept or Deny one challenge (Deny optionally with one more try). Ownership (the class is this teacher's,
 // and the challenge is in it), "still open", and the one-more-try grant
 // are all checked in the decision's own transaction (see
 // challenge-queue-core.ts), so a double-click or a second tab gets
@@ -17,9 +17,10 @@ export async function decideChallengeAction(
   formData: FormData,
 ): Promise<DecideState> {
   const challengeId = String(formData.get("challengeId") ?? "");
-  const decision = formData.get("decision");
-  if (!isChallengeDecision(decision)) return { challengeId, error: DECIDE_FAILED_MESSAGE };
-  const extraTry = decision === "deny" && formData.get("extraTry") === "on";
+  // Accept, Deny, or "Deny, give one more try": each its own button.
+  const choice = parseDecisionChoice(formData.get("decision"));
+  if (!choice) return { challengeId, error: DECIDE_FAILED_MESSAGE };
+  const { decision, extraTry } = choice;
 
   const teacher = await getOrCreateTeacher();
   let result: DecideResult;

@@ -4,7 +4,6 @@ import type { Statement } from "./link-rate-limit";
 import {
   CHALLENGE_ALREADY_SENT_MESSAGE,
   CHALLENGE_BUSY_MESSAGE,
-  CHALLENGE_DECIDED_MESSAGE,
   CHALLENGE_NOT_READY_MESSAGE,
   CHALLENGE_SENT_MESSAGE,
   CHALLENGE_UNIQUE_CONSTRAINT,
@@ -240,7 +239,6 @@ describe("challengeMessage", () => {
     assert.equal(challengeMessage({ status: "sent" }), CHALLENGE_SENT_MESSAGE);
     assert.equal(challengeMessage({ status: "already_sent" }), CHALLENGE_ALREADY_SENT_MESSAGE);
     assert.equal(challengeMessage({ status: "not_ready" }), CHALLENGE_NOT_READY_MESSAGE);
-    assert.equal(challengeMessage({ status: "decided" }), CHALLENGE_DECIDED_MESSAGE);
     assert.equal(challengeMessage({ status: "busy" }), CHALLENGE_BUSY_MESSAGE);
     assert.equal(challengeMessage({ status: "invalid", error: "x" }), "x");
     assert.match(CHALLENGE_SENT_MESSAGE, /Your teacher will take a look/);

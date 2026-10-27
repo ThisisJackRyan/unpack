@@ -1,11 +1,13 @@
 "use client";
 
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
-import { focusRing, pill, primaryButton, secondaryButton } from "@/components/ui";
-import { decisionMessage, type ChallengeDecision, type QueueItem } from "@/lib/challenge-queue-core";
+import { pill, primaryButton, secondaryButton } from "@/components/ui";
+import { decisionMessage, parseDecisionChoice, type DecisionChoice, type QueueItem } from "@/lib/challenge-queue-core";
 import type { DecideState } from "./state";
 
 type Action = (state: DecideState, formData: FormData) => Promise<DecideState>;
+
+const secondaryButtonDisabled = `${secondaryButton} disabled:cursor-not-allowed disabled:opacity-60`;
 
 // The queue, with one live region that stays mounted while cards come and
 // go: after a decision the page refreshes, the card is gone, and the
@@ -55,7 +57,7 @@ function ChallengeCard({
   item: QueueItem;
   onDecided: (message: string) => void;
 }) {
-  const [running, setRunning] = useState<ChallengeDecision | null>(null);
+  const [running, setRunning] = useState<DecisionChoice | null>(null);
   const [state, dispatch, pending] = useActionState(async (prev: DecideState, formData: FormData) => {
     const next = await action(prev, formData);
     if (next.result) onDecided(decisionMessage(next.result, item.studentName));
@@ -67,7 +69,8 @@ function ChallengeCard({
     if (pending) return;
     const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const data = new FormData(e.currentTarget, submitter);
-    setRunning(data.get("decision") === "accept" ? "accept" : "deny");
+    const value = data.get("decision");
+    setRunning(parseDecisionChoice(value) ? (value as DecisionChoice) : null);
     startTransition(() => dispatch(data));
   }
 
@@ -147,38 +150,31 @@ function ChallengeCard({
 
       <form onSubmit={onSubmit} aria-busy={pending} className="flex flex-col gap-4 border-t border-zinc-200 pt-5">
         <input type="hidden" name="challengeId" value={item.id} />
-        <label className="flex items-start gap-3 text-base text-zinc-800">
-          <input
-            type="checkbox"
-            name="extraTry"
-            disabled={pending}
-            aria-describedby={`${headingId}-extra`}
-            className={`mt-1 h-5 w-5 shrink-0 rounded border-zinc-400 accent-indigo-600 ${focusRing}`}
-          />
-          <span className="flex flex-col">
-            <span className="font-semibold">Give one more try</span>
-            <span id={`${headingId}-extra`} className="text-sm text-zinc-600">
-              With Deny: {item.studentName} gets exactly 1 try back, and can send a new note if it doesn’t pass.
-            </span>
-          </span>
-        </label>
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <button type="submit" name="decision" value="accept" disabled={pending} className={primaryButton}>
             {pending && running === "accept" ? "Accepting…" : "Accept"}
             <span className="sr-only"> {item.studentName}’s answers</span>
           </button>
-          <button
-            type="submit"
-            name="decision"
-            value="deny"
-            disabled={pending}
-            className={`${secondaryButton} disabled:cursor-not-allowed disabled:opacity-60`}
-          >
+          <button type="submit" name="decision" value="deny" disabled={pending} className={secondaryButtonDisabled}>
             {pending && running === "deny" ? "Denying…" : "Deny"}
             <span className="sr-only"> {item.studentName}’s challenge</span>
           </button>
+          <button
+            type="submit"
+            name="decision"
+            value="deny_extra_try"
+            disabled={pending}
+            aria-describedby={`${headingId}-extra`}
+            className={secondaryButtonDisabled}
+          >
+            {pending && running === "deny_extra_try" ? "Denying…" : "Deny, give one more try"}
+            <span className="sr-only"> to {item.studentName}</span>
+          </button>
         </div>
-        <p aria-live="polite" className="text-base font-medium text-amber-900 empty:hidden">
+        <p id={`${headingId}-extra`} className="text-sm text-zinc-600">
+          One more try: {item.studentName} gets exactly 1 try back, and can send a new note if it doesn’t pass.
+        </p>
+        <p aria-live="polite" className="text-base font-medium text-red-700 empty:hidden">
           {state.challengeId === item.id ? state.error : ""}
         </p>
       </form>
