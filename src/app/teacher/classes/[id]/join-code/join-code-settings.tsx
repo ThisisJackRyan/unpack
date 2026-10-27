@@ -112,7 +112,7 @@ export function JoinCodeSettings({
             }}
             role="group"
             aria-labelledby="new-code-confirm"
-            className="flex flex-col gap-4 rounded-xl border border-ink-200 bg-ink-50 px-4 py-4"
+            className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-ink-50 px-4 py-4"
           >
             <p id="new-code-confirm" className="text-base text-ink-800">
               Make a new code? <span className="font-mono font-semibold tracking-wider">{code}</span> stops working

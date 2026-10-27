@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Link from "next/link";
+import { OpenBook } from "@/components/illustrations";
 import { countOpenChallenges } from "@/lib/challenge-queue";
 import { countDraftsClearedByGradeChange } from "@/lib/classes";
 import { READING_DELETED_FLAG, READING_DELETED_MESSAGE } from "@/lib/reading-delete";
@@ -55,7 +56,7 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
       {readingDeleted && (
         <p
           role="status"
-          className="rounded-xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950"
+          className="rounded-2xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950"
         >
           {READING_DELETED_MESSAGE}
         </p>
@@ -260,25 +261,7 @@ function ReadingsEmptyState({ href }: { href: string }) {
     <div
       className={`${card} flex flex-col items-center gap-4 px-6 py-14 text-center`}
     >
-      <svg aria-hidden="true" viewBox="0 0 96 96" className="h-24 w-24" fill="none">
-        <circle cx="48" cy="48" r="44" fill="#eef2ff" />
-        <rect
-          x="28"
-          y="22"
-          width="40"
-          height="52"
-          rx="6"
-          fill="#fff"
-          stroke="#4f46e5"
-          strokeWidth="3"
-        />
-        <path
-          d="M36 36h24M36 45h24M36 54h16"
-          stroke="#a5b4fc"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
-      </svg>
+      <OpenBook className="h-28 w-36" />
       <h3 className="text-xl font-semibold text-ink-950">Add your first reading</h3>
       <p className="max-w-sm text-base text-ink-600">
         Paste a link or some text. Students read it, then answer questions.

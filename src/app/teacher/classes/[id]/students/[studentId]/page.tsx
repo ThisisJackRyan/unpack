@@ -12,6 +12,7 @@ import { loadClass } from "../../loaders";
 import { resetTriesAction } from "../actions";
 import { ProgressAnnouncer } from "../announcer";
 import { ResetTriesButton } from "../reset-tries";
+import { OpenBook } from "@/components/illustrations";
 
 type Props = { params: Promise<{ id: string; studentId: string }> };
 
@@ -58,9 +59,10 @@ export default async function StudentProgressPage({ params }: Props) {
       <ProgressAnnouncer headingId="student-heading" />
 
       {status.readings.length === 0 ? (
-        <p className={`${card} px-6 py-12 text-center text-lg text-ink-600`}>
-          No published readings yet. Publish one, and progress shows up here.
-        </p>
+        <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
+          <OpenBook className="h-24 w-32" />
+          <p className="text-lg text-ink-600">No published readings yet. Publish one, and progress shows up here.</p>
+        </div>
       ) : (
         <ul className={`${card} divide-y divide-ink-200`}>
           {status.readings.map((r) => {
@@ -81,7 +83,7 @@ export default async function StudentProgressPage({ params }: Props) {
                   )}
                 </div>
                 {cell.needsReset && (
-                  <div className="flex flex-col items-start gap-3 rounded-lg bg-warning-50 px-4 py-3">
+                  <div className="flex flex-col items-start gap-3 rounded-xl bg-warning-50 px-4 py-3">
                     <p className="text-base text-ink-800">
                       {name}’s questions didn’t load after {STUDENT_GENERATION_CALL_LIMIT} tries, so they can’t try again
                       on their own. Let them try again to give them {STUDENT_GENERATION_CALL_LIMIT} more.

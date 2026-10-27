@@ -6,6 +6,7 @@ import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadClass } from "../loaders";
 import { decideChallengeAction } from "./actions";
 import { ChallengeQueue } from "./queue";
+import { PaperPlane } from "@/components/illustrations";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -43,9 +44,10 @@ export default async function ChallengesPage({ params }: Props) {
       <ChallengeQueue action={decideChallengeAction.bind(null, found.id)} items={items} />
 
       {items.length === 0 && (
-        <p className={`${card} px-6 py-12 text-center text-lg text-ink-600`}>
-          You’re all caught up. New challenges show up here.
-        </p>
+        <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
+          <PaperPlane className="h-24 w-32" />
+          <p className="text-lg text-ink-600">You’re all caught up. New challenges show up here.</p>
+        </div>
       )}
     </div>
   );

@@ -52,7 +52,7 @@ export function DeleteStudentButton({ action, studentId, name }: { action: Actio
         onCancel={(e) => {
           if (pending) e.preventDefault();
         }}
-        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-2xl border border-ink-200 bg-white p-0 text-left shadow-xl backdrop:bg-ink-950/40"
+        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-3xl border border-ink-200 bg-white p-0 text-left shadow-xl backdrop:bg-ink-950/40"
       >
         <form onSubmit={onSubmit} aria-busy={pending} className="flex flex-col gap-5 p-6">
           <input type="hidden" name="studentId" value={studentId} />

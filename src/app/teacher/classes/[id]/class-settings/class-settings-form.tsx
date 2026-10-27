@@ -82,7 +82,7 @@ export function ClassSettingsForm({
         {warn && isGradeLevel(picked) && (
           <p
             id="class-grade-warning"
-            className="flex gap-3 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-base text-warning-950"
+            className="flex gap-3 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-base text-warning-950"
           >
             <span aria-hidden="true" className="mt-2 h-2 w-2 shrink-0 rounded-full bg-warning-500" />
             <span>{gradeChangeWarning(draftsToClear, picked)}</span>

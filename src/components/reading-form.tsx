@@ -31,9 +31,9 @@ const errorText = "text-base text-danger-700";
 // A pill segmented control: a light gray track, the chosen option white.
 // The radio inside each option is visually hidden but still focusable, so
 // arrow keys move between options and the focus ring shows on the option.
-const track = "grid gap-1 rounded-xl bg-ink-100 p-1";
+const track = "grid gap-1 rounded-2xl bg-ink-100 p-1";
 const option =
-  "flex min-h-12 cursor-pointer rounded-lg px-4 text-ink-600 transition-colors hover:text-ink-950 has-checked:bg-white has-checked:text-ink-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-ink-200 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600";
+  "flex min-h-12 cursor-pointer rounded-xl px-4 text-ink-600 transition-colors hover:text-ink-950 has-checked:bg-white has-checked:text-ink-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-ink-200 has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600";
 
 const SOURCES = [
   { value: "link", label: "Paste a link" },

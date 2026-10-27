@@ -25,7 +25,7 @@ export function ChallengeQueue({ action, items }: { action: Action; items: Queue
     <>
       <p
         aria-live="polite"
-        className="rounded-xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950 empty:hidden"
+        className="rounded-2xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950 empty:hidden"
       >
         {announcement}
       </p>
@@ -78,7 +78,7 @@ function ChallengeCard({
   const noTry = item.lastTry === null;
 
   return (
-    <li aria-labelledby={headingId} className="flex flex-col gap-5 rounded-2xl border border-ink-200 bg-white p-5 sm:p-6">
+    <li aria-labelledby={headingId} className="flex flex-col gap-5 rounded-3xl border border-ink-200 bg-white p-5 sm:p-6">
       <div className="flex flex-col gap-2">
         <h2 id={headingId} className="text-xl font-semibold break-words text-ink-950">
           {item.studentName}
@@ -102,7 +102,7 @@ function ChallengeCard({
         </p>
       </div>
 
-      <figure className="flex flex-col gap-1.5 rounded-xl bg-primary-50/60 px-4 py-3">
+      <figure className="flex flex-col gap-1.5 rounded-2xl bg-primary-50/60 px-4 py-3">
         <figcaption className="text-sm font-semibold text-primary-900">Note from {item.studentName}</figcaption>
         <blockquote className="text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">{item.note}</blockquote>
       </figure>
@@ -113,13 +113,13 @@ function ChallengeCard({
         </h3>
         <ol className="flex flex-col gap-3">
           {item.questions.map((q) => (
-            <li key={q.id} className="flex flex-col gap-2 rounded-xl border border-ink-200 px-4 py-3">
+            <li key={q.id} className="flex flex-col gap-2 rounded-2xl border border-ink-200 px-4 py-3">
               <p className="text-base font-medium break-words text-ink-900">
                 <span className="text-ink-500">{q.position}.</span> {q.prompt}
               </p>
               {q.answer ? (
                 <>
-                  <p className="rounded-lg bg-ink-50 px-3 py-2 text-base leading-relaxed whitespace-pre-line break-words text-ink-900">
+                  <p className="rounded-xl bg-ink-50 px-3 py-2 text-base leading-relaxed whitespace-pre-line break-words text-ink-900">
                     {q.answer.text}
                   </p>
                   <div className="flex flex-col items-start gap-1.5">

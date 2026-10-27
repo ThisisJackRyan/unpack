@@ -38,7 +38,7 @@ export function DeleteReadingButton({ action, title }: { action: Action; title: 
         onCancel={(e) => {
           if (pending) e.preventDefault();
         }}
-        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-2xl border border-ink-200 bg-white p-0 text-left shadow-xl backdrop:bg-ink-950/40"
+        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-3xl border border-ink-200 bg-white p-0 text-left shadow-xl backdrop:bg-ink-950/40"
       >
         <form onSubmit={onSubmit} aria-busy={pending} className="flex flex-col gap-5 p-6">
           <h2 id="delete-reading-title" className="text-xl font-semibold break-words text-ink-950">

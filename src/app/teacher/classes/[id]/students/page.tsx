@@ -21,6 +21,7 @@ import { ProgressAnnouncer } from "./announcer";
 import { DeleteStudentButton } from "./delete-student";
 import { ResetTriesButton } from "./reset-tries";
 import type { DeleteStudentState, ResetTriesState } from "./state";
+import { OpenBook, ReadingBuddy } from "@/components/illustrations";
 
 type DeleteAction = (state: DeleteStudentState, formData: FormData) => Promise<DeleteStudentState>;
 type ResetAction = (state: ResetTriesState, formData: FormData) => Promise<ResetTriesState>;
@@ -80,14 +81,16 @@ export default async function ClassProgressPage({ params }: Props) {
       <ProgressAnnouncer headingId="progress-heading" />
 
       {status.students.length === 0 ? (
-        <p className={`${card} px-6 py-12 text-center text-lg text-ink-600`}>
-          No students yet. Share the join code, and they’ll show up here.
-        </p>
+        <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
+          <ReadingBuddy className="h-24 w-24" />
+          <p className="text-lg text-ink-600">No students yet. Share the join code, and they’ll show up here.</p>
+        </div>
       ) : status.readings.length === 0 ? (
         <>
-          <p className={`${card} px-6 py-12 text-center text-lg text-ink-600`}>
-            No published readings yet. Publish one, and progress shows up here.
-          </p>
+          <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
+            <OpenBook className="h-24 w-32" />
+            <p className="text-lg text-ink-600">No published readings yet. Publish one, and progress shows up here.</p>
+          </div>
           <StudentList status={status} actions={actions} />
         </>
       ) : (

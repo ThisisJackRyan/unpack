@@ -36,10 +36,10 @@ type Props = {
 
 type Running = { intent: QuestionIntent; questionId?: string };
 
-const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
+const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
 const quietButton = `${smallButton} text-ink-700 hover:bg-ink-100 hover:text-ink-950`;
 // primaryButton in red, for confirming a delete.
-const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-danger-700 px-5 text-base font-semibold text-white transition-colors hover:bg-danger-800 ${focusRing}`;
+const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-danger-700 px-5 text-base font-semibold text-white transition-colors hover:bg-danger-800 ${focusRing}`;
 
 const ROLE_LABELS: Record<QuestionRole, string> = {
   detail: "From the text",
@@ -211,7 +211,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
                   {state.sample.map((prompt, i) => (
                     <li
                       key={i}
-                      className="flex gap-4 rounded-xl border border-dashed border-ink-300 bg-ink-50 p-4"
+                      className="flex gap-4 rounded-2xl border border-dashed border-ink-300 bg-ink-50 p-4"
                     >
                       <QuestionNumber n={i + 1} />
                       <QuestionText
@@ -341,7 +341,7 @@ function ConfirmButton({
         ref={dialogRef}
         aria-labelledby={`${id}-title`}
         aria-describedby={`${id}-body`}
-        className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-2xl bg-white p-6 shadow-xl backdrop:bg-ink-950/40"
+        className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-3xl bg-white p-6 shadow-xl backdrop:bg-ink-950/40"
       >
         <h2 id={`${id}-title`} className="text-xl font-semibold text-ink-950">
           {title}
@@ -423,11 +423,11 @@ function QuestionCard({
   }
 
   return (
-    <li className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4 shadow-xs">
+    <li className="flex gap-4 rounded-2xl border border-ink-200 bg-white p-4 shadow-xs">
       <QuestionNumber n={question.position} />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {regenerating ? (
-          <div aria-hidden="true" className="flex animate-pulse flex-col gap-2 py-1">
+          <div aria-hidden="true" className="flex animate-pulse flex-col gap-2 py-1 motion-reduce:animate-none">
             <div className="h-3 w-24 rounded bg-ink-100" />
             <div className="h-4 w-11/12 rounded bg-ink-200" />
             <div className="h-4 w-2/3 rounded bg-ink-200" />
@@ -455,7 +455,7 @@ function QuestionCard({
               onKeyDown={onKeyDown}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? errorId : `${fieldId}-count`}
-              className={`block w-full rounded-xl border border-ink-300 bg-white px-3 py-2 text-base leading-relaxed text-ink-950 aria-invalid:border-danger-600 ${focusRing}`}
+              className={`block w-full rounded-2xl border-2 border-ink-400 bg-white px-3 py-2 text-base leading-relaxed text-ink-950 aria-invalid:border-danger-600 ${focusRing}`}
             />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p id={`${fieldId}-count`} className="text-sm text-ink-500 tabular-nums">
@@ -558,9 +558,9 @@ export function QuestionNumber({ n }: { n: number }) {
 // Placeholder cards for the set being written, one per expected question.
 function SkeletonList({ count }: { count: number }) {
   return (
-    <ol aria-hidden="true" className="flex animate-pulse flex-col gap-3">
+    <ol aria-hidden="true" className="flex animate-pulse flex-col gap-3 motion-reduce:animate-none">
       {Array.from({ length: count }, (_, i) => (
-        <li key={i} className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4">
+        <li key={i} className="flex gap-4 rounded-2xl border border-ink-200 bg-white p-4">
           <div className="h-8 w-8 shrink-0 rounded-full bg-ink-200" />
           <div className="flex flex-1 flex-col gap-2 py-1">
             <div className="h-3 w-24 rounded bg-ink-100" />
@@ -575,7 +575,7 @@ function SkeletonList({ count }: { count: number }) {
 
 function EmptyState({ title, body, children }: { title: string; body: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-ink-300 bg-ink-50 px-6 py-10 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-10 text-center">
       <h3 className="text-lg font-semibold text-ink-950">{title}</h3>
       <p className="max-w-md text-base text-ink-600">{body}</p>
       <div className="mt-2">{children}</div>

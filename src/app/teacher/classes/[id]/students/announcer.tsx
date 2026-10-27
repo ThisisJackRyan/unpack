@@ -28,7 +28,7 @@ export function ProgressAnnouncer({ headingId }: { headingId: string }) {
   return (
     <p
       aria-live="polite"
-      className="rounded-xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950 empty:hidden"
+      className="rounded-2xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950 empty:hidden"
     >
       {message}
     </p>

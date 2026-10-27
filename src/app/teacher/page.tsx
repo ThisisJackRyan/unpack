@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ReadingBuddy } from "@/components/illustrations";
 import { atClassLimit, listClasses } from "@/lib/classes";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { getOrCreateTeacher } from "@/lib/teacher";
@@ -48,7 +49,7 @@ export default async function TeacherClassesPage() {
                     {gradeLevelLabel(c.gradeLevel)}
                   </span>
                 </span>
-                <span className="shrink-0 rounded-lg bg-ink-100 px-3 py-1.5 font-mono text-base font-semibold tracking-widest text-ink-900">
+                <span className="shrink-0 rounded-xl bg-ink-100 px-3 py-1.5 font-mono text-base font-semibold tracking-widest text-ink-900">
                   <span className="sr-only">Join code </span>
                   {c.joinCode}
                 </span>
@@ -66,34 +67,7 @@ function EmptyState() {
     <div
       className={`${card} flex flex-col items-center gap-4 px-6 py-14 text-center`}
     >
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 96 96"
-        className="h-24 w-24"
-        fill="none"
-      >
-        <circle cx="48" cy="48" r="44" fill="#eef2ff" />
-        <path
-          d="M24 34c8-4 16-4 24 2v32c-8-6-16-6-24-2V34Z"
-          fill="#fff"
-          stroke="#4f46e5"
-          strokeWidth="3"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M72 34c-8-4-16-4-24 2v32c8-6 16-6 24-2V34Z"
-          fill="#fff"
-          stroke="#4f46e5"
-          strokeWidth="3"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M30 44c4-1 8-1 12 1M30 52c4-1 8-1 12 1M54 45c4-2 8-2 12-1M54 53c4-2 8-2 12-1"
-          stroke="#a5b4fc"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
-      </svg>
+      <ReadingBuddy className="h-28 w-28" />
       <h2 className="text-xl font-semibold text-ink-950">
         Create your first class
       </h2>

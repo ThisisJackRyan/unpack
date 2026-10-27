@@ -127,7 +127,7 @@ export default async function ReadingPage({ params }: Props) {
               <>
                 <ol className="flex flex-col gap-3" aria-label="Questions">
                   {questions.map((q) => (
-                    <li key={q.id} className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4">
+                    <li key={q.id} className="flex gap-4 rounded-2xl border border-ink-200 bg-white p-4">
                       <QuestionNumber n={q.position} />
                       <QuestionText role={questionRole(q.position, reading.questionCount)} prompt={q.prompt} />
                     </li>
@@ -196,7 +196,7 @@ function CapPanel({
   return (
     <section
       aria-labelledby="cap-heading"
-      className={`flex flex-col gap-4 rounded-xl border p-5 sm:p-6 ${
+      className={`flex flex-col gap-4 rounded-2xl border p-5 sm:p-6 ${
         raised ? "border-primary-200 bg-primary-50/60" : "border-warning-200 bg-warning-50"
       }`}
     >
@@ -225,11 +225,11 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
         </p>
       </div>
       {sets.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-600">
+        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-600">
           No student has opened this reading yet. Each student’s questions show up here after they open it.
         </p>
       ) : (
-        <ul className="divide-y divide-ink-200 overflow-hidden rounded-xl border border-ink-200">
+        <ul className="divide-y divide-ink-200 overflow-hidden rounded-2xl border border-ink-200">
           {sets.map((set) => (
             <li key={set.studentId}>
               <details className="group">
@@ -246,7 +246,7 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
                 </summary>
                 <ol className="flex flex-col gap-3 bg-ink-50 px-4 py-4" aria-label={`${set.name}’s questions`}>
                   {set.questions.map((q) => (
-                    <li key={q.id} className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4">
+                    <li key={q.id} className="flex gap-4 rounded-2xl border border-ink-200 bg-white p-4">
                       <QuestionNumber n={q.position} />
                       <QuestionText role={questionRole(q.position, set.questions.length)} prompt={q.prompt} />
                     </li>
