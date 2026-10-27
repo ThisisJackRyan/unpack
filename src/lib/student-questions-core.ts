@@ -17,7 +17,8 @@
 // 4. The winner calls the model. On success it marks the claim "done" and
 //    inserts the set in ONE transaction, only while its token still holds
 //    the claim. On failure it deletes its claim, so the next open tries
-//    again (a failed call saved nothing, so this isn't a regeneration).
+//    again (a failed call saved nothing, so this isn't a regeneration),
+//    and gives back the try if the model never answered (see below).
 // 5. A "pending" claim older than CLAIM_STALE_SECONDS belongs to a request
 //    that died (a killed function, say). One later request may take it
 //    over with a conditional update that swaps in its own token; the old
@@ -44,10 +45,33 @@
 //   refused once the student has made STUDENT_GENERATION_WINDOW_LIMIT calls
 //   for this reading in the last STUDENT_GENERATION_WINDOW_MINUTES
 //   ("throttled": take a break) or STUDENT_GENERATION_CALL_LIMIT in all
-//   ("calls_used_up": ask the teacher). Only real model calls count: a
-//   cached open, a loser that waits, and a refused claim write nothing.
-//   The count runs under the same reading lock as the claim, so a burst
-//   of Try agains makes exactly the limit of calls.
+//   ("calls_used_up": ask the teacher, who can reset it with "Let them
+//   try again", see student-question-reset.ts). A cached open, a loser
+//   that waits, and a refused claim write nothing. The count runs under
+//   the same reading lock as the claim, so a burst of Try agains makes
+//   exactly the limit of calls.
+//
+// What counts as a call (failureCounts): only a call that reached the
+// model and got a response back, including a response we then reject as
+// unusable output (no tool call, wrong count, a refusal). A failure where
+// no response came back is the provider's or our setup's fault, not the
+// student's, so it gives the try back: no API key, a 400/401/403/404 (bad
+// request, bad key, no permission, unknown model), 429 or 529 (busy or
+// overloaded), any other 5xx, a network error, or a timeout (the SDK's or
+// our write deadline). "Got a response" is reported by the writer
+// (onModelResponse, called after each reply arrives), so a write whose
+// first reply was unusable and whose second try then hit a 5xx still
+// counts.
+//
+// Giving it back stays race-safe: the call row is written before the call
+// (so an in-flight call holds its slot and a burst can't get past the
+// limit), stamped with its claim's claimed_at. On an uncounted failure,
+// the release deletes the claim and, in the same statement, that one row,
+// and only while this token still holds the claim. Rows are only ever
+// removed for calls that are over and never reached the model, so the
+// rows left are never fewer than the calls the model answered: the limit
+// on answered calls is exact. If the claim was lost to a stale takeover,
+// the row stays counted (the safe side).
 
 import type { GradeLevel } from "./grade-levels";
 import type { Statement } from "./link-rate-limit";
@@ -55,6 +79,7 @@ import {
   QUESTION_ERROR_MESSAGES,
   questionErrorKind,
   questionErrorLogFields,
+  QuestionWriterError,
   type QuestionErrorKind,
 } from "./ai/questions";
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
@@ -80,9 +105,14 @@ export const STUDENT_GENERATION_WINDOW_LIMIT = 3;
 export const STUDENT_GENERATION_WINDOW_MINUTES = 10;
 export const STUDENT_GENERATION_CALL_LIMIT = 6;
 
-// What the student reading page shows on "throttled". On "calls_used_up"
-// it shows STUDENT_SETS_LIMITED_MESSAGE.
+// What the student reading page shows on "throttled".
 export const STUDENT_GENERATION_THROTTLED_MESSAGE = "Let’s take a little break. Try again in a few minutes.";
+
+// What it shows on "calls_used_up", with a Try again button. The teacher
+// sees this student as "Needs a reset" on Class progress, with a "Let them
+// try again" button; after that, Try again works.
+export const STUDENT_GENERATION_USED_UP_MESSAGE =
+  "We couldn’t get your questions ready. Ask your teacher to let you try again.";
 
 // How long a "pending" caller should wait before asking again.
 export const PENDING_RETRY_AFTER_MS = 2_000;
@@ -152,13 +182,24 @@ export type StudentQuestionStore = {
   // Takes over a stale pending claim, under the throttle.
   takeOverStale(readingId: string, studentId: string, token: string, staleSeconds: number): Promise<TakeOverOutcome>;
   // Deletes the claim if this token still holds it and it is pending.
-  release(readingId: string, studentId: string, token: string): Promise<void>;
+  // With refundCall, also deletes the call row that claim recorded, so the
+  // failed call doesn't count toward the throttle.
+  release(readingId: string, studentId: string, token: string, refundCall: boolean): Promise<void>;
   // Marks the claim done and saves the set, in one transaction, only if
   // this token still holds it. False when the claim was lost.
   commit(readingId: string, studentId: string, token: string, prompts: string[]): Promise<boolean>;
 };
 
-export type StudentQuestionWriter = (context: StudentReadingContext) => Promise<string[]>;
+export type StudentQuestionWriterHooks = {
+  // Called each time the model replies (before the reply is checked), so a
+  // failure afterwards still counts toward the throttle.
+  onModelResponse: () => void;
+};
+
+export type StudentQuestionWriter = (
+  context: StudentReadingContext,
+  hooks: StudentQuestionWriterHooks,
+) => Promise<string[]>;
 
 export type StudentQuestionDeps = {
   store: StudentQuestionStore;
@@ -170,6 +211,15 @@ export type StudentQuestionDeps = {
   // Logs safe fields only (never the text, prompts, or names).
   onError?: (fields: Record<string, unknown>) => void;
 };
+
+// Whether a failed write counts toward the "Try again" throttle (see the
+// top of this file): only when the model replied at least once. Unusable
+// output is only ever thrown after a reply, so it counts even from a
+// writer that doesn't report replies.
+export function failureCounts(error: unknown, modelResponded: boolean): boolean {
+  if (modelResponded) return true;
+  return error instanceof QuestionWriterError && error.kind === "failed";
+}
 
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "23505";
@@ -216,12 +266,14 @@ export async function getOrCreateStudentQuestionsWith(
   }
 
   let prompts: string[];
+  let modelResponded = false;
   try {
-    prompts = await deps.write(context);
+    prompts = await deps.write(context, { onModelResponse: () => (modelResponded = true) });
   } catch (error) {
     const kind = questionErrorKind(error);
-    deps.onError?.(questionErrorLogFields(error));
-    await store.release(readingId, studentId, token);
+    const counted = failureCounts(error, modelResponded);
+    deps.onError?.({ ...questionErrorLogFields(error), counted });
+    await store.release(readingId, studentId, token, !counted);
     return { status: "error", kind, message: QUESTION_ERROR_MESSAGES[kind] };
   }
 
@@ -282,7 +334,9 @@ order by position`,
 //    (their student_question_calls rows for this reading, in the window
 //    and in all), counted in the same fresh snapshot, so exact too.
 // 3. Record the model call this claim is about to make, only if step 2
-//    inserted this token's claim.
+//    inserted this token's claim, stamped with the claim's claimed_at so
+//    an uncounted failure can find and delete exactly this row (see
+//    releaseStatement).
 // 4. Say why when nothing was inserted: whether this student already has
 //    a claim, whether the student and reading still qualify, how many
 //    claims the reading has, and the student's calls.
@@ -330,13 +384,10 @@ returning claim_token`,
       params: [readingId, studentId, token, limit, ...THROTTLE_PARAMS],
     },
     {
-      text: `insert into student_question_calls (reading_id, student_id)
-select $1::uuid, $2::uuid
-where exists (
-  select 1 from question_generations
-  where reading_id = $1::uuid and student_id = $2::uuid
-    and claim_token = $3::uuid and status = 'pending'
-)
+      text: `insert into student_question_calls (reading_id, student_id, created_at)
+select $1::uuid, $2::uuid, claimed_at from question_generations
+where reading_id = $1::uuid and student_id = $2::uuid
+  and claim_token = $3::uuid and status = 'pending'
 returning id`,
       params: [readingId, studentId, token],
     },
@@ -389,7 +440,8 @@ export function claimOutcome(results: Record<string, unknown>[][], limit: number
 //    exact against claims and other takeovers.
 // 2. One statement: swap in this token only if the claim is still pending
 //    and stale and the student is under the throttle, and record the call
-//    it is about to make. Two requests that both see a stale claim can't
+//    it is about to make (stamped with the new claimed_at, as in the
+//    claim). Two requests that both see a stale claim can't
 //    both take it: the second waits on the row lock, re-checks the WHERE
 //    against the new claimed_at, and matches nothing. The final select
 //    says why when nothing was taken (`stale` is read from the snapshot
@@ -417,11 +469,11 @@ taken as (
     and claimed_at < now() - make_interval(secs => $4::int)
     and (select recent_calls from calls) < $6::int
     and (select all_calls from calls) < $7::int
-  returning claim_token
+  returning claim_token, claimed_at
 ),
 logged as (
-  insert into student_question_calls (reading_id, student_id)
-  select $1::uuid, $2::uuid from taken
+  insert into student_question_calls (reading_id, student_id, created_at)
+  select $1::uuid, $2::uuid, claimed_at from taken
   returning id
 )
 select
@@ -448,12 +500,31 @@ export function takeOverOutcome(results: Record<string, unknown>[][]): TakeOverO
   return throttleFromRow(row) ?? "not_stale";
 }
 
-export function releaseStatement(readingId: string, studentId: string, token: string): Statement {
+// One statement: delete this token's pending claim and, with refundCall
+// ($4), the one call row it recorded (same reading and student, created_at
+// equal to the claim's claimed_at). Nothing happens if the token no longer
+// holds a pending claim, so a call whose claim was taken over stays
+// counted.
+export function releaseStatement(
+  readingId: string,
+  studentId: string,
+  token: string,
+  refundCall: boolean,
+): Statement {
   return {
-    text: `delete from question_generations
-where reading_id = $1::uuid and student_id = $2::uuid
-  and claim_token = $3::uuid and status = 'pending'`,
-    params: [readingId, studentId, token],
+    text: `with released as (
+  delete from question_generations
+  where reading_id = $1::uuid and student_id = $2::uuid
+    and claim_token = $3::uuid and status = 'pending'
+  returning claimed_at
+)
+delete from student_question_calls
+where $4::boolean and id = (
+  select c.id from student_question_calls c join released on c.created_at = released.claimed_at
+  where c.reading_id = $1::uuid and c.student_id = $2::uuid
+  limit 1
+)`,
+    params: [readingId, studentId, token, refundCall],
   };
 }
 

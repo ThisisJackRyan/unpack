@@ -21,7 +21,10 @@ import {
   type StudentQuestion,
   type StudentQuestionsResult,
   type StudentQuestionStore,
+  type StudentQuestionWriter,
+  failureCounts,
 } from "./student-questions-core";
+import { QuestionWriterError } from "./ai/questions";
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
 
 const READING = "r1";
@@ -84,10 +87,17 @@ function fakeStore(options: { published?: boolean; inClass?: boolean; count?: nu
       record(key(r, s));
       return "taken";
     },
-    async release(r, s, token) {
+    async release(r, s, token, refundCall) {
       await tick();
       const c = claims.get(key(r, s));
-      if (c?.token === token && c.status === "pending") claims.delete(key(r, s));
+      if (c?.token !== token || c.status !== "pending") return;
+      claims.delete(key(r, s));
+      if (refundCall) {
+        // The one row this claim recorded: stamped with its claimedAt.
+        const times = calls.get(key(r, s)) ?? [];
+        const i = times.lastIndexOf(c.claimedAt);
+        if (i >= 0) calls.set(key(r, s), [...times.slice(0, i), ...times.slice(i + 1)]);
+      }
     },
     async commit(r, s, token, prompts) {
       await tick();
@@ -113,16 +123,23 @@ function fakeStore(options: { published?: boolean; inClass?: boolean; count?: nu
   };
 }
 
-function fakeWriter(result: string[] | Error = ["A?", "B?", "C?"], delayMs = 5) {
+// `responded`: whether the model replied before an error (reported the
+// way the real writer does, through onModelResponse). A success always
+// replied.
+function fakeWriter(result: string[] | Error = ["A?", "B?", "C?"], delayMs = 5, responded = false) {
   let calls = 0;
-  const write = async () => {
+  const write: StudentQuestionWriter = async (_context, hooks) => {
     calls++;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (!(result instanceof Error) || responded) hooks.onModelResponse();
     if (result instanceof Error) throw result;
     return result;
   };
   return { write, calls: () => calls };
 }
+
+// A failure that counts: the model answered, but not usably.
+const unusable = () => new QuestionWriterError("failed", "invalid output: no submit_questions tool call");
 
 let tokens = 0;
 const newToken = () => `t${++tokens}`;
@@ -259,7 +276,7 @@ describe("getOrCreateStudentQuestionsWith", () => {
 });
 
 describe("the Try again throttle", () => {
-  const open = (store: StudentQuestionStore, write: () => Promise<string[]>, configured?: boolean) =>
+  const open = (store: StudentQuestionStore, write: StudentQuestionWriter, configured?: boolean) =>
     getOrCreateStudentQuestionsWith(READING, STUDENT, { store, write, newToken, configured });
 
   it("is 3 calls per student per reading per 10 minutes, 6 for all time, with kind copy", () => {
@@ -271,7 +288,7 @@ describe("the Try again throttle", () => {
 
   it("stops calling the model after the window limit, then allows more after the window", async () => {
     const { store, advance } = fakeStore();
-    const failing = fakeWriter(new Error("boom"), 1);
+    const failing = fakeWriter(unusable(), 1);
     for (let i = 0; i < STUDENT_GENERATION_WINDOW_LIMIT; i++) {
       assert.equal((await open(store, failing.write)).status, "error");
     }
@@ -285,7 +302,7 @@ describe("the Try again throttle", () => {
 
   it("makes exactly the window limit of calls for a burst of 20 Try agains", async () => {
     const { store, calls } = fakeStore();
-    const failing = fakeWriter(new Error("boom"), 3);
+    const failing = fakeWriter(unusable(), 3);
     // Each request retries while pending, like the page does, until it
     // gets an answer.
     const tryUntilAnswered = async () => {
@@ -304,7 +321,7 @@ describe("the Try again throttle", () => {
 
   it("stops for good at the lifetime cap, with no model call", async () => {
     const { store, advance } = fakeStore();
-    const failing = fakeWriter(new Error("boom"), 1);
+    const failing = fakeWriter(unusable(), 1);
     for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT; i++) {
       if (i > 0 && i % STUDENT_GENERATION_WINDOW_LIMIT === 0) advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
       assert.equal((await open(store, failing.write)).status, "error");
@@ -348,10 +365,95 @@ describe("the Try again throttle", () => {
   });
 });
 
+describe("which failures count toward the throttle", () => {
+  const open = (store: StudentQuestionStore, write: StudentQuestionWriter) =>
+    getOrCreateStudentQuestionsWith(READING, STUDENT, { store, write, newToken });
+  const h = new Headers();
+  // Each provider or setup failure where no reply came back.
+  const uncounted: [string, Error][] = [
+    ["missing API key", new QuestionWriterError("not_configured", "ANTHROPIC_API_KEY is not set")],
+    ["400 bad request", new Anthropic.BadRequestError(400, {}, "x", h)],
+    ["401 invalid key", new Anthropic.AuthenticationError(401, {}, "x", h)],
+    ["403 no permission", new Anthropic.PermissionDeniedError(403, {}, "x", h)],
+    ["404 unknown model", new Anthropic.NotFoundError(404, {}, "x", h)],
+    ["429 rate limited", new Anthropic.RateLimitError(429, {}, "x", h)],
+    ["529 overloaded", new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error" } }, "x", h)],
+    ["500 server error", new Anthropic.InternalServerError(500, {}, "x", h)],
+    ["503 unavailable", new Anthropic.InternalServerError(503, {}, "x", h)],
+    ["network error", new Anthropic.APIConnectionError({ message: "fetch failed" })],
+    ["SDK timeout", new Anthropic.APIConnectionTimeoutError()],
+    ["write deadline", Object.assign(new Error("deadline"), { name: "TimeoutError" })],
+  ];
+
+  for (const [name, error] of uncounted) {
+    it(`${name}: gives the try back, so the student can keep trying`, async () => {
+      const { store, calls, claims } = fakeStore();
+      const failing = fakeWriter(error, 1);
+      const logged: Record<string, unknown>[] = [];
+      // Far more than the lifetime cap, all in one window.
+      for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT + 2; i++) {
+        const result = await getOrCreateStudentQuestionsWith(READING, STUDENT, {
+          store,
+          write: failing.write,
+          newToken,
+          onError: (f) => logged.push(f),
+        });
+        assert.equal(result.status, "error", `${name} #${i}`);
+      }
+      assert.equal(failing.calls(), STUDENT_GENERATION_CALL_LIMIT + 2);
+      assert.equal(calls.get(`${READING}:${STUDENT}`)?.length ?? 0, 0);
+      assert.equal(claims.size, 0);
+      assert.equal(logged[0].counted, false);
+      const ok = fakeWriter();
+      assert.equal((await open(store, ok.write)).status, "ready");
+      assert.equal(calls.get(`${READING}:${STUDENT}`)?.length, 1);
+    });
+  }
+
+  it("unusable output counts, whether or not the writer reported the reply", async () => {
+    for (const responded of [true, false]) {
+      const { store, calls } = fakeStore();
+      assert.equal((await open(store, fakeWriter(unusable(), 1, responded).write)).status, "error");
+      assert.equal(calls.get(`${READING}:${STUDENT}`)?.length, 1);
+    }
+  });
+
+  it("a provider error after the model already replied once counts", async () => {
+    const { store, calls } = fakeStore();
+    const failing = fakeWriter(new Anthropic.InternalServerError(500, {}, "x", h), 1, true);
+    assert.equal((await open(store, failing.write)).status, "error");
+    assert.equal(calls.get(`${READING}:${STUDENT}`)?.length, 1);
+  });
+
+  it("a burst against a provider outage still makes one call at a time", async () => {
+    const { store, calls } = fakeStore();
+    let inFlight = 0;
+    let most = 0;
+    const write: StudentQuestionWriter = async () => {
+      inFlight++;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 3));
+      inFlight--;
+      throw new Anthropic.InternalServerError(503, {}, "x", h);
+    };
+    await Promise.all(Array.from({ length: 20 }, () => open(store, write)));
+    assert.equal(most, 1);
+    assert.equal(calls.get(`${READING}:${STUDENT}`)?.length ?? 0, 0);
+  });
+
+  it("failureCounts: only a reply, or unusable output", () => {
+    assert.equal(failureCounts(new Error("x"), true), true);
+    assert.equal(failureCounts(unusable(), false), true);
+    assert.equal(failureCounts(new Error("x"), false), false);
+    assert.equal(failureCounts(new QuestionWriterError("not_configured", "no key"), false), false);
+    assert.equal(failureCounts(new QuestionWriterError("timeout", "slow"), false), false);
+  });
+});
+
 describe("per-reading cap", () => {
   const LIMIT = STUDENT_SETS_PER_READING_LIMIT;
   const students = (n: number, from = 0) => Array.from({ length: n }, (_, i) => `s${from + i}`);
-  const open = (store: StudentQuestionStore, write: () => Promise<string[]>, s: string) =>
+  const open = (store: StudentQuestionStore, write: StudentQuestionWriter, s: string) =>
     getOrCreateStudentQuestionsWith(READING, s, { store, write, newToken });
 
   it("is 150 sets, with a plain message", () => {
@@ -470,7 +572,7 @@ describe("student question statements", () => {
       /from student_question_calls\s+where reading_id = \$1::uuid and student_id = \$2::uuid\s+and created_at > now\(\) - make_interval\(mins => \$5::int\)\) < \$6::int/,
     );
     assert.match(insert.text, /where reading_id = \$1::uuid and student_id = \$2::uuid\) < \$7::int/);
-    assert.match(record.text, /^insert into student_question_calls \(reading_id, student_id\)/);
+    assert.match(record.text, /^insert into student_question_calls \(reading_id, student_id, created_at\)\nselect \$1::uuid, \$2::uuid, claimed_at from question_generations/);
     assert.match(record.text, /claim_token = \$3::uuid and status = 'pending'/);
     assert.deepEqual(record.params, [READING, STUDENT, "t"]);
   });
@@ -504,7 +606,7 @@ describe("student question statements", () => {
     assert.match(s.text, /claimed_at < now\(\) - make_interval\(secs => \$4::int\)/);
     assert.match(s.text, /\(select recent_calls from calls\) < \$6::int/);
     assert.match(s.text, /\(select all_calls from calls\) < \$7::int/);
-    assert.match(s.text, /insert into student_question_calls \(reading_id, student_id\)\s+select \$1::uuid, \$2::uuid from taken/);
+    assert.match(s.text, /returning claim_token, claimed_at[\s\S]*insert into student_question_calls \(reading_id, student_id, created_at\)\s+select \$1::uuid, \$2::uuid, claimed_at from taken/);
     assert.deepEqual(s.params, [READING, STUDENT, "t", 150, 10, 3, 6]);
   });
 
@@ -517,8 +619,14 @@ describe("student question statements", () => {
     assert.equal(takeOverOutcome([[], []]), "not_stale");
   });
 
-  it("releases only its own pending claim", () => {
-    assert.match(releaseStatement(READING, STUDENT, "t").text, /claim_token = \$3::uuid and status = 'pending'/);
+  it("releases only its own pending claim, and refunds only that claim's call row when asked", () => {
+    const s = releaseStatement(READING, STUDENT, "t", true);
+    assert.match(s.text, /claim_token = \$3::uuid and status = 'pending'\s+returning claimed_at/);
+    assert.match(s.text, /where \$4::boolean and id = \(/);
+    assert.match(s.text, /c\.created_at = released\.claimed_at/);
+    assert.match(s.text, /limit 1\s*\)$/);
+    assert.deepEqual(s.params, [READING, STUDENT, "t", true]);
+    assert.deepEqual(releaseStatement(READING, STUDENT, "t", false).params, [READING, STUDENT, "t", false]);
   });
 
   it("commits the claim and the set together, on the token", () => {

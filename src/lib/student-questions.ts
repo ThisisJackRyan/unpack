@@ -67,8 +67,8 @@ export function postgresStudentQuestionStore(
     async takeOverStale(readingId, studentId, token, staleSeconds) {
       return takeOverOutcome(await execute(takeOverStatements(readingId, studentId, token, staleSeconds)));
     },
-    async release(readingId, studentId, token) {
-      await one(releaseStatement(readingId, studentId, token));
+    async release(readingId, studentId, token, refundCall) {
+      await one(releaseStatement(readingId, studentId, token, refundCall));
     },
     async commit(readingId, studentId, token, prompts) {
       const results = await execute(commitStatements(readingId, studentId, token, prompts));
@@ -78,12 +78,23 @@ export function postgresStudentQuestionStore(
 }
 
 // The real writer: the configured model, at the reading's grade and count.
-const modelWriter: StudentQuestionWriter = (context) =>
-  writeQuestionSet(getQuestionModel(), {
-    bodyText: context.bodyText,
-    gradeLevel: context.gradeLevel,
-    count: context.questionCount,
-  });
+// Reports each reply the model sends, so the throttle counts a write only
+// if the model answered (see failureCounts). getQuestionModel throws
+// before any call when the key is missing, so that never counts.
+const modelWriter: StudentQuestionWriter = (context, hooks) => {
+  const model = getQuestionModel();
+  return writeQuestionSet(
+    {
+      model: model.model,
+      create: async (params, options) => {
+        const reply = await model.create(params, options);
+        hooks.onModelResponse();
+        return reply;
+      },
+    },
+    { bodyText: context.bodyText, gradeLevel: context.gradeLevel, count: context.questionCount },
+  );
+};
 
 export type GetStudentQuestionsOptions = {
   // For scripts/check-student-questions.ts: a mock model, so the check
