@@ -5,12 +5,12 @@ import { AUTH_LOADING_COPY } from "./auth-loading-text";
 
 describe("sign-in and sign-up loading state", () => {
   it("has friendly copy with a real ellipsis, curly apostrophes and no em dash", () => {
-    assert.equal(AUTH_LOADING_COPY.signIn, "Getting sign-in ready…");
-    assert.equal(AUTH_LOADING_COPY.signUp, "Getting sign-up ready…");
+    assert.equal(AUTH_LOADING_COPY.signIn, "Getting sign-in ready\u2026");
+    assert.equal(AUTH_LOADING_COPY.signUp, "Getting sign-up ready\u2026");
     for (const text of Object.values(AUTH_LOADING_COPY)) {
       assert.ok(!text.includes("'"), text);
       assert.ok(!text.includes("..."), text);
-      assert.ok(!text.includes("—"), text);
+      assert.ok(!text.includes("\u2014"), text);
     }
   });
 

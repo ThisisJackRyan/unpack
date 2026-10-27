@@ -16,8 +16,8 @@ describe("max length note", () => {
   });
 
   it("is gentle copy with a curly apostrophe", () => {
-    assert.equal(MAX_LENGTH_MESSAGE, "That’s the max length");
+    assert.equal(MAX_LENGTH_MESSAGE, "That\u2019s the max length");
     assert.ok(!MAX_LENGTH_MESSAGE.includes("'"));
-    assert.ok(!MAX_LENGTH_MESSAGE.includes("—"));
+    assert.ok(!MAX_LENGTH_MESSAGE.includes("\u2014"));
   });
 });
