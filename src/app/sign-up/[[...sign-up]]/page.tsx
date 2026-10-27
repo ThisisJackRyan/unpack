@@ -1,5 +1,6 @@
 import { SignUp } from "@clerk/nextjs";
 import { AuthFrame } from "@/components/auth-frame";
+import { AuthLoading } from "@/components/auth-loading";
 import { AFTER_AUTH_PATH } from "@/lib/auth-routes";
 
 // Account sign-up (teachers and self-learners; the role is chosen next,
@@ -13,6 +14,7 @@ import { AFTER_AUTH_PATH } from "@/lib/auth-routes";
 export default function SignUpPage() {
   return (
     <AuthFrame>
+      <AuthLoading kind="signUp" />
       <SignUp fallbackRedirectUrl={AFTER_AUTH_PATH} />
     </AuthFrame>
   );
