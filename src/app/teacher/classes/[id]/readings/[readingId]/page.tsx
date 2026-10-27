@@ -4,6 +4,8 @@ import { questionRole } from "@/lib/ai/prompts";
 import { effectiveGradeLevel, gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel, questionModeLabel } from "@/lib/question-modes";
 import { listSharedQuestions } from "@/lib/shared-questions-db";
+import type { StudentSet } from "@/lib/student-sets";
+import { listStudentSets } from "@/lib/student-sets-db";
 import { sourceHost } from "@/lib/validate-reading";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { backLink, card, focusRing, secondaryButton } from "@/components/ui";
@@ -31,6 +33,9 @@ export default async function ReadingPage({ params }: Props) {
   const paragraphs = reading.bodyText.split(/\n{2,}/);
   const shared = reading.questionMode === "shared";
   const questions = shared ? await listSharedQuestions(reading.id) : [];
+  // Sets exist only once students open a published per-student reading.
+  const studentSets =
+    !shared && reading.status === "published" ? await listStudentSets(reading.id, found.id) : null;
   const gradeLabel = gradeLevelLabel(effectiveGradeLevel(reading.gradeLevel, found.gradeLevel));
 
   return (
@@ -127,6 +132,8 @@ export default async function ReadingPage({ params }: Props) {
         )}
       </section>
 
+      {studentSets && <StudentSets sets={studentSets} />}
+
       <section aria-labelledby="text-heading" className={`${card} px-6 py-8 sm:px-10 sm:py-10`}>
         <h2 id="text-heading" className="sr-only">
           Reading text
@@ -140,6 +147,56 @@ export default async function ReadingPage({ params }: Props) {
         </div>
       </section>
     </div>
+  );
+}
+
+// Each student's own set, collapsed so a class of 30 stays scannable.
+// Native <details>, so it works and is keyboard accessible without JS.
+function StudentSets({ sets }: { sets: StudentSet[] }) {
+  return (
+    <section aria-labelledby="student-sets-heading" className={`${card} flex flex-col gap-4 p-5 sm:p-6`}>
+      <div className="flex flex-col gap-1">
+        <h2 id="student-sets-heading" className="text-xl font-semibold text-zinc-950">
+          Student questions
+        </h2>
+        <p className="text-base text-zinc-600">
+          {sets.length === 1 ? "1 student has a set." : `${sets.length} students have a set.`}
+        </p>
+      </div>
+      {sets.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-8 text-center text-base text-zinc-600">
+          No student has opened this reading yet. Each student’s questions show up here after they open it.
+        </p>
+      ) : (
+        <ul className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200">
+          {sets.map((set) => (
+            <li key={set.studentId}>
+              <details className="group">
+                <summary
+                  className={`flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden ${focusRing}`}
+                >
+                  <span className="min-w-0 text-base font-semibold break-words text-zinc-950">{set.name}</span>
+                  <span className="flex shrink-0 items-center gap-3 text-base text-zinc-600">
+                    {questionCountLabel(set.questions.length)}
+                    <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+                      ›
+                    </span>
+                  </span>
+                </summary>
+                <ol className="flex flex-col gap-3 bg-zinc-50 px-4 py-4" aria-label={`${set.name}’s questions`}>
+                  {set.questions.map((q) => (
+                    <li key={q.id} className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4">
+                      <QuestionNumber n={q.position} />
+                      <QuestionText role={questionRole(q.position, set.questions.length)} prompt={q.prompt} />
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

@@ -279,6 +279,31 @@ export const questionGenerations = pgTable(
   ],
 );
 
+// One row per counted join attempt per key, for the join rate limits (see
+// src/lib/join-rate-limit.ts): an allowed attempt writes an "ip" row and a
+// "code" row. key_hash is a SHA-256 hex digest, so no raw IP address (or
+// typed code) is stored. Rows older than the limit window are pruned as new
+// attempts are recorded, so a hashed IP is kept for about 10 minutes.
+export const joinAttempts = pgTable(
+  "join_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    keyKind: text("key_kind").notNull(),
+    keyHash: text("key_hash").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("join_attempts_key_created_at_idx").on(
+      t.keyKind,
+      t.keyHash,
+      t.createdAt,
+    ),
+    // For the prune, which deletes expired rows of every key.
+    index("join_attempts_created_at_idx").on(t.createdAt),
+    check("join_attempts_key_kind_check", sql`${t.keyKind} in ('ip', 'code')`),
+  ],
+);
+
 // Inferred types
 
 export type Teacher = typeof teachers.$inferSelect;

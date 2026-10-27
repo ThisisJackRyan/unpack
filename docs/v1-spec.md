@@ -45,14 +45,20 @@ Student status for a reading is derived from attempts and challenges: Passed if 
 - An attempt passes only when **every** answer passes the effort check.
 - Try 4 is blocked; only the challenge option appears.
 - Shared mode: questions are cached per reading. Per-student mode: each student's set is generated once and cached, and it isn't regenerated on retries.
-- Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions. Once published, only the title can be edited; the text, grade, question count, mode, and questions stay locked.
+- Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions.
+- Once published, only the title can be edited; the text, grade, question count, mode, and questions stay locked. This applies to both modes.
 - Per-student mode: each reading allows at most 150 student question sets. Past that, a new student sees "Ask your teacher for help with this one." A student who already has a set keeps it.
 - Changing a class's grade clears the shared questions of its draft readings that use the class grade (no reading override). Published readings and drafts with an override are untouched.
 - Question generation is limited to 30 per teacher per 10 minutes (generate, regenerate, and previews). Students' own sets in per-student mode don't count toward it.
 - Free plan: creating a 2nd class is blocked.
 - Readings: the text must be 200 to 20,000 characters after cleanup (line endings, control characters, extra blank lines). A longer article is refused, never cut. Titles are up to 120 characters, links up to 2,048.
 - Link fetching: limited to 20 per teacher per 10 minutes (pasted text isn't limited). We only fetch http/https links to public hosts, with 8 seconds and 2 MB per fetch, and only HTML pages.
-- Joining a class is rate limited per IP and per code, with a bot check.
+- Joining: a student enters the class code, their first name (up to 30 letters; spaces, hyphens, and apostrophes are OK), and the first 1 or 2 letters of their last name. Nothing else is collected.
+- A name already taken in the class (ignoring case and extra spaces) is refused with "Someone already has that name. Add another letter." It is never resumed: progress does not carry over by name.
+- Joining needs the class code to be on. An unknown code and a code that's off get the same message. Students who already joined keep access when the code is turned off.
+- Joining is rate limited to 60 tries per IP and 100 per code, each per 10 minutes. Every try counts, including a wrong code or a taken name. A bot check is planned (a placeholder for now).
+- IP addresses are stored only as a SHA-256 hash, for the rate limit, and deleted after the 10-minute window.
+- A student's session is an httpOnly cookie that lasts 180 days. Only a hash of its token is stored. Joining a different class on the same device replaces the session.
 - Student data is visible only to the owning teacher, and we store only first names plus last initials.
 
 ## AI calls

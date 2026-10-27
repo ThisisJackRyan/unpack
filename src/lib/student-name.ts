@@ -16,3 +16,9 @@ export function normalizeNamePart(s: string): string {
 export function studentNameKey(firstName: string, lastInitials: string): string {
   return `${normalizeNamePart(firstName)} ${normalizeNamePart(lastInitials)}`;
 }
+
+// Limits for the join form, here (no imports) so the client form can use
+// them too. 30 fits real first names, including double ones. The spec
+// asks for the first 1 or 2 letters of the last name.
+export const FIRST_NAME_MAX_LENGTH = 30;
+export const LAST_INITIALS_MAX_LENGTH = 2;
