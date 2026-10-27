@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono, Nunito } from "next/font/google";
+import { ClerkAvatarAlt } from "@/components/clerk-avatar-alt";
 import { AFTER_AUTH_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 import { clerkAppearance } from "@/lib/clerk-appearance";
 import "./globals.css";
@@ -55,6 +56,8 @@ export default function RootLayout({
           signUpFallbackRedirectUrl={AFTER_AUTH_PATH}
         >
           {children}
+          {/* Clerk's avatar alt is "'s logo" for an account with no name. */}
+          <ClerkAvatarAlt />
         </ClerkProvider>
       </body>
     </html>
