@@ -27,10 +27,13 @@ export const readingStatusEnum = pgEnum("reading_status", [
 ]);
 export const gradeLevelEnum = pgEnum("grade_level", GRADE_LEVELS);
 export const attemptResultEnum = pgEnum("attempt_result", ["pass", "fail"]);
+// closed: the student passed on their own while the challenge was open
+// (auto-closed by the passing commit, see submit-answers-core.ts).
 export const challengeStatusEnum = pgEnum("challenge_status", [
   "open",
   "approved",
   "denied",
+  "closed",
 ]);
 
 const createdAt = () =>
@@ -160,7 +163,10 @@ export const attempts = pgTable(
       t.tryNumber,
     ),
     index("attempts_reading_id_idx").on(t.readingId),
-    check("attempts_try_number_check", sql`${t.tryNumber} between 1 and 3`),
+    // 3 tries, plus one per "one more try" a teacher grants (see
+    // challenges.tries_allowed), so no fixed top. The conditional insert
+    // in submit-answers-core.ts enforces the student's limit.
+    check("attempts_try_number_check", sql`${t.tryNumber} >= 1`),
   ],
 );
 
@@ -194,18 +200,45 @@ export const challenges = pgTable(
     readingId: uuid("reading_id")
       .notNull()
       .references(() => readings.id, { onDelete: "cascade" }),
+    // 1 for the first note. A student denied with one more try who fails
+    // it again can send a new note: a new row, round + 1. Earlier rounds
+    // are kept as they were decided.
+    round: integer("round").notNull().default(1),
     note: text("note").notNull(),
     status: challengeStatusEnum("status").notNull().default("open"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    // The teacher who accepted or denied it; null while open, and for an
+    // auto-close.
+    resolvedBy: uuid("resolved_by").references(() => teachers.id, {
+      onDelete: "set null",
+    }),
+    // Set only by Deny with "Give one more try": the student's limits from
+    // then on (tries used + 1, checks used + EXTRA_TRY_CHECKS). The latest
+    // round that has them wins; with none, MAX_TRIES and
+    // EFFORT_CHECK_LIMIT. Nothing is deleted: attempts, answers, and
+    // effort_checks rows stay, and only the limits move.
+    triesAllowed: integer("tries_allowed"),
+    checksAllowed: integer("checks_allowed"),
     // Not in the v1 spec; added so the challenge queue can be ordered.
     createdAt: createdAt(),
   },
   (t) => [
-    // One challenge per student per reading. The insert in
-    // src/lib/challenges-core.ts is conditional (3 failed tries, no pass);
-    // this is what makes 20 parallel sends save exactly one.
-    unique("challenges_student_id_reading_id_unique").on(t.studentId, t.readingId),
+    // One challenge per student, reading, and round. The insert in
+    // src/lib/challenges-core.ts runs under the student's advisory lock
+    // and is conditional (out of tries or checks, no pass, no open or
+    // final challenge); this is the backstop that makes 20 parallel sends
+    // save exactly one.
+    unique("challenges_student_reading_round_unique").on(
+      t.studentId,
+      t.readingId,
+      t.round,
+    ),
     index("challenges_reading_id_status_idx").on(t.readingId, t.status),
+    check("challenges_round_check", sql`${t.round} >= 1`),
+    check(
+      "challenges_grant_check",
+      sql`(${t.triesAllowed} is null) = (${t.checksAllowed} is null) and (${t.triesAllowed} is null or ${t.status} = 'denied')`,
+    ),
   ],
 );
 
