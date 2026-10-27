@@ -368,7 +368,16 @@ async function checkFailedGenerations() {
 
 async function checkSoloFlow() {
   console.log("\n== (e) SOLO FLOW ==");
-  const challengesBefore = await one<{ n: number }>(sql`select count(*)::int as n from challenges`);
+  // Scoped to this run's accounts: the test database is shared, so another
+  // run's challenges must not make this flaky.
+  const runChallenges = () =>
+    one<{ n: number }>(sql`
+      select count(*)::int as n from challenges ch
+      join students s on s.id = ch.student_id
+      join classes c on c.id = s.class_id
+      join teachers t on t.id = c.teacher_id
+      where t.clerk_user_id like ${`%\_${RUN_ID}`}`);
+  const challengesBefore = await runChallenges();
   const failing = await rawReading(bId, "Three tries");
   const questions = await readyQuestions(bId, failing);
   for (let i = 1; i <= 3; i++) {
@@ -383,9 +392,9 @@ async function checkSoloFlow() {
   check(stage.kind === "moved_on" && stage.attempt?.tryNumber === 3, `the page shows the last try's nudges: ${stage.kind}`);
   const fourth = await submitSelfAnswers(bId, failing, answersFor(questions), { check: checker(true) });
   check(fourth.status === "out_of_tries", `a 4th try is refused: ${fourth.status}`);
-  const challengesAfter = await one<{ n: number }>(sql`select count(*)::int as n from challenges`);
+  const challengesAfter = await runChallenges();
   const own = await one<{ n: number }>(sql`select count(*)::int as n from challenges where reading_id = ${failing}`);
-  check(challengesAfter.n === challengesBefore.n && own.n === 0, `zero challenge rows for it, none anywhere new (${challengesBefore.n} -> ${challengesAfter.n})`);
+  check(challengesAfter.n === challengesBefore.n && own.n === 0, `zero challenge rows for it, none new for this run's accounts (${challengesBefore.n} -> ${challengesAfter.n})`);
 
   const passing = await rawReading(bId, "Pass it");
   const passQuestions = await readyQuestions(bId, passing);
