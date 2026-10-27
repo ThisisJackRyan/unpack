@@ -122,15 +122,21 @@ export function readingCapFromRows(results: Record<string, unknown>[][]): Readin
 // - "near" / "full": not raised yet, at CAP_NEAR_THRESHOLD or more, or at
 //   the cap. A note and the "Raise the limit" button.
 // - "raised": the new limit, with how full it is. No button.
+// - "raised_near": raised, and within 15 of the new limit
+//   (capNearThreshold: 285 to 299 of 300). An amber almost-full note that
+//   it can't go higher. No button.
 // - "raised_full": raised, and full at the new limit. A note that it's
 //   full and can't go higher. No button.
 export type CapView =
   | { kind: "none" }
   | { kind: "near" | "full"; used: number; limit: number; raiseTo: number }
-  | { kind: "raised" | "raised_full"; used: number; limit: number };
+  | { kind: "raised" | "raised_near" | "raised_full"; used: number; limit: number };
 
 export function capView(cap: ReadingCap): CapView {
-  if (cap.raised) return { kind: cap.used >= cap.limit ? "raised_full" : "raised", used: cap.used, limit: cap.limit };
+  if (cap.raised) {
+    const kind = cap.used >= cap.limit ? "raised_full" : cap.used >= capNearThreshold(cap.limit) ? "raised_near" : "raised";
+    return { kind, used: cap.used, limit: cap.limit };
+  }
   if (cap.used >= cap.limit) return { kind: "full", used: cap.used, limit: cap.limit, raiseTo: STUDENT_SETS_RAISED_LIMIT };
   if (cap.used >= CAP_NEAR_THRESHOLD) return { kind: "near", used: cap.used, limit: cap.limit, raiseTo: STUDENT_SETS_RAISED_LIMIT };
   return { kind: "none" };
@@ -138,7 +144,9 @@ export function capView(cap: ReadingCap): CapView {
 
 export function capHeadline(view: Exclude<CapView, { kind: "none" }>): string {
   if (view.kind === "full" || view.kind === "raised_full") return `This reading is full (${view.limit} students)`;
-  if (view.kind === "near") return `This reading is almost full (${view.used} of ${view.limit} students)`;
+  if (view.kind === "near" || view.kind === "raised_near") {
+    return `This reading is almost full (${view.used} of ${view.limit} students)`;
+  }
   return `Limit raised to ${view.limit} students`;
 }
 
@@ -151,6 +159,8 @@ export function capDetail(view: Exclude<CapView, { kind: "none" }>): string {
       return `Once ${view.limit} students have their own questions, new students who open it see “${STUDENT_SETS_LIMITED_MESSAGE}”`;
     case "raised":
       return `${view.used} of ${view.limit} students have their own questions. The limit can only be raised once.`;
+    case "raised_near":
+      return `Once ${view.limit} students have their own questions, new students who open it see “${STUDENT_SETS_LIMITED_MESSAGE}” The limit was raised once already, so it can’t go higher.`;
     case "raised_full":
       return `New students who open it now see “${STUDENT_SETS_LIMITED_MESSAGE}” Students who already have their questions keep them. The limit was raised once already, so it can’t go higher.`;
   }

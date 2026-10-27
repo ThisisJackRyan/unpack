@@ -179,8 +179,9 @@ export default async function ReadingPage({ params }: Props) {
 // The student set cap: a calm note near or at it, with the one-time
 // raise, and the new limit after (full again at the new limit: no
 // button, it can't go higher). Amber while the raise is still there to
-// use; indigo after. Not red: nothing is lost. The headline is a live
-// region, so the change after a raise is announced.
+// use, and again when a raised reading is almost full (285 to 299 of
+// 300); indigo otherwise after the raise. Not red: nothing is lost. The
+// headline is a live region, so the change after a raise is announced.
 function CapPanel({
   view,
   raiseAction,
@@ -188,6 +189,7 @@ function CapPanel({
   view: Exclude<CapView, { kind: "none" }>;
   raiseAction: () => Promise<{ message?: string; error?: string }>;
 }) {
+  // raised_near stays amber: almost full again is a heads-up, like near.
   const raised = view.kind === "raised" || view.kind === "raised_full";
   return (
     <section

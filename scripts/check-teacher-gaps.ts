@@ -447,6 +447,14 @@ async function checkCap() {
     "...still one log row",
   );
 
+  // Almost full at the raised limit: 290 of 300 shows the amber note.
+  await openAll(readingId, students.slice(0, to - 10));
+  const capNear = await getReadingCap(classId, teacherId, readingId);
+  check(
+    capNear !== undefined && capNear.used === to - 10 && capView(capNear).kind === "raised_near",
+    `at ${to - 10} of ${to} the page shows the almost-full note, with no button: ${JSON.stringify(capNear)}`,
+  );
+
   // Every student at once: the 150 with a set, the ones turned away, and
   // enough new ones to pass 300.
   const next = await openAll(readingId, students);
