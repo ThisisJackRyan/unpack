@@ -1,11 +1,12 @@
 // Pure question-writing logic: request building, output validation, the
 // one validation retry, and error mapping. The model call is injected, so
-// tests run it against a fake with no network. The real client is in
-// client.ts (server-only).
+// tests run it against a fake with no network. The real call goes through
+// Vercel AI Gateway (gateway-adapter.ts, built in client.ts, server-only).
 
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { GradeLevel } from "../grade-levels";
+import { QuestionWriterError } from "./errors";
+import { isRefusal, wasCutOff, type ModelReply, type ModelRequest, type QuestionModel, type ToolSpec } from "./model";
 import {
   QUESTION_MAX_LENGTH,
   QUESTIONS_TOOL_NAME,
@@ -22,89 +23,16 @@ import {
   QUESTION_WRITE_DEADLINE_MS,
 } from "./settings";
 
-// The signal is the write's overall deadline. The SDK checks it before each
-// try and wakes from its backoff sleep when it fires.
-export type MessagesCreate = (
-  params: Anthropic.MessageCreateParamsNonStreaming,
-  options: { signal: AbortSignal },
-) => Promise<Anthropic.Message>;
-
-export type QuestionModel = { model: string; create: MessagesCreate };
-
-// What went wrong, in the terms the teacher's message needs.
-export type QuestionErrorKind =
-  | "not_configured"
-  | "busy"
-  | "timeout"
-  | "failed";
-
-export const QUESTION_ERROR_MESSAGES: Record<QuestionErrorKind, string> = {
-  not_configured: "Question writing isn’t set up yet.",
-  busy: "Question writing is busy right now. Try again in a minute.",
-  timeout: "That took too long. Try again.",
-  failed: "We couldn’t write questions this time. Try again.",
-};
-
-// Plain fields, not parameter properties: Node's type stripping (used by
-// the tests) doesn't support those.
-export class QuestionWriterError extends Error {
-  readonly kind: QuestionErrorKind;
-  readonly reason: string;
-  constructor(kind: QuestionErrorKind, reason: string) {
-    super(`question writer: ${kind} (${reason})`);
-    this.name = "QuestionWriterError";
-    this.kind = kind;
-    this.reason = reason;
-  }
-}
-
-// Maps anything thrown while writing questions to an error kind.
-// Most specific first: a timeout is a connection error, a 529 is an
-// InternalServerError, and the SDK's abort error is an APIError (the only
-// abort is the write deadline, so it's a timeout).
-export function questionErrorKind(error: unknown): QuestionErrorKind {
-  if (error instanceof QuestionWriterError) return error.kind;
-  if (
-    error instanceof Anthropic.APIConnectionTimeoutError ||
-    error instanceof Anthropic.APIUserAbortError
-  ) {
-    return "timeout";
-  }
-  // The deadline's own reason (TimeoutError), or a plain fetch abort.
-  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
-    return "timeout";
-  }
-  if (error instanceof Anthropic.APIConnectionError) return "failed";
-  if (
-    error instanceof Anthropic.AuthenticationError ||
-    error instanceof Anthropic.PermissionDeniedError ||
-    // A model name the API doesn't know: ANTHROPIC_MODEL is wrong.
-    error instanceof Anthropic.NotFoundError
-  ) {
-    return "not_configured";
-  }
-  if (error instanceof Anthropic.RateLimitError) return "busy";
-  if (error instanceof Anthropic.APIError) {
-    if (error.status === 529 || error.type === "overloaded_error") return "busy";
-    return "failed";
-  }
-  return "failed";
-}
-
-// Fields that are safe to log: no reading text, prompts, keys, or names.
-export function questionErrorLogFields(error: unknown): Record<string, unknown> {
-  const fields: Record<string, unknown> = {
-    kind: questionErrorKind(error),
-    name: error instanceof Error ? error.name : typeof error,
-  };
-  if (error instanceof QuestionWriterError) fields.reason = error.reason;
-  if (error instanceof Anthropic.APIError) {
-    fields.status = error.status;
-    fields.type = error.type;
-    fields.requestId = error.requestID;
-  }
-  return fields;
-}
+// The error kinds, messages, and mapping live in errors.ts; the seam types
+// in model.ts. Re-exported here, where the callers already import them.
+export {
+  QUESTION_ERROR_MESSAGES,
+  QuestionWriterError,
+  questionErrorKind,
+  questionErrorLogFields,
+  type QuestionErrorKind,
+} from "./errors";
+export type { ModelCall, ModelReply, ModelRequest, QuestionModel } from "./model";
 
 // Collapses case and spacing so "Why did Mia leave?" and "why did mia
 // leave ?" count as the same question.
@@ -145,12 +73,12 @@ export function questionsOutputSchema(count: number, avoid: string[] = []) {
 }
 
 // JSON Schema for the tool. Strict tool use keeps the input to this shape.
-export const QUESTIONS_TOOL: Anthropic.Tool = {
+export const QUESTIONS_TOOL: ToolSpec = {
   name: QUESTIONS_TOOL_NAME,
   description:
     "Submit the finished questions, in order. Call this exactly once with every question.",
   strict: true,
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       questions: {
@@ -168,28 +96,23 @@ export type ParsedQuestions =
   | { ok: true; questions: string[] }
   | { ok: false; problem: string };
 
-// Pulls the questions out of a response. The tool call is found by type and
-// name, not by position: with thinking on, content can start with thinking
-// blocks, and the model may write a sentence before calling the tool.
+// Pulls the questions out of a reply. The tool call is found by name, not
+// by position: the model may write a sentence before calling the tool.
 export function parseQuestionsResponse(
-  response: Pick<Anthropic.Message, "content" | "stop_reason">,
+  reply: ModelReply,
   count: number,
   avoid: string[] = [],
 ): ParsedQuestions {
-  if (response.stop_reason === "refusal") {
+  if (isRefusal(reply)) {
     return { ok: false, problem: "the model declined" };
   }
-  const call = response.content.find(
-    (block): block is Anthropic.ToolUseBlock =>
-      block.type === "tool_use" && block.name === QUESTIONS_TOOL_NAME,
-  );
+  const call = reply.toolCalls.find((c) => c.toolName === QUESTIONS_TOOL_NAME);
   if (!call) {
     return {
       ok: false,
-      problem:
-        response.stop_reason === "max_tokens"
-          ? "the answer was cut off before the tool call"
-          : `no ${QUESTIONS_TOOL_NAME} tool call`,
+      problem: wasCutOff(reply)
+        ? "the answer was cut off before the tool call"
+        : `no ${QUESTIONS_TOOL_NAME} tool call`,
     };
   }
   const parsed = questionsOutputSchema(count, avoid).safeParse(call.input);
@@ -204,25 +127,25 @@ export function parseQuestionsResponse(
 // thinking setting (the default is adaptive thinking; turning it off is a
 // 400 on some current models).
 //
-// tool_choice is "auto", not forced. Forcing a tool ({type: "tool"} or
-// "any") returns a 400 on current models such as claude-sonnet-5-5 and
+// Tool choice is "auto", not forced (the adapter sends toolChoice "auto"
+// with parallel tool use off). Forcing a tool ({type: "tool"} or "any")
+// returns a 400 on current models such as claude-sonnet-5-5 and
 // claude-opus-5-5, and conflicts with thinking on others. So the system
 // prompt tells the model to answer only through the tool, strict: true
-// keeps the call's input to the schema, and a response without the call is
+// keeps the call's input to the schema, and a reply without the call is
 // treated as invalid output and retried once.
 export function buildQuestionRequest(
   model: string,
   userPrompt: string,
   audience: PromptAudience = "class",
-): Anthropic.MessageCreateParamsNonStreaming {
+): ModelRequest {
   return {
     model,
-    max_tokens: QUESTION_MAX_TOKENS,
     system: questionsSystemPrompt(audience),
-    tools: [QUESTIONS_TOOL],
-    tool_choice: { type: "auto", disable_parallel_tool_use: true },
-    output_config: { effort: QUESTION_EFFORT },
     messages: [{ role: "user", content: userPrompt }],
+    tool: QUESTIONS_TOOL,
+    maxOutputTokens: QUESTION_MAX_TOKENS,
+    effort: QUESTION_EFFORT,
   };
 }
 
@@ -247,7 +170,7 @@ export function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<
 
 // Calls the model, and once more if the output is invalid. Each try is a
 // fresh request with a note on what was wrong: we never echo the rejected
-// answer back, so no thinking blocks are replayed. API errors are not
+// answer back, so no thinking blocks are replayed. Gateway errors are not
 // caught here (the SDK has already retried them); they reach the caller.
 //
 // One deadline covers everything (see QUESTION_WRITE_DEADLINE_MS). When it

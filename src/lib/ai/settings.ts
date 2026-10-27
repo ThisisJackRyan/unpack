@@ -2,13 +2,17 @@
 // that has to reason about how long a call can take (the stale claim
 // timeout in student-questions-core.ts). No imports, so tests can use it.
 
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
+// The model on Vercel AI Gateway (creator/model, the gateway's naming).
+// AI_MODEL overrides it (see config.ts).
+export const DEFAULT_AI_MODEL = "anthropic/claude-sonnet-5.5";
 
-// Per request. A question set is short, so a call that runs past this is
+// Per HTTP request to the gateway (each SDK try gets its own; see
+// gateway-adapter.ts). A question set is short, so a call that runs past this is
 // stuck, and a teacher shouldn't stare at a spinner for longer.
 export const AI_TIMEOUT_MS = 30_000;
 
-// SDK retries on connection errors, timeouts, 408/409/429/5xx. One retry
+// AI SDK retries (maxRetries) on network errors, a per-request timeout,
+// and 408/409/429/5xx from the gateway. One retry
 // smooths over a blip; more would keep a teacher waiting on an outage.
 export const AI_MAX_RETRIES = 1;
 
