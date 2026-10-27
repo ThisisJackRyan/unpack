@@ -16,8 +16,8 @@ export default async function JoinPage() {
   const session = await getStudentSession();
 
   return (
-    <StudentShell>
-      <div className="mx-auto flex max-w-md flex-col gap-10">
+    <StudentShell narrow>
+      <div className="flex flex-col gap-10">
         {session && (
           <section
             aria-labelledby="current-class-heading"
