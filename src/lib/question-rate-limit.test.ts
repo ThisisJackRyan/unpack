@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Statement } from "./link-rate-limit";
+import { LINK_FETCH_LIMITED_MESSAGE, type Statement } from "./link-rate-limit";
 import {
   checkQuestionGenerationLimit,
   QUESTION_GENERATION_LIMIT,
+  QUESTION_GENERATION_LIMITED_MESSAGE,
   QUESTION_GENERATION_PRUNE_HOURS,
   QUESTION_GENERATION_WINDOW_MINUTES,
   questionGenerationStatements,
@@ -25,6 +26,14 @@ describe("question generation limit settings", () => {
     assert.equal(QUESTION_GENERATION_LIMIT, 30);
     assert.equal(QUESTION_GENERATION_WINDOW_MINUTES, 10);
     assert.equal(QUESTION_GENERATION_PRUNE_HOURS, 24);
+  });
+
+  it("has its own message, not the link fetch one", () => {
+    assert.equal(
+      QUESTION_GENERATION_LIMITED_MESSAGE,
+      "You’ve made a lot of questions. Try again in a few minutes.",
+    );
+    assert.notEqual(QUESTION_GENERATION_LIMITED_MESSAGE, LINK_FETCH_LIMITED_MESSAGE);
   });
 });
 

@@ -10,8 +10,8 @@ import {
   writeReplacementQuestion,
 } from "@/lib/ai/questions";
 import { effectiveGradeLevel } from "@/lib/grade-levels";
-import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
 import { recordQuestionGeneration } from "@/lib/question-generation-attempts";
+import { QUESTION_GENERATION_LIMITED_MESSAGE } from "@/lib/question-rate-limit";
 import { getReadingForTeacher } from "@/lib/readings";
 import {
   checkPublish,
@@ -139,7 +139,7 @@ export async function questionAction(
       logDbError("questionAction: recordQuestionGeneration failed", error, readingId);
       return fail(QUESTION_ERROR_MESSAGES.failed);
     }
-    if (!allowed) return fail(LINK_FETCH_LIMITED_MESSAGE);
+    if (!allowed) return fail(QUESTION_GENERATION_LIMITED_MESSAGE);
 
     const gradeLevel = effectiveGradeLevel(reading.gradeLevel, found.class.gradeLevel);
     const input = {

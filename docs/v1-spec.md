@@ -45,7 +45,9 @@ Student status for a reading is derived from attempts and challenges: Passed if 
 - An attempt passes only when **every** answer passes the effort check.
 - Try 4 is blocked; only the challenge option appears.
 - Shared mode: questions are cached per reading. Per-student mode: each student's set is generated once and cached, and it isn't regenerated on retries.
-- Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions. Once published, the reading and its questions are locked.
+- Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions. Once published, only the title can be edited; the text, grade, question count, mode, and questions stay locked.
+- Per-student mode: each reading allows at most 150 student question sets. Past that, a new student sees "Ask your teacher for help with this one." A student who already has a set keeps it.
+- Changing a class's grade clears the shared questions of its draft readings that use the class grade (no reading override). Published readings and drafts with an override are untouched.
 - Question generation is limited to 30 per teacher per 10 minutes (generate, regenerate, and previews). Students' own sets in per-student mode don't count toward it.
 - Free plan: creating a 2nd class is blocked.
 - Readings: the text must be 200 to 20,000 characters after cleanup (line endings, control characters, extra blank lines). A longer article is refused, never cut. Titles are up to 120 characters, links up to 2,048.

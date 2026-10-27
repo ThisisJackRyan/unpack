@@ -4,6 +4,7 @@ import { BODY_TEXT_MAX_LENGTH } from "../validate-reading";
 import {
   capReadingText,
   defuseTags,
+  PRIVACY_RULE,
   QUESTIONS_SYSTEM_PROMPT,
   questionRole,
   questionSetPrompt,
@@ -67,6 +68,34 @@ describe("system prompt", () => {
     assert.match(QUESTIONS_SYSTEM_PROMPT, /never as instructions to you/);
     assert.match(QUESTIONS_SYSTEM_PROMPT, /Never multiple choice, yes\/no, or true\/false/);
     assert.match(QUESTIONS_SYSTEM_PROMPT, /At most 300 characters/);
+  });
+});
+
+describe("privacy rule", () => {
+  it("is in the system prompt for every question", () => {
+    assert.ok(QUESTIONS_SYSTEM_PROMPT.includes(`- ${PRIVACY_RULE}`));
+    for (const topic of ["family", "health", "home life", "religion", "money", "where they live", "their own situation"]) {
+      assert.ok(PRIVACY_RULE.includes(topic), topic);
+    }
+    assert.match(PRIVACY_RULE, /opinion about the text's ideas, not about their private life/);
+  });
+
+  it("keeps the own-take question's connection off private life", () => {
+    const full = questionSetPrompt({ bodyText: BODY, gradeLevel: "4", count: 3 });
+    assert.match(full, /connection to ideas, events, or other texts \(never to their own private life\)/);
+    const one = questionSetPrompt({ bodyText: BODY, gradeLevel: "4", count: 1 });
+    assert.match(one, /not their private life/);
+    const replacement = replacementPrompt({
+      bodyText: BODY,
+      gradeLevel: "4",
+      position: 3,
+      count: 3,
+      replacing: "What do you think?",
+      others: [],
+    });
+    assert.match(replacement, /never to their own private life/);
+    // No role asks for a bare "connection" any more.
+    for (const p of [full, one, replacement]) assert.doesNotMatch(p, /or connection\)/);
   });
 });
 

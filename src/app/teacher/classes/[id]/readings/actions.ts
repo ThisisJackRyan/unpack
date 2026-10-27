@@ -6,7 +6,13 @@ import { fetchArticle } from "@/lib/fetch-article";
 import { FetchArticleError, type FetchArticleErrorKind } from "@/lib/fetch-errors";
 import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
 import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
-import { insertReading, updateDraftReading, type ReadingDraft } from "@/lib/readings";
+import {
+  getReadingForTeacher,
+  insertReading,
+  saveReadingEdit,
+  type ReadingDraft,
+} from "@/lib/readings";
+import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import {
   BODY_TEXT_MAX_LENGTH,
@@ -163,31 +169,67 @@ export async function updateReading(
   _prev: ReadingFormState,
   formData: FormData,
 ): Promise<ReadingFormState> {
+  const teacher = await getOrCreateTeacher();
+  let found: Awaited<ReturnType<typeof getReadingForTeacher>>;
+  try {
+    found = await getReadingForTeacher(classId, readingId, teacher.id);
+  } catch (error) {
+    logDbError("updateReading: getReadingForTeacher failed", error);
+    return { errors: { form: "We couldn’t save your changes. Please try again." } };
+  }
+  if (!found) return { errors: { form: "We couldn’t find this reading." } };
+  const { reading } = found;
+
+  // A published reading's form sends only the title. Any field it leaves
+  // out keeps its saved value; any field it does send must still match, or
+  // the save is refused (see editReadingStatements).
+  const published = reading.status === "published";
+  const sent = (name: string, saved: string) =>
+    published && !formData.has(name) ? saved : formData.get(name);
+
   // The edit form always edits the text directly.
-  const result = readForm(formData, "text");
+  const result = validateReadingForm({
+    source: "text",
+    url: null,
+    title: formData.get("title"),
+    bodyText: sent("bodyText", reading.bodyText),
+    gradeLevel: sent("gradeLevel", reading.gradeLevel ?? ""),
+    questionCount: sent("questionCount", String(reading.questionCount)),
+    questionMode: sent("questionMode", reading.questionMode),
+  });
   if (!result.ok) {
     return { errors: result.errors, values: result.values };
   }
   const { data, values } = result;
   if (data.source !== "text") throw new Error("unreachable");
 
-  const teacher = await getOrCreateTeacher();
   try {
-    const updated = await updateDraftReading(classId, readingId, teacher.id, {
+    const saved = await saveReadingEdit(classId, readingId, teacher.id, {
       title: data.title,
-      bodyText: data.bodyText,
+      // The saved text as is, not re-normalized, when the form didn't send it.
+      bodyText: published && !formData.has("bodyText") ? reading.bodyText : data.bodyText,
       gradeLevel: data.gradeLevel,
       questionCount: data.questionCount,
       questionMode: data.questionMode,
     });
-    if (!updated) {
+    if (!saved) {
+      // Published (perhaps since the page loaded) and more than the title
+      // changed, or the reading is gone.
+      const again = await getReadingForTeacher(classId, readingId, teacher.id);
       return {
-        errors: { form: "Only drafts can be edited." },
+        errors: {
+          // Only blame publishing when the reading really is published now.
+          form: !again
+            ? "We couldn’t find this reading."
+            : again.reading.status === "published"
+              ? PUBLISHED_TITLE_ONLY_MESSAGE
+              : "We couldn’t save your changes. Please try again.",
+        },
         values,
       };
     }
   } catch (error) {
-    logDbError("updateReading: updateDraftReading failed", error);
+    logDbError("updateReading: saveReadingEdit failed", error);
     return {
       errors: { form: "We couldn’t save your changes. Please try again." },
       values,

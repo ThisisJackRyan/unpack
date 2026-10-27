@@ -3,25 +3,31 @@ import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   CLAIM_STALE_SECONDS,
-  claimStatement,
+  claimOutcome,
+  claimStatements,
   commitStatements,
   getOrCreateStudentQuestionsWith,
   releaseStatement,
+  STUDENT_SETS_LIMITED_MESSAGE,
+  STUDENT_SETS_PER_READING_LIMIT,
   studentContextStatement,
+  studentFacingResult,
   takeOverStatement,
   type StudentQuestion,
+  type StudentQuestionsResult,
   type StudentQuestionStore,
 } from "./student-questions-core";
-import { QUESTION_WRITE_MAX_MS } from "./ai/settings";
+import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
 
 const READING = "r1";
 const STUDENT = "s1";
 const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
 
 // In-memory store with the same rules as the Postgres one: claim is an
-// atomic insert-if-absent, commit is all-or-nothing on the token. Every call
-// yields first, so concurrent callers interleave.
-function fakeStore(options: { published?: boolean; count?: number } = {}) {
+// atomic insert-if-absent under the per-reading cap (the reading lock makes
+// the count and insert one step), commit is all-or-nothing on the token.
+// Every call yields first, so concurrent callers interleave.
+function fakeStore(options: { published?: boolean; inClass?: boolean; count?: number } = {}) {
   const claims = new Map<string, { token: string; status: "pending" | "done"; claimedAt: number }>();
   const questions = new Map<string, StudentQuestion[]>();
   let now = 0;
@@ -30,18 +36,24 @@ function fakeStore(options: { published?: boolean; count?: number } = {}) {
   const store: StudentQuestionStore = {
     async loadContext() {
       await tick();
-      if (options.published === false) return undefined;
-      return { bodyText: "text", gradeLevel: "4", questionCount: options.count ?? 3 };
+      if (options.published === false) return { status: "not_found" };
+      if (options.inClass === false) return { status: "not_allowed" };
+      return {
+        status: "ok",
+        context: { bodyText: "text", gradeLevel: "4", questionCount: options.count ?? 3 },
+      };
     },
     async readQuestions(r, s) {
       await tick();
       return questions.get(key(r, s)) ?? [];
     },
-    async claim(r, s, token) {
+    async claim(r, s, token, limit) {
       await tick();
-      if (claims.has(key(r, s))) return false;
+      if (claims.has(key(r, s))) return "exists";
+      const held = [...claims.keys()].filter((k) => k.startsWith(`${r}:`)).length;
+      if (held >= limit) return "limit_reached";
       claims.set(key(r, s), { token, status: "pending", claimedAt: now });
-      return true;
+      return "claimed";
     },
     async takeOverStale(r, s, token, staleSeconds) {
       await tick();
@@ -146,6 +158,17 @@ describe("getOrCreateStudentQuestionsWith", () => {
     assert.equal(writer.calls(), 0);
   });
 
+  it("returns not_allowed for a student outside the class, without claiming", async () => {
+    const { store, claims } = fakeStore({ inClass: false });
+    const writer = fakeWriter();
+    assert.deepEqual(
+      await getOrCreateStudentQuestionsWith(READING, STUDENT, { store, write: writer.write, newToken }),
+      { status: "not_allowed" },
+    );
+    assert.equal(writer.calls(), 0);
+    assert.equal(claims.size, 0);
+  });
+
   it("releases the claim on a model failure, so the next open tries again", async () => {
     const { store, claims } = fakeStore();
     const logged: Record<string, unknown>[] = [];
@@ -200,21 +223,130 @@ describe("getOrCreateStudentQuestionsWith", () => {
   });
 });
 
+describe("per-reading cap", () => {
+  const LIMIT = STUDENT_SETS_PER_READING_LIMIT;
+  const students = (n: number, from = 0) => Array.from({ length: n }, (_, i) => `s${from + i}`);
+  const open = (store: StudentQuestionStore, write: () => Promise<string[]>, s: string) =>
+    getOrCreateStudentQuestionsWith(READING, s, { store, write, newToken });
+
+  it("is 150 sets, with a plain message", () => {
+    assert.equal(LIMIT, 150);
+    assert.equal(STUDENT_SETS_LIMITED_MESSAGE, "Ask your teacher for help with this one.");
+  });
+
+  it("allows sets under the cap and refuses new students at it", async () => {
+    const { store, questions } = fakeStore();
+    const writer = fakeWriter(["A?", "B?", "C?"], 1);
+    const results = await Promise.all(students(LIMIT + 50).map((s) => open(store, writer.write, s)));
+    assert.equal(results.filter((r) => r.status === "ready").length, LIMIT);
+    assert.equal(results.filter((r) => r.status === "limit_reached").length, 50);
+    assert.equal(writer.calls(), LIMIT);
+    assert.equal(questions.size, LIMIT);
+  });
+
+  it("still serves a student who already has a set at the cap", async () => {
+    const { store } = fakeStore();
+    const writer = fakeWriter(["A?", "B?", "C?"], 1);
+    await Promise.all(students(LIMIT).map((s) => open(store, writer.write, s)));
+    const again = await open(store, writer.write, "s0");
+    assert.equal(again.status, "ready");
+    assert.equal(writer.calls(), LIMIT);
+  });
+
+  it("lets a stale claim be taken over at the cap", async () => {
+    const { store, claims, advance } = fakeStore();
+    for (const s of students(LIMIT)) {
+      claims.set(`${READING}:${s}`, { token: "dead", status: "pending", claimedAt: 0 });
+    }
+    advance(CLAIM_STALE_SECONDS + 1);
+    const writer = fakeWriter();
+    assert.equal((await open(store, writer.write, "s7")).status, "ready");
+    assert.equal((await open(store, writer.write, "new")).status, "limit_reached");
+    assert.equal(writer.calls(), 1);
+  });
+
+  it("frees the slot when a model failure releases the claim", async () => {
+    const { store, claims } = fakeStore();
+    for (const s of students(LIMIT - 1)) {
+      claims.set(`${READING}:${s}`, { token: "x", status: "done", claimedAt: 0 });
+    }
+    const failing = fakeWriter(new Error("boom"));
+    assert.equal((await open(store, failing.write, "last")).status, "error");
+    assert.equal(claims.size, LIMIT - 1);
+    const ok = fakeWriter();
+    assert.equal((await open(store, ok.write, "other")).status, "ready");
+    assert.equal((await open(store, ok.write, "last")).status, "limit_reached");
+  });
+
+  it("counts per reading", async () => {
+    const { store, claims } = fakeStore();
+    for (const s of students(LIMIT)) {
+      claims.set(`other:${s}`, { token: "x", status: "done", claimedAt: 0 });
+    }
+    const writer = fakeWriter();
+    assert.equal((await open(store, writer.write, "s0")).status, "ready");
+  });
+});
+
+describe("studentFacingResult", () => {
+  it("shows not_allowed exactly like not_found", () => {
+    assert.deepEqual(studentFacingResult({ status: "not_allowed" }), { status: "not_found" });
+    assert.deepEqual(studentFacingResult({ status: "not_found" }), { status: "not_found" });
+  });
+
+  it("passes every other result through unchanged", () => {
+    const results: StudentQuestionsResult[] = [
+      { status: "ready", questions: [{ id: "q1", position: 1, prompt: "Why?" }] },
+      { status: "pending", retryAfterMs: 2_000 },
+      { status: "limit_reached" },
+      { status: "error", kind: "timeout", message: "m" },
+    ];
+    for (const r of results) assert.equal(studentFacingResult(r), r);
+  });
+});
+
 describe("stale claim timeout", () => {
-  it("outlasts the longest a live writer can take", () => {
-    assert.ok(CLAIM_STALE_SECONDS * 1000 > QUESTION_WRITE_MAX_MS);
+  it("outlasts the write deadline, with margin", () => {
+    assert.equal(QUESTION_WRITE_DEADLINE_MS, 110_000);
+    assert.ok(CLAIM_STALE_SECONDS * 1000 >= QUESTION_WRITE_DEADLINE_MS + 30_000);
   });
 });
 
 describe("student question statements", () => {
-  it("only finds published per-student readings in the student's class", () => {
+  it("only finds published per-student readings, and says if the student is in the class", () => {
     const s = studentContextStatement(READING, STUDENT);
-    assert.match(s.text, /join students s on s\.class_id = r\.class_id/);
+    assert.match(s.text, /s\.id = \$2::uuid and s\.class_id = r\.class_id\s+\) as in_class/);
     assert.match(s.text, /r\.status = 'published' and r\.question_mode = 'per_student'/);
   });
 
-  it("claims with insert-if-absent", () => {
-    assert.match(claimStatement(READING, STUDENT, "t").text, /on conflict do nothing\s+returning claim_token$/);
+  it("claims under the reading lock, in class, under the cap, insert-if-absent", () => {
+    const [lock, insert, why] = claimStatements(READING, STUDENT, "t", 150);
+    assert.equal(lock.text, "select id from readings where id = $1::uuid for no key update");
+    assert.match(insert.text, /join students s on s\.class_id = r\.class_id/);
+    assert.match(insert.text, /r\.status = 'published' and r\.question_mode = 'per_student'/);
+    assert.match(
+      insert.text,
+      /\(select count\(\*\) from question_generations where reading_id = \$1::uuid\) < \$4::int/,
+    );
+    assert.match(insert.text, /on conflict do nothing\s+returning claim_token$/);
+    assert.deepEqual(insert.params, [READING, STUDENT, "t", 150]);
+    assert.match(why.text, /as has_claim/);
+    assert.match(why.text, /r\.status = 'published' and r\.question_mode = 'per_student'\s+\) as eligible/);
+    assert.match(why.text, /as claims/);
+  });
+
+  it("reads the claim outcome", () => {
+    const claimed = [[{ id: READING }], [{ claim_token: "t" }], [{ has_claim: true, claims: 150 }]];
+    assert.equal(claimOutcome(claimed, 150), "claimed");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: true, eligible: false, claims: 150 }]], 150), "exists");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, eligible: true, claims: 150 }]], 150), "limit_reached");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, eligible: true, claims: 149 }]], 150), "refused");
+    assert.equal(claimOutcome([[], [], [{ has_claim: false, eligible: false, claims: 0 }]], 150), "refused");
+  });
+
+  it("refuses a student who doesn't qualify even at the cap", () => {
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, eligible: false, claims: 150 }]], 150), "refused");
+    assert.equal(claimOutcome([[{}], [], [{ has_claim: false, claims: 150 }]], 150), "refused");
   });
 
   it("takes over only pending claims older than the timeout", () => {

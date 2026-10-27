@@ -59,8 +59,9 @@ type Props = {
     state: ReadingFormState,
     formData: FormData,
   ) => Promise<ReadingFormState>;
-  // "create" offers link or text; "edit" edits the saved text directly.
-  mode: "create" | "edit";
+  // "create" offers link or text; "edit" edits the saved text directly;
+  // "title" (a published reading) shows only the title.
+  mode: "create" | "edit" | "title";
   classGradeLabel: string;
   cancelHref: string;
   initialValues?: ReadingFormValues;
@@ -86,6 +87,7 @@ export function ReadingForm({
   const values = state.values ?? initialValues;
   const errors = state.errors ?? {};
   const create = mode === "create";
+  const titleOnly = mode === "title";
 
   // The panels switch with CSS alone; this mirrors the checked source radio
   // for the pending label and the length check.
@@ -230,132 +232,136 @@ export function ReadingForm({
           </p>
         </div>
 
-        <div className={textPanel}>
-          <label htmlFor="bodyText" className={label}>
-            {create ? "Reading text" : "Text"}
-          </label>
-          <textarea
-            ref={textareaRef}
-            id="bodyText"
-            name="bodyText"
-            rows={14}
-            defaultValue={values.bodyText}
-            onChange={(e) =>
-              setBodyLength(normalizeBodyText(e.currentTarget.value).length)
-            }
-            aria-invalid={bodyError ? true : undefined}
-            aria-describedby={describedBy(
-              "body-hint",
-              "body-count",
-              bodyError && "body-error",
-            )}
-            className={`${field} min-h-72 py-3 text-base leading-relaxed`}
-          />
-          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-            <p id="body-hint" className={hint}>
-              {sourceHost && <>Saved from {sourceHost}. </>}
-              At least {BODY_TEXT_MIN_LENGTH} characters, up to{" "}
-              {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}.
-            </p>
-            <p
-              id="body-count"
-              aria-live="polite"
-              className={`text-sm tabular-nums ${overLimit ? "font-semibold text-red-700" : "text-zinc-500"}`}
-            >
-              {bodyLength.toLocaleString("en-US")} /{" "}
-              {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
-              <span className="sr-only"> characters</span>
+        {!titleOnly && (
+          <div className={textPanel}>
+            <label htmlFor="bodyText" className={label}>
+              {create ? "Reading text" : "Text"}
+            </label>
+            <textarea
+              ref={textareaRef}
+              id="bodyText"
+              name="bodyText"
+              rows={14}
+              defaultValue={values.bodyText}
+              onChange={(e) =>
+                setBodyLength(normalizeBodyText(e.currentTarget.value).length)
+              }
+              aria-invalid={bodyError ? true : undefined}
+              aria-describedby={describedBy(
+                "body-hint",
+                "body-count",
+                bodyError && "body-error",
+              )}
+              className={`${field} min-h-72 py-3 text-base leading-relaxed`}
+            />
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+              <p id="body-hint" className={hint}>
+                {sourceHost && <>Saved from {sourceHost}. </>}
+                At least {BODY_TEXT_MIN_LENGTH} characters, up to{" "}
+                {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}.
+              </p>
+              <p
+                id="body-count"
+                aria-live="polite"
+                className={`text-sm tabular-nums ${overLimit ? "font-semibold text-red-700" : "text-zinc-500"}`}
+              >
+                {bodyLength.toLocaleString("en-US")} /{" "}
+                {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
+                <span className="sr-only"> characters</span>
+              </p>
+            </div>
+            <p id="body-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              {bodyError}
             </p>
           </div>
-          <p id="body-error" aria-live="polite" className={`${errorText} empty:hidden`}>
-            {bodyError}
-          </p>
-        </div>
+        )}
       </div>
 
-      <div className="flex flex-col gap-6 border-t border-zinc-200 pt-8">
-        <h2 className="text-lg font-semibold text-zinc-950">Questions</h2>
+      {!titleOnly && (
+        <div className="flex flex-col gap-6 border-t border-zinc-200 pt-8">
+          <h2 className="text-lg font-semibold text-zinc-950">Questions</h2>
 
-        <div className="grid gap-6 sm:grid-cols-2">
-          <div className="flex flex-col gap-2">
-            <label htmlFor="gradeLevel" className={label}>
-              Grade level
-            </label>
-            <select
-              id="gradeLevel"
-              name="gradeLevel"
-              // Remount on each result so the kept value is applied.
-              key={`grade-${values.gradeLevel}`}
-              defaultValue={values.gradeLevel}
-              aria-invalid={errors.gradeLevel ? true : undefined}
-              aria-describedby={errors.gradeLevel ? "grade-error" : undefined}
-              className={field}
-            >
-              <option value="">Class grade ({classGradeLabel})</option>
-              {GRADE_LEVELS.map((level) => (
-                <option key={level} value={level}>
-                  {gradeLevelLabel(level)}
-                </option>
-              ))}
-            </select>
-            <p id="grade-error" aria-live="polite" className={`${errorText} empty:hidden`}>
-              {errors.gradeLevel}
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label htmlFor="questionCount" className={label}>
-              Number of questions
-            </label>
-            <select
-              id="questionCount"
-              name="questionCount"
-              key={`count-${values.questionCount}`}
-              defaultValue={values.questionCount}
-              aria-invalid={errors.questionCount ? true : undefined}
-              aria-describedby={errors.questionCount ? "count-error" : undefined}
-              className={field}
-            >
-              {QUESTION_COUNTS.map((n) => (
-                <option key={n} value={String(n)}>
-                  {n}
-                </option>
-              ))}
-            </select>
-            <p id="count-error" aria-live="polite" className={`${errorText} empty:hidden`}>
-              {errors.questionCount}
-            </p>
-          </div>
-        </div>
-
-        <fieldset key={`mode-${values.questionMode}`} className="flex flex-col gap-2">
-          <legend className={`${label} mb-2`}>Question mode</legend>
-          <div className={`${track} sm:grid-cols-2`}>
-            {QUESTION_MODES.map((m) => (
-              <label key={m} className={`${option} flex-col justify-center gap-0.5 py-3`}>
-                <input
-                  type="radio"
-                  name="questionMode"
-                  value={m}
-                  defaultChecked={values.questionMode === m}
-                  aria-describedby={describedBy(
-                    `mode-${m}-hint`,
-                    errors.questionMode && "mode-error",
-                  )}
-                  className="sr-only"
-                />
-                <span className="text-base font-semibold">{questionModeLabel(m)}</span>
-                <span id={`mode-${m}-hint`} className="text-sm text-zinc-600">
-                  {questionModeHint(m)}
-                </span>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="gradeLevel" className={label}>
+                Grade level
               </label>
-            ))}
+              <select
+                id="gradeLevel"
+                name="gradeLevel"
+                // Remount on each result so the kept value is applied.
+                key={`grade-${values.gradeLevel}`}
+                defaultValue={values.gradeLevel}
+                aria-invalid={errors.gradeLevel ? true : undefined}
+                aria-describedby={errors.gradeLevel ? "grade-error" : undefined}
+                className={field}
+              >
+                <option value="">Class grade ({classGradeLabel})</option>
+                {GRADE_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {gradeLevelLabel(level)}
+                  </option>
+                ))}
+              </select>
+              <p id="grade-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+                {errors.gradeLevel}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label htmlFor="questionCount" className={label}>
+                Number of questions
+              </label>
+              <select
+                id="questionCount"
+                name="questionCount"
+                key={`count-${values.questionCount}`}
+                defaultValue={values.questionCount}
+                aria-invalid={errors.questionCount ? true : undefined}
+                aria-describedby={errors.questionCount ? "count-error" : undefined}
+                className={field}
+              >
+                {QUESTION_COUNTS.map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <p id="count-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+                {errors.questionCount}
+              </p>
+            </div>
           </div>
-          <p id="mode-error" aria-live="polite" className={`${errorText} empty:hidden`}>
-            {errors.questionMode}
-          </p>
-        </fieldset>
-      </div>
+
+          <fieldset key={`mode-${values.questionMode}`} className="flex flex-col gap-2">
+            <legend className={`${label} mb-2`}>Question mode</legend>
+            <div className={`${track} sm:grid-cols-2`}>
+              {QUESTION_MODES.map((m) => (
+                <label key={m} className={`${option} flex-col justify-center gap-0.5 py-3`}>
+                  <input
+                    type="radio"
+                    name="questionMode"
+                    value={m}
+                    defaultChecked={values.questionMode === m}
+                    aria-describedby={describedBy(
+                      `mode-${m}-hint`,
+                      errors.questionMode && "mode-error",
+                    )}
+                    className="sr-only"
+                  />
+                  <span className="text-base font-semibold">{questionModeLabel(m)}</span>
+                  <span id={`mode-${m}-hint`} className="text-sm text-zinc-600">
+                    {questionModeHint(m)}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p id="mode-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              {errors.questionMode}
+            </p>
+          </fieldset>
+        </div>
+      )}
 
       <p aria-live="polite" className={`${errorText} empty:hidden`}>
         {errors.form}

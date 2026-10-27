@@ -15,10 +15,18 @@ export const AI_MAX_RETRIES = 1;
 // We call the model once, and once more if its output fails validation.
 export const QUESTION_WRITE_ATTEMPTS = 2;
 
-// The longest one question write can hold on, in the worst case: every
-// attempt times out on every SDK try.
-export const QUESTION_WRITE_MAX_MS =
-  QUESTION_WRITE_ATTEMPTS * (AI_MAX_RETRIES + 1) * AI_TIMEOUT_MS;
+// The most one question write may take, end to end: both validation
+// attempts, every SDK retry, and any backoff or retry-after wait between
+// them. One AbortSignal.timeout covers all of it (see writeValidated); when
+// it fires, the write ends as a "timeout".
+//
+// Why a deadline: a timeout already ends the write (it's an API error, so
+// no second attempt follows), but timeouts aren't the only slow path. A
+// try that times out, an SDK retry that returns invalid output, and a
+// second attempt that does the same, plus backoff or a server's
+// retry-after, could otherwise run past 2 minutes. The deadline is the
+// real worst case, and the stale claim timeout is built on it.
+export const QUESTION_WRITE_DEADLINE_MS = 110_000;
 
 // Room for thinking plus a short tool call. Current models may think
 // before answering, and thinking counts toward max_tokens.

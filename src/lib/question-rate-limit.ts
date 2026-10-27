@@ -20,6 +20,9 @@ export const QUESTION_GENERATION_WINDOW_MINUTES = 10;
 // Attempts older than this are deleted as new ones are recorded.
 export const QUESTION_GENERATION_PRUNE_HOURS = 24;
 
+export const QUESTION_GENERATION_LIMITED_MESSAGE =
+  "You’ve made a lot of questions. Try again in a few minutes.";
+
 // Teacher row lock, then a conditional insert counted under a fresh
 // READ COMMITTED snapshot, then a prune: see linkFetchStatements for why
 // these three statements, in this order, in one transaction.

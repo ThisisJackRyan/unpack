@@ -4,6 +4,9 @@ import { db, getSql, schema } from "@/db";
 import type { Class, Teacher } from "@/db/schema";
 import type { GradeLevel } from "./grade-levels";
 import { withUniqueJoinCode } from "./join-code";
+import type { StatementExecutor } from "./link-rate-limit";
+import { neonExecutor } from "./neon-executor";
+import { classGradeChangeStatements, insertedCount } from "./shared-questions";
 
 // Server-only class queries, always scoped to the owning teacher.
 
@@ -116,4 +119,17 @@ export async function getClassForTeacher(
     )
     .limit(1);
   return row;
+}
+
+// Changes the class's grade and clears the shared questions of its drafts
+// that follow the class grade (see classGradeChangeStatements). Returns
+// false when the class isn't the teacher's. Not called by any page yet.
+export async function updateClassGrade(
+  classId: string,
+  teacherId: string,
+  gradeLevel: GradeLevel,
+  execute: StatementExecutor = neonExecutor,
+): Promise<boolean> {
+  if (!isUuid(classId)) return false;
+  return insertedCount(await execute(classGradeChangeStatements(classId, teacherId, gradeLevel))) === 1;
 }

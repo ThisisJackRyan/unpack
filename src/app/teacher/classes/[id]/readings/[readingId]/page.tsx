@@ -47,11 +47,9 @@ export default async function ReadingPage({ params }: Props) {
             {reading.title}
           </h1>
         </div>
-        {reading.status === "draft" && (
-          <Link href={`${classHref}/readings/${reading.id}/edit`} className={secondaryButton}>
-            Edit
-          </Link>
-        )}
+        <Link href={`${classHref}/readings/${reading.id}/edit`} className={secondaryButton}>
+          {reading.status === "draft" ? "Edit" : "Edit title"}
+        </Link>
       </div>
 
       <dl className={`${card} grid gap-x-6 gap-y-4 p-5 sm:grid-cols-2 sm:p-6`}>
