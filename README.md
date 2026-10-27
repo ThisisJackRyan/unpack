@@ -42,7 +42,7 @@ The student join form's bot check (Cloudflare Turnstile) is on when both `NEXT_P
 
 ### Clerk webhook
 
-`/api/webhooks/clerk` keeps the `teachers` row in step with Clerk: `user.created` and `user.updated` save the teacher's name and primary email, and `user.deleted` deletes the teacher and everything under them (classes, readings, students, and their work). To set it up for each Clerk instance (development and production are separate):
+`/api/webhooks/clerk` keeps the `teachers` row in step with Clerk: `user.created` saves the teacher's name and primary email, `user.updated` updates them on an existing teacher (never creating one, so a late event can't bring back a deleted teacher), and `user.deleted` deletes the teacher and everything under them (classes, readings, students, and their work) in one transaction. To set it up for each Clerk instance (development and production are separate):
 
 1. Clerk Dashboard, **Configure**, **Webhooks**, **Add endpoint**.
 2. Endpoint URL: `https://<your domain>/api/webhooks/clerk`.
