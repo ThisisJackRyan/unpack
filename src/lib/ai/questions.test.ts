@@ -383,6 +383,7 @@ describe("questionErrorKind", () => {
     ["bad key (401)", gatewayErrors.badKey(), "not_configured"],
     ["401 as rethrown by generateText (dev)", gatewayErrors.wrappedAuthDev(), "not_configured"],
     ["401 as rethrown by generateText (production)", gatewayErrors.wrappedAuthProduction(), "not_configured"],
+    ["out of credits (402)", gatewayErrors.outOfCredits(), "not_configured"],
     ["no permission (403)", gatewayErrors.forbidden(), "not_configured"],
     ["unknown model (404)", gatewayErrors.unknownModel(), "not_configured"],
     ["rate limited (429)", gatewayErrors.rateLimited(), "busy"],
@@ -406,6 +407,7 @@ describe("questionErrorKind", () => {
     const api = (statusCode: number, data?: unknown) =>
       new APICallError({ message: "x", url: "https://example.test", requestBodyValues: {}, statusCode, data });
     assert.equal(questionErrorKind(api(401)), "not_configured");
+    assert.equal(questionErrorKind(api(402)), "not_configured");
     assert.equal(questionErrorKind(api(403)), "not_configured");
     assert.equal(questionErrorKind(api(404)), "not_configured");
     assert.equal(questionErrorKind(api(429)), "busy");

@@ -233,6 +233,7 @@ describe("gateway failures", () => {
   // status, gateway error type, kind, whether the SDK retries it.
   const table: [number, string, string, boolean][] = [
     [401, "authentication_error", "not_configured", false],
+    [402, "insufficient_funds", "not_configured", false],
     [403, "forbidden", "not_configured", false],
     [404, "model_not_found", "not_configured", false],
     [400, "invalid_request_error", "failed", false],

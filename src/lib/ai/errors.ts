@@ -120,7 +120,9 @@ export function questionErrorKind(error: unknown): QuestionErrorKind {
   }
   if (GatewayRateLimitError.isInstance(last)) return "busy";
   const status = statusOf(last);
-  if (status === 401 || status === 403 || status === 404) return "not_configured";
+  // 402: the gateway account is out of credits. That's our setup, not the
+  // student's, so it's not set up (and the try is given back).
+  if (status === 401 || status === 402 || status === 403 || status === 404) return "not_configured";
   if (status === 429 || status === 529 || isOverloaded(last)) return "busy";
   // 400, any other 5xx, a network error (the gateway reports it as a 500),
   // and anything unknown.

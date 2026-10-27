@@ -57,6 +57,9 @@ export const gatewayErrors = {
   noCredentials: () =>
     GatewayAuthenticationError.createContextualError({ apiKeyProvided: false, oidcTokenProvided: false, statusCode: 401 }),
   badKey: () => GatewayAuthenticationError.createContextualError({ apiKeyProvided: true, oidcTokenProvided: false, statusCode: 401 }),
+  // The gateway has no class for a 402 (out of credits): an unknown error
+  // type comes back as a GatewayInternalServerError with the status.
+  outOfCredits: () => new GatewayInternalServerError({ message: "insufficient funds", statusCode: 402 }),
   forbidden: () => new GatewayForbiddenError({ message: "forbidden", statusCode: 403 }),
   unknownModel: () => new GatewayModelNotFoundError({ message: "model not found", statusCode: 404, modelId: "anthropic/nope" }),
   badRequest: () => new GatewayInvalidRequestError({ message: "bad request", statusCode: 400 }),

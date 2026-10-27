@@ -379,6 +379,7 @@ describe("which failures count toward the throttle", () => {
     ["400 bad request", gatewayErrors.badRequest()],
     ["401 invalid key", gatewayErrors.badKey()],
     ["401 as rethrown by generateText", gatewayErrors.wrappedAuthProduction()],
+    ["402 out of credits", gatewayErrors.outOfCredits()],
     ["403 no permission", gatewayErrors.forbidden()],
     ["404 unknown model", gatewayErrors.unknownModel()],
     ["429 rate limited", gatewayErrors.rateLimited()],

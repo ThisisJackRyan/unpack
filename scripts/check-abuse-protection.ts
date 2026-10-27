@@ -11,11 +11,12 @@
 //   opens add no call rows. The failing model answers with unusable
 //   output, which counts.
 // - Provider failures are given back: a model throwing a 529 overloaded,
-//   a 503, a 401 bad key, or a network error fills the window like any
-//   call (STUDENT_GENERATION_WINDOW_LIMIT calls, then "throttled" with no
-//   model call) but never counts toward STUDENT_GENERATION_CALL_LIMIT:
-//   window after window, more calls than the cap, none counted, never
-//   "calls_used_up", and the student then still gets a set. A burst
+//   a 503, a 401 bad key, a 402 out of credits, or a network error fills
+//   the window like any call (STUDENT_GENERATION_WINDOW_LIMIT calls, then
+//   "throttled" with no model call) but never counts toward
+//   STUDENT_GENERATION_CALL_LIMIT: window after window, more calls than
+//   the cap, none counted, never "calls_used_up", and the student then
+//   still gets a set. A burst
 //   against an outage makes one call at a time, exactly the window limit.
 // - "Let them try again": at the cap, class status says Needs a reset;
 //   another teacher's reset is not_found with every call row intact; the
@@ -352,6 +353,7 @@ async function checkProviderFailures() {
     ["529 overloaded", retried(gatewayErrors.overloaded())],
     ["503 unavailable", retried(gatewayErrors.unavailable())],
     ["401 bad key", gatewayErrors.wrappedAuthProduction()],
+    ["402 out of credits", gatewayErrors.outOfCredits()],
     ["network error", retried(gatewayErrors.network())],
   ];
   const total = STUDENT_GENERATION_CALL_LIMIT + 2;
