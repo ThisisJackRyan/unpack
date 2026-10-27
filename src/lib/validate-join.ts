@@ -18,11 +18,31 @@ export const FIRST_NAME_INVALID_MESSAGE =
 export const CLASS_NOT_FOUND_MESSAGE =
   "We couldn’t find that class code. Check it with your teacher.";
 
-// The join's generic failure: a database error, or a server that isn't set
-// up (JOIN_IP_HASH_SECRET or the Turnstile keys missing in production).
-// Says nothing about why, so a student can't tell a broken deploy from a
-// blip.
+// The join's generic failure: a database error. Says nothing about why.
 export const JOIN_FAILED_MESSAGE = "We couldn’t join you to the class. Please try again.";
+
+// A join blocked by server setup (the Turnstile keys, or
+// JOIN_IP_HASH_SECRET in production, missing or unusable). Trying again
+// won't help, so it says so instead of the generic message; the server
+// logs which variable (see logJoinBlockedConfig).
+export const JOIN_DISABLED_MESSAGE = "Joining is turned off right now. Ask your teacher.";
+
+// The stable first argument of that server log, to search the runtime
+// logs for.
+export const JOIN_BLOCKED_CONFIG_TAG = "join_blocked_config";
+
+// What blocked a join: the missing variable NAMES (never a value) and the
+// human explanation.
+export type JoinBlockedConfig = { missing: string[]; message: string };
+
+// The one console.error per blocked join:
+// console.error("join_blocked_config", { missing: [...], message }).
+export function logJoinBlockedConfig(
+  blocked: JoinBlockedConfig,
+  log: (tag: string, fields: JoinBlockedConfig) => void = console.error,
+): void {
+  log(JOIN_BLOCKED_CONFIG_TAG, { missing: [...blocked.missing], message: blocked.message });
+}
 
 // Letters (any alphabet, with accents) plus spaces, hyphens, apostrophes,
 // and the Hawaiian ʻokina, e.g. "Mary Ann", "Jean-Luc", "D’Andre",

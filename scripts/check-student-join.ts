@@ -9,10 +9,12 @@
 //   JOIN_IP_LIMIT rows for that key.
 // - Per-code limit race: 140 parallel joins from distinct IPs into one code
 //   -> exactly JOIN_CODE_LIMIT joined.
-// - Unknown and turned-off codes are refused alike; the session lookup works
-//   by hash; a straight and a curly apostrophe are the same name; neither
-//   the raw token nor a raw IP is stored; expired attempt
-//   rows are pruned; turning a code off keeps joined students in.
+// - Unknown and turned-off codes are refused alike (also a well-formed
+//   6-character code and one with look-alikes, typed loosely, with no DB
+//   error); the session lookup works by hash; a straight and a curly
+//   apostrophe are the same name; neither the raw token nor a raw IP is
+//   stored; expired attempt rows are pruned; turning a code off keeps
+//   joined students in.
 // - Reading views: the class home (listReadingsWithStatus) lists the
 //   published readings, draft hidden, all Not started; a per-student
 //   reading in the student's class is ready
@@ -38,6 +40,7 @@
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import { hashJoinCode, hashJoinIp } from "@/lib/client-ip";
+import { generateJoinCode } from "@/lib/join-code";
 import { JOIN_CODE_LIMIT, JOIN_IP_LIMIT, JOIN_WINDOW_MINUTES } from "@/lib/join-rate-limit";
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
@@ -271,6 +274,26 @@ async function checkCodesAndSessions(): Promise<{ classId: string; code: string;
     `unknown code: ${unknown.status}; turned-off code: ${inactive.status} (same answer)`,
   );
   check((await countStudents(off.id)) === 0, "no student added to the turned-off class");
+
+  // Well-formed codes that match no class: one from the code alphabet, one
+  // with look-alikes no generated code has, both typed loosely. The lookup
+  // must miss cleanly (no DB error), so the student sees "couldn't find".
+  let wellFormed = generateJoinCode();
+  while ((await sql`select 1 from classes where join_code = ${wellFormed}`).length) wellFormed = generateJoinCode();
+  const outside = "O0I1L0";
+  const outsideTaken = (await sql`select 1 from classes where join_code = ${outside}`).length > 0;
+  const typed = `${wellFormed.slice(0, 3).toLowerCase()}-${wellFormed.slice(3)}`;
+  for (const [label, code] of [["well-formed unknown", typed], ["out-of-alphabet", " o0i-1l0 "]]) {
+    usedHashes.add(hashJoinCode(validateJoin({ code, firstName: "Maya", lastInitials: "Ro" }).values.code));
+    let status: string;
+    try {
+      status = (await join(code, "Maya", "Ro", ipKey(label))).status;
+    } catch (error) {
+      status = `threw ${(error as Error).message}`;
+    }
+    check(status === "class_not_found", `${label} code "${code}": ${status}`);
+  }
+  check(!outsideTaken, `no class has the out-of-alphabet code ${outside}`);
 
   const { id: classId, code } = await newClass();
   const rawIp = `203.0.113.${Math.floor(Math.random() * 200) + 1}`;

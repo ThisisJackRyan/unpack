@@ -5,6 +5,10 @@ import {
   FIRST_NAME_INVALID_MESSAGE,
   FIRST_NAME_MAX_LENGTH,
   formatInitials,
+  JOIN_BLOCKED_CONFIG_TAG,
+  JOIN_DISABLED_MESSAGE,
+  JOIN_FAILED_MESSAGE,
+  logJoinBlockedConfig,
   validateJoin,
 } from "./validate-join";
 
@@ -116,6 +120,51 @@ describe("validateJoin", () => {
     assert.equal(CLASS_NOT_FOUND_MESSAGE, "We couldn’t find that class code. Check it with your teacher.");
   });
 
+  // Every refused code gets the code-field "couldn't find" text, never the
+  // generic failure; only an empty one (after spaces and dashes go) asks
+  // for a code.
+  it("refuses every malformed code with the code-field not-found message", () => {
+    const malformed = [
+      "ABC 23$", // a symbol
+      "ABC_234", // an underscore
+      "ABC.234", // a dot
+      "ABC–234", // an en dash, which isn't stripped
+      "ABC\u200B234", // a zero-width space, which isn't stripped
+      "ÀBC234", // an accented letter
+      "АВС234", // Cyrillic look-alikes
+      "ABC２３４", // full-width digits
+      "ABC\u0000234", // a NUL, which Postgres text can't hold
+      "'; drop table classes; --", // SQL-looking junk
+      "A".repeat(13), // too long
+      "ab-cd-ef-gh-jk-mn-p", // too long once normalized (13)
+      "ß".repeat(7), // uppercases to 14 letters
+    ];
+    for (const code of malformed) {
+      assert.deepEqual(errors({ code }), { code: CLASS_NOT_FOUND_MESSAGE }, code);
+    }
+    for (const code of ["-", " - - ", "\t"]) {
+      assert.deepEqual(errors({ code }), { code: "Enter your class code." }, code);
+    }
+  });
+
+  it("lets through, for a lookup, codes that only normalize or that no class can have", () => {
+    const cases: [string, string][] = [
+      ["abc234", "ABC234"], // lowercase
+      ["ABC 234", "ABC234"], // a space
+      ["abc-234", "ABC234"], // a dash
+      [" a-b c\u00A02 3-4 ", "ABC234"], // mixed, with a no-break space
+      ["ZZZZZZ", "ZZZZZZ"], // well formed, matches no class
+      ["O0I1L0", "O0I1L0"], // outside the code alphabet: the lookup misses
+      ["A", "A"], // too short: the lookup misses
+      ["ABCDEFGHJKMN", "ABCDEFGHJKMN"], // 12, the longest let through
+    ];
+    for (const [code, normalized] of cases) {
+      const result = validateJoin({ ...ok, code });
+      assert.ok(result.ok, code);
+      assert.equal(result.data.code, normalized, code);
+    }
+  });
+
   it("echoes the cleaned values after an error", () => {
     const result = validateJoin({ code: "abc", firstName: " Maya ", lastInitials: "" });
     assert.deepEqual(result.values, { code: "ABC", firstName: "Maya", lastInitials: "" });
@@ -127,5 +176,20 @@ describe("formatInitials", () => {
     assert.equal(formatInitials("ro"), "Ro");
     assert.equal(formatInitials("RO"), "Ro");
     assert.equal(formatInitials("r"), "R");
+  });
+});
+
+describe("join blocked by server setup", () => {
+  it("has its own message, distinct from the generic failure", () => {
+    assert.equal(JOIN_DISABLED_MESSAGE, "Joining is turned off right now. Ask your teacher.");
+    assert.notEqual(JOIN_DISABLED_MESSAGE, JOIN_FAILED_MESSAGE);
+    assert.doesNotMatch(JOIN_DISABLED_MESSAGE, /'|\u2014/);
+  });
+
+  it("logs one tagged line with the names and the message only", () => {
+    const calls: unknown[][] = [];
+    logJoinBlockedConfig({ missing: ["JOIN_IP_HASH_SECRET"], message: "why" }, (...args) => calls.push(args));
+    assert.deepEqual(calls, [[JOIN_BLOCKED_CONFIG_TAG, { missing: ["JOIN_IP_HASH_SECRET"], message: "why" }]]);
+    assert.equal(JOIN_BLOCKED_CONFIG_TAG, "join_blocked_config");
   });
 });
