@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   BLOCKED_EVENT_HANDLERS,
-  collapsedCaret,
   isBlockedInputType,
   isBlockedShortcut,
   type KeyLike,
@@ -58,8 +58,8 @@ describe("isBlockedInputType", () => {
 });
 
 describe("isBlockedShortcut", () => {
-  it("blocks select all, copy, cut, and paste with Ctrl or Cmd, any case", () => {
-    for (const k of ["a", "c", "x", "v", "A", "C", "X", "V"]) {
+  it("blocks copy, cut, and paste with Ctrl or Cmd, any case", () => {
+    for (const k of ["c", "x", "v", "C", "X", "V"]) {
       assert.equal(isBlockedShortcut(key(k, { ctrlKey: true })), true, `ctrl+${k}`);
       assert.equal(isBlockedShortcut(key(k, { metaKey: true })), true, `cmd+${k}`);
     }
@@ -85,23 +85,80 @@ describe("isBlockedShortcut", () => {
       key("Enter"),
       key("c", { ctrlKey: true, altKey: true }),
       key("Insert"),
+      // Select all: how a student clears an answer (F4).
+      key("a", { ctrlKey: true }),
+      key("A", { metaKey: true }),
     ]) {
       assert.equal(isBlockedShortcut(k), false, JSON.stringify(k));
     }
   });
 });
 
-describe("collapsedCaret", () => {
-  it("collapses a forward selection to its end and a backward one to its start", () => {
-    assert.equal(collapsedCaret({ selectionStart: 2, selectionEnd: 9, selectionDirection: "forward" }), 9);
-    assert.equal(collapsedCaret({ selectionStart: 2, selectionEnd: 9, selectionDirection: "none" }), 9);
-    assert.equal(collapsedCaret({ selectionStart: 2, selectionEnd: 9, selectionDirection: "backward" }), 2);
-    assert.equal(collapsedCaret({ selectionStart: 0, selectionEnd: 40 }), 40);
+// F4 (student QA): an answer box held "idk" from the last try; the
+// student selected all, pressed Delete, typed a new answer and checked,
+// and got "idk" glued to the new answer. Cause: the box blocked Ctrl+A
+// and collapsed every range selection to a caret at its end, so Delete
+// removed nothing and the new text went after "idk". A tiny model of the
+// box, wired like NoCopyTextarea: keydown goes through isBlockedShortcut
+// and beforeinput through isBlockedInputType; a selection is kept (the
+// source check below makes sure nothing collapses it again).
+type Box = { value: string; start: number; end: number };
+
+function selectRange(box: Box, start: number, end: number): Box {
+  return { ...box, start, end };
+}
+
+function press(box: Box, k: KeyLike): Box {
+  if (isBlockedShortcut(k)) return box;
+  if ((k.ctrlKey || k.metaKey) && k.key.toLowerCase() === "a") return selectRange(box, 0, box.value.length);
+  return box;
+}
+
+function input(box: Box, inputType: string, data = ""): Box {
+  if (isBlockedInputType(inputType)) return box;
+  let { start, end } = box;
+  if (start === end && inputType === "deleteContentForward") end = Math.min(box.value.length, end + 1);
+  if (start === end && inputType === "deleteContentBackward") start = Math.max(0, start - 1);
+  const value = box.value.slice(0, start) + data + box.value.slice(end);
+  const caret = start + data.length;
+  return { value, start: caret, end: caret };
+}
+
+function typeText(box: Box, text: string): Box {
+  return [...text].reduce((b, ch) => input(b, "insertText", ch), box);
+}
+
+describe("clearing an answer box (F4)", () => {
+  const idk: Box = { value: "idk", start: 3, end: 3 };
+
+  it("select all with the keyboard, Delete, then a new answer replaces the old one", () => {
+    let box = press(idk, key("a", { ctrlKey: true }));
+    box = input(box, "deleteContentForward");
+    box = typeText(box, "The fox hid.");
+    assert.equal(box.value, "The fox hid.");
   });
 
-  it("leaves a caret, an unknown selection, and IME composition alone", () => {
-    assert.equal(collapsedCaret({ selectionStart: 4, selectionEnd: 4 }), null);
-    assert.equal(collapsedCaret({ selectionStart: null, selectionEnd: null }), null);
-    assert.equal(collapsedCaret({ selectionStart: 2, selectionEnd: 5 }, true), null);
+  it("a mouse or long-press select all, Backspace, then a new answer replaces the old one", () => {
+    let box = selectRange(idk, 0, 3);
+    box = input(box, "deleteContentBackward");
+    box = typeText(box, "The fox hid.");
+    assert.equal(box.value, "The fox hid.");
+  });
+
+  it("selecting then typing over replaces the selection", () => {
+    const box = typeText(selectRange(idk, 0, 3), "The fox hid.");
+    assert.equal(box.value, "The fox hid.");
+  });
+
+  it("the answer box keeps a selection: nothing collapses it to a caret", () => {
+    const source = readFileSync(new URL("../components/no-copy.tsx", import.meta.url), "utf8");
+    const textarea = source.slice(source.indexOf("export function NoCopyTextarea"));
+    assert.doesNotMatch(textarea, /setSelectionRange|selectionchange|"select"|"mouseup"/);
+  });
+
+  it("copy, cut, and paste stay blocked with text selected", () => {
+    for (const k of ["c", "x", "v"]) assert.equal(isBlockedShortcut(key(k, { ctrlKey: true })), true, k);
+    for (const t of ["insertFromPaste", "deleteByCut", "insertFromDrop"]) assert.equal(isBlockedInputType(t), true, t);
+    assert.equal(input({ value: "idk", start: 0, end: 3 }, "deleteByCut").value, "idk");
   });
 });

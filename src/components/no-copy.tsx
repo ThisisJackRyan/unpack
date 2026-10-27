@@ -3,7 +3,6 @@
 import { useEffect, useRef, type ComponentProps, type SyntheticEvent } from "react";
 import {
   BLOCKED_EVENT_HANDLERS,
-  collapsedCaret,
   isBlockedInputType,
   isBlockedShortcut,
   type BlockedHandlerName,
@@ -47,47 +46,20 @@ export function NoCopyText({ className, children, ...rest }: ComponentProps<"div
 
 type NoCopyTextareaProps = Omit<ComponentProps<"textarea">, BlockedHandlerName | "onKeyDown" | "ref">;
 
-// A textarea where typing and Backspace work, but paste, drop, cut, copy,
-// select all, and the context menu don't, and any range selection
-// (mouse, double click, Shift+arrows, long press) collapses to a caret.
-// beforeinput is a native listener: React's onBeforeInput doesn't carry
-// inputType.
+// A textarea where typing, Backspace, select all and selecting work (so
+// select all + Delete clears an answer), but paste, drop, cut, copy, and
+// the context menu don't. beforeinput is a native listener: React's
+// onBeforeInput doesn't carry inputType.
 export function NoCopyTextarea(props: NoCopyTextareaProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    let composing = false;
-    const collapse = () => {
-      const caret = collapsedCaret(el, composing);
-      if (caret !== null) el.setSelectionRange(caret, caret);
-    };
     const onBeforeInput = (e: InputEvent) => {
       if (isBlockedInputType(e.inputType)) e.preventDefault();
     };
-    const onSelectionChange = () => {
-      if (document.activeElement === el) collapse();
-    };
-    const onCompositionStart = () => {
-      composing = true;
-    };
-    const onCompositionEnd = () => {
-      composing = false;
-    };
     el.addEventListener("beforeinput", onBeforeInput);
-    el.addEventListener("select", collapse);
-    el.addEventListener("mouseup", collapse);
-    el.addEventListener("compositionstart", onCompositionStart);
-    el.addEventListener("compositionend", onCompositionEnd);
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => {
-      el.removeEventListener("beforeinput", onBeforeInput);
-      el.removeEventListener("select", collapse);
-      el.removeEventListener("mouseup", collapse);
-      el.removeEventListener("compositionstart", onCompositionStart);
-      el.removeEventListener("compositionend", onCompositionEnd);
-      document.removeEventListener("selectionchange", onSelectionChange);
-    };
+    return () => el.removeEventListener("beforeinput", onBeforeInput);
   }, []);
   return (
     <textarea

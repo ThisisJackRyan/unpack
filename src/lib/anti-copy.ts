@@ -53,11 +53,16 @@ export type KeyLike = {
   altKey: boolean;
 };
 
-const SHORTCUT_KEYS: ReadonlySet<string> = new Set(["a", "c", "x", "v"]);
+// Select all (Ctrl+A) is not here: in an answer box it is how a student
+// clears an answer to start over, and the copy, cut, and drag blocks still
+// keep the selected text in the box. Blocking it, and collapsing every
+// selection to a caret, made select all + Delete remove nothing, so a new
+// answer was typed after the old one ("idk" glued to it, F4).
+const SHORTCUT_KEYS: ReadonlySet<string> = new Set(["c", "x", "v"]);
 
-// Select all, copy, cut, and paste: Ctrl or Cmd with A, C, X, or V (with
-// or without Shift, so Ctrl+Shift+V is caught too), plus the old Windows
-// keys Ctrl+Insert (copy), Shift+Insert (paste), and Shift+Delete (cut).
+// Copy, cut, and paste: Ctrl or Cmd with C, X, or V (with or without
+// Shift, so Ctrl+Shift+V is caught too), plus the old Windows keys
+// Ctrl+Insert (copy), Shift+Insert (paste), and Shift+Delete (cut).
 // Ctrl+Alt is left alone: on many keyboards it is AltGr, which types
 // letters.
 export function isBlockedShortcut(e: KeyLike): boolean {
@@ -66,21 +71,4 @@ export function isBlockedShortcut(e: KeyLike): boolean {
   if (e.ctrlKey && !e.altKey && key === "insert") return true;
   if (e.shiftKey && !e.ctrlKey && !e.metaKey && (key === "insert" || key === "delete")) return true;
   return false;
-}
-
-export type SelectionLike = {
-  selectionStart: number | null;
-  selectionEnd: number | null;
-  selectionDirection?: string | null;
-};
-
-// Where to put the caret when an answer box has a range selected, or null
-// to leave it (already a caret, or mid IME composition, where the browser
-// may be using a range to show the word being composed). The caret goes to
-// the end the student was moving, so Shift+arrows act like plain arrows,
-// and typing and Backspace keep working.
-export function collapsedCaret(selection: SelectionLike, composing = false): number | null {
-  const { selectionStart: start, selectionEnd: end } = selection;
-  if (composing || start === null || end === null || start === end) return null;
-  return selection.selectionDirection === "backward" ? start : end;
 }
