@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { clientIpFromHeaders, hashJoinIp } from "@/lib/client-ip";
-import { verifyJoinBotCheck } from "@/lib/join-bot-check";
+import { botCheckMessage, TURNSTILE_RESPONSE_FIELD, verifyJoinBotCheck } from "@/lib/join-bot-check";
 import { JOIN_LIMITED_MESSAGE } from "@/lib/join-rate-limit";
 import { joinClass } from "@/lib/student-join";
 import { NAME_TAKEN_MESSAGE, type JoinOutcome } from "@/lib/student-join-core";
@@ -26,14 +26,21 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
   if (!result.ok) return { errors: result.errors, values: result.values };
   const { data, values } = result;
 
+  // The bot check comes before the rate limits (see join-bot-check.ts): a
+  // refused check isn't counted, so a bot can't use up a code's tries. Off
+  // (no keys) it passes with no network call. It never throws.
+  const bot = await verifyJoinBotCheck(
+    { token: formData.get(TURNSTILE_RESPONSE_FIELD) },
+    { onFailure: (fields) => console.error("joinClassAction: bot check refused", fields) },
+  );
+  if (!bot.ok) return { errors: { form: botCheckMessage(bot.reason) }, values };
+
   const requestHeaders = await headers();
   let outcome: JoinOutcome;
   try {
     // Throws in production when JOIN_IP_HASH_SECRET is missing or short, so
     // the join fails closed with the generic message below.
     const ipHash = hashJoinIp(clientIpFromHeaders((name) => requestHeaders.get(name)));
-    // A no-op until the abuse PR replaces it.
-    await verifyJoinBotCheck({ ipHash });
     outcome = await joinClass(data, ipHash);
   } catch (error) {
     // Name, code, and message only: a Postgres error's detail can echo the
