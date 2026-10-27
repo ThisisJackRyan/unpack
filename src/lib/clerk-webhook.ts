@@ -43,7 +43,7 @@
 // Logs: only the event type and the outcome. Never a name, an email, or
 // an id from the payload.
 
-import { hashClerkUserId, notDeletedSql, pruneDeletedStatement, recordDeletedStatement } from "./deleted-accounts";
+import { accountLockStatement, hashClerkUserId, notDeletedSql, pruneDeletedStatement, recordDeletedStatement } from "./deleted-accounts";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 
 export type ClerkEmail = { id?: string; email_address?: string };
@@ -105,6 +105,9 @@ returning id`,
 // Postgres fails it with 23503 (the set null update re-checks the
 // challenge's student_id foreign key after the student is gone). So:
 //
+// 0. Take the id's account lock (deleted-accounts.ts), so a concurrent
+//    user.created or first visit either commits first and is deleted
+//    below, or waits and then sees the id listed (step 4).
 // 1. Lock the account row, so a class or self-learner reading created
 //    right now (insertClassIfAllowed and the self-learner create take the
 //    same lock) either commits first and is deleted below, or waits and
@@ -131,6 +134,7 @@ returning id`,
 export function deleteTeacherStatements(clerkUserId: string): Statement[] {
   const params = [clerkUserId];
   return [
+    accountLockStatement(clerkUserId),
     { text: `select id from teachers where clerk_user_id = $1::text for update`, params },
     {
       text: `delete from classes
@@ -172,7 +176,8 @@ export async function handleClerkEvent(event: ClerkEvent, execute: StatementExec
     const profile = teacherProfile(data);
     if ("missing" in profile) return profile.missing === "id" ? "skipped_no_id" : "skipped_no_email";
     if (event.type === "user.created") {
-      const [rows = []] = await execute([upsertTeacherStatement(profile)]);
+      // After the account lock, so it can't slip past a concurrent delete.
+      const [, rows = []] = await execute([accountLockStatement(profile.clerkUserId), upsertTeacherStatement(profile)]);
       return rows.length > 0 ? "upserted" : "deleted_account";
     }
     const [rows = []] = await execute([updateTeacherStatement(profile)]);

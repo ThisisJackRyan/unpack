@@ -58,7 +58,7 @@ import {
   loadSelfProgress,
   submitSelfAnswers,
 } from "@/lib/self-readings";
-import { createAccountStatement, hashClerkUserId } from "@/lib/deleted-accounts";
+import { createAccountStatements, hashClerkUserId } from "@/lib/deleted-accounts";
 import { prepareDbCheck } from "./lib/db-check";
 
 const { fetchEndpoint } = prepareDbCheck();
@@ -532,7 +532,7 @@ async function checkDelete() {
     },
     neonExecutor,
   );
-  const [visit = []] = await neonExecutor([createAccountStatement(clerkId("test_self_gone"), "Late", "late@example.invalid")]);
+  const [, visit = []] = await neonExecutor(createAccountStatements(clerkId("test_self_gone"), "Late", "late@example.invalid"));
   const back = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${clerkId("test_self_gone")}`);
   check(
     late === "deleted_account" && visit.length === 0 && back.n === 0,

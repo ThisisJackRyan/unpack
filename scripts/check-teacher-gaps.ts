@@ -57,7 +57,7 @@ import { capView } from "@/lib/reading-cap";
 import { deleteReading, getClassCapBadges, getReadingCap, raiseReadingCap } from "@/lib/readings";
 import { getOrCreateStudentQuestions, postgresStudentQuestionStore } from "@/lib/student-questions";
 import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "@/lib/student-questions-core";
-import { createAccountStatement, hashClerkUserId } from "@/lib/deleted-accounts";
+import { createAccountStatements, hashClerkUserId } from "@/lib/deleted-accounts";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
 const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
@@ -77,6 +77,8 @@ const RAISES = intFlag("raises", 20);
 const CLAIMS = intFlag("claims", 200);
 const DB_CONCURRENCY = intFlag("concurrency", DB_CHECK_CONCURRENCY);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
+// Rounds of the user.created / user.deleted race.
+const RACE_ROUNDS = 10;
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
 
@@ -604,23 +606,33 @@ async function checkTeacherDelete() {
     neonExecutor,
   );
   check(lateCreate === "deleted_account", `a late user.created after user.deleted: ${lateCreate}`);
-  const [firstVisit = []] = await neonExecutor([createAccountStatement(goneClerkId, "Late", "late@example.invalid")]);
+  const [, firstVisit = []] = await neonExecutor(createAccountStatements(goneClerkId, "Late", "late@example.invalid"));
   check(firstVisit.length === 0, `a first visit on a leftover session creates nothing (${firstVisit.length} rows)`);
   const stillGone = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${goneClerkId}`);
   check(stillGone.n === 0, `...and no teacher row came back (${stillGone.n})`);
 
   // A user.created racing the user.deleted of a fresh id: whichever
-  // commits first, no row is left.
-  const racedId = `test_gaps_raced_${RUN_ID}`;
-  const raceData = { id: racedId, first_name: "Raced", email_addresses: [{ id: "idn_1", email_address: "raced@example.invalid" }] };
-  const raced = await Promise.all([
-    handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
-    handleClerkEvent({ type: "user.deleted", data: { id: racedId, deleted: true } }, neonExecutor),
-    handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
-  ]);
-  const racedRows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${racedId}`);
-  check(racedRows.n === 0, `user.created racing user.deleted leaves no row (${raced.join(", ")})`);
-  const [fresh = []] = await neonExecutor([createAccountStatement(`test_gaps_fresh_${RUN_ID}`, "Fresh", "fresh@example.invalid")]);
+  // commits first, no row is left. Repeated, since one round can miss the
+  // window (both take the id's account lock, deleted-accounts.ts).
+  const raceOutcomes: string[] = [];
+  let raceLeftovers = 0;
+  for (let round = 0; round < RACE_ROUNDS; round++) {
+    const racedId = `test_gaps_raced_${RUN_ID}_${round}`;
+    const raceData = { id: racedId, first_name: "Raced", email_addresses: [{ id: "idn_1", email_address: "raced@example.invalid" }] };
+    const raced = await Promise.all([
+      handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
+      handleClerkEvent({ type: "user.deleted", data: { id: racedId, deleted: true } }, neonExecutor),
+      handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
+    ]);
+    const racedRows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${racedId}`);
+    raceLeftovers += racedRows.n;
+    if (racedRows.n > 0) raceOutcomes.push(raced.join(", "));
+  }
+  check(
+    raceLeftovers === 0,
+    `user.created racing user.deleted leaves no row (${RACE_ROUNDS} rounds${raceOutcomes.length ? `; left a row after: ${raceOutcomes.join(" | ")}` : ""})`,
+  );
+  const [, fresh = []] = await neonExecutor(createAccountStatements(`test_gaps_fresh_${RUN_ID}`, "Fresh", "fresh@example.invalid"));
   check(fresh.length === 1, "a first visit for an account that was never deleted still creates its row");
 
   const renamed = await handleClerkEvent(
@@ -640,13 +652,15 @@ async function checkTeacherDelete() {
 // left by a failed run can't block it.
 async function cleanup(): Promise<void> {
   let deleted = 0;
-  const prefixes = ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept", "test_gaps_raced", "test_gaps_fresh"];
+  const raced = Array.from({ length: RACE_ROUNDS }, (_, round) => `test_gaps_raced_${RUN_ID}_${round}`);
+  const prefixes = ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept", "test_gaps_fresh"];
   for (const prefix of prefixes) {
     const results = await neonExecutor(deleteTeacherStatements(`${prefix}_${RUN_ID}`));
     deleted += deletedAccountRows(results);
   }
+  for (const id of raced) deleted += deletedAccountRows(await neonExecutor(deleteTeacherStatements(id)));
   // The delete lists each test id; take them off again.
-  const hashes = prefixes.map((p) => hashClerkUserId(`${p}_${RUN_ID}`));
+  const hashes = [...prefixes.map((p) => hashClerkUserId(`${p}_${RUN_ID}`)), ...raced.map(hashClerkUserId)];
   await sql`delete from deleted_clerk_users where clerk_user_hash = any(${hashes})`;
   console.log(`\ncleanup: deleted ${deleted} test teachers (and everything under them)`);
 }

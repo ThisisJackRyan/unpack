@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
-import { hashClerkUserId } from "./deleted-accounts";
+import { accountLockStatement, ACCOUNT_LOCK_SPACE, hashClerkUserId } from "./deleted-accounts";
 import type { Statement } from "./link-rate-limit";
 import {
   deletedAccountRows,
@@ -93,20 +93,22 @@ describe("handleClerkEvent", () => {
   it("user.created upserts by clerk_user_id, race-safe with the lazy creation", async () => {
     const db = fakeDb();
     assert.equal(await handleClerkEvent({ type: "user.created", data: USER }, db.execute), "upserted");
-    assert.equal(db.seen.length, 1);
-    assert.match(db.seen[0].text, /^insert into teachers \(clerk_user_id, name, email\)/);
-    assert.match(db.seen[0].text, /on conflict \(clerk_user_id\) do update set name = excluded\.name, email = excluded\.email/);
-    assert.deepEqual(db.seen[0].params, ["user_test_1", "Maya Ro", "teacher@example.com", hashClerkUserId("user_test_1")]);
-    assert.equal(db.seen[0].text.includes("teacher@example.com"), false);
+    assert.equal(db.seen.length, 2);
+    // The id's account lock first, the same one user.deleted takes.
+    assert.deepEqual(db.seen[0], accountLockStatement("user_test_1"));
+    assert.match(db.seen[1].text, /^insert into teachers \(clerk_user_id, name, email\)/);
+    assert.match(db.seen[1].text, /on conflict \(clerk_user_id\) do update set name = excluded\.name, email = excluded\.email/);
+    assert.deepEqual(db.seen[1].params, ["user_test_1", "Maya Ro", "teacher@example.com", hashClerkUserId("user_test_1")]);
+    assert.equal(db.seen[1].text.includes("teacher@example.com"), false);
   });
 
   it("user.created for a deleted account writes nothing and is deleted_account", async () => {
     const db = fakeDb(() => []);
     assert.equal(await handleClerkEvent({ type: "user.created", data: USER }, db.execute), "deleted_account");
-    assert.equal(db.seen.length, 1);
+    assert.equal(db.seen.length, 2);
     // The deleted list is checked inside the insert itself.
     assert.match(
-      db.seen[0].text,
+      db.seen[1].text,
       /select \$1::text, \$2::text, \$3::text\nwhere not exists \(select 1 from deleted_clerk_users where clerk_user_hash = \$4::text\)\non conflict/,
     );
   });
@@ -134,8 +136,11 @@ describe("handleClerkEvent", () => {
       db.seen.map((s) => s.text),
       deleteTeacherStatements("user_test_1").map((s) => s.text),
     );
-    const [lock, classes, selfReadings, listed, prune, teacher] = db.seen;
-    assert.equal(db.seen.length, 6);
+    const [accountLock, lock, classes, selfReadings, listed, prune, teacher] = db.seen;
+    assert.equal(db.seen.length, 7);
+    assert.deepEqual(accountLock, accountLockStatement("user_test_1"));
+    assert.equal(accountLock.text, "select pg_advisory_xact_lock($1::int, hashtext($2::text))");
+    assert.deepEqual(accountLock.params, [ACCOUNT_LOCK_SPACE, hashClerkUserId("user_test_1")]);
     assert.equal(lock.text, "select id from teachers where clerk_user_id = $1::text for update");
     assert.match(classes.text, /^delete from classes\nwhere teacher_id in \(select id from teachers where clerk_user_id = \$1::text\)$/);
     assert.equal(
@@ -165,7 +170,8 @@ describe("handleClerkEvent", () => {
     const classes = texts.findIndex((t) => t.startsWith("delete from classes"));
     const selfReadings = texts.findIndex((t) => t.startsWith("delete from self_readings"));
     const teacher = texts.findIndex((t) => t.startsWith("delete from teachers"));
-    assert.equal(lock, 0);
+    assert.equal(texts[0], accountLockStatement("user_test_1").text);
+    assert.equal(lock, 1);
     assert.ok(classes > lock && selfReadings > lock);
     assert.ok(teacher > classes && teacher > selfReadings);
     assert.equal(teacher, texts.length - 1);
@@ -185,7 +191,7 @@ describe("handleClerkEvent", () => {
   it("user.created never sets a role (the account chooses on /welcome)", async () => {
     const db = fakeDb();
     await handleClerkEvent({ type: "user.created", data: USER }, db.execute);
-    assert.equal(/role/.test(db.seen[0].text), false);
+    assert.equal(/role/.test(db.seen[1].text), false);
     const upd = fakeDb();
     await handleClerkEvent({ type: "user.updated", data: USER }, upd.execute);
     assert.equal(/role/.test(upd.seen[0].text), false);
@@ -213,7 +219,7 @@ describe("handleClerkWebhookRequest (with the real verifier)", () => {
     const { d, logs, db } = deps();
     const res = await handleClerkWebhookRequest(signed(body("user.created")), d);
     assert.equal(res.status, 200);
-    assert.equal(db.seen.length, 1);
+    assert.equal(db.seen.length, 2);
     assert.deepEqual(logs, [{ level: "info", message: "clerk webhook", fields: { type: "user.created", outcome: "upserted" } }]);
     const logged = JSON.stringify(logs);
     for (const secret of ["Maya", "teacher@example.com", "user_test_1"]) assert.equal(logged.includes(secret), false);
@@ -285,7 +291,7 @@ describe("handleClerkWebhookRequest (with the real verifier)", () => {
     const { d, logs, db } = deps();
     const res = await handleClerkWebhookRequest(signed(body("user.deleted", { id: "user_test_1", deleted: true })), d);
     assert.equal(res.status, 200);
-    assert.equal(db.seen.length, 6);
+    assert.equal(db.seen.length, 7);
     assert.deepEqual(logs, [{ level: "info", message: "clerk webhook", fields: { type: "user.deleted", outcome: "deleted" } }]);
   });
 

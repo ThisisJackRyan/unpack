@@ -9,7 +9,11 @@
 // row for an account the person deleted (with their name and email). The
 // user.deleted cascade writes the id's hash in the same transaction, and
 // user.created and the first visit insert only when the hash is not
-// listed (one statement, so a delete committed first always wins).
+// listed. All three first take the id's account lock (accountLockStatement),
+// so they run one after another: a delete committed first always wins,
+// and a create committed first is deleted. Without the lock a create
+// could check the list before a concurrent delete commits it, while the
+// delete can't yet see the create's uncommitted row, leaving a row behind.
 //
 // What is stored: only clerk_user_hash, SHA-256 of "deleted-clerk-user:"
 // plus the Clerk user id, and deleted_at. Not keyed with a server secret
@@ -34,6 +38,10 @@ export const DELETED_ACCOUNT_RETENTION_DAYS = 30;
 // The most expired rows one delete prunes, so each prune stays small.
 export const DELETED_ACCOUNT_PRUNE_BATCH = 200;
 
+// Advisory lock space for accountLockStatement (the join limits use 1 and
+// 2, effort checks 3 and 4).
+export const ACCOUNT_LOCK_SPACE = 5;
+
 export function hashClerkUserId(clerkUserId: string): string {
   return createHash("sha256").update(`deleted-clerk-user:${clerkUserId}`, "utf8").digest("hex");
 }
@@ -41,6 +49,17 @@ export function hashClerkUserId(clerkUserId: string): string {
 // SQL: the hash given as parameter $n is not on the list.
 export function notDeletedSql(n: number): string {
   return `not exists (select 1 from deleted_clerk_users where clerk_user_hash = $${n}::text)`;
+}
+
+// The id's account lock, held to the end of the transaction. First in the
+// account delete and in every create, so a create's insert runs (with a
+// fresh snapshot) only after a concurrent delete has committed, or the
+// delete's row lock waits for the create. By hash, never the raw id.
+export function accountLockStatement(clerkUserId: string): Statement {
+  return {
+    text: "select pg_advisory_xact_lock($1::int, hashtext($2::text))",
+    params: [ACCOUNT_LOCK_SPACE, hashClerkUserId(clerkUserId)],
+  };
 }
 
 // Lists the id (a repeat delete keeps the first time).
@@ -76,7 +95,8 @@ export function isDeletedStatement(clerkUserId: string): Statement {
 
 // The first-visit creation (account.ts): insert or refresh the row, only
 // while the id is not listed. No row back: the account was deleted. An
-// existing row keeps its role (the update sets only name and email).
+// existing row keeps its role (the update sets only name and email). Run
+// it after accountLockStatement, in one batch (createAccountStatements).
 export function createAccountStatement(clerkUserId: string, name: string | null, email: string): Statement {
   return {
     text: `insert into teachers (clerk_user_id, name, email)
@@ -86,6 +106,11 @@ on conflict (clerk_user_id) do update set name = excluded.name, email = excluded
 returning id`,
     params: [clerkUserId, name, email, hashClerkUserId(clerkUserId)],
   };
+}
+
+// The lock, then the insert: run as one batch; the insert's rows are last.
+export function createAccountStatements(clerkUserId: string, name: string | null, email: string): Statement[] {
+  return [accountLockStatement(clerkUserId), createAccountStatement(clerkUserId, name, email)];
 }
 
 export const ACCOUNT_DELETED_PATH = "/account-deleted";

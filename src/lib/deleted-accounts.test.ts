@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import {
+  accountLockStatement,
+  ACCOUNT_LOCK_SPACE,
   createAccountStatement,
+  createAccountStatements,
   DELETED_ACCOUNT_RETENTION_DAYS,
   hashClerkUserId,
   isDeletedStatement,
@@ -36,5 +39,15 @@ describe("deleted accounts list", () => {
     assert.match(s.text, /^insert into teachers \(clerk_user_id, name, email\)\nselect \$1::text, \$2::text, \$3::text\nwhere not exists \(select 1 from deleted_clerk_users where clerk_user_hash = \$4::text\)\non conflict \(clerk_user_id\) do update set name = excluded\.name, email = excluded\.email\nreturning id$/);
     assert.deepEqual(s.params, ["user_test_1", "Maya Ro", "teacher@example.com", hashClerkUserId("user_test_1")]);
     assert.equal(/role/.test(s.text), false);
+  });
+
+  it("the first visit takes the id's account lock (by hash, in its own lock space) before the insert", () => {
+    const [lock, insert] = createAccountStatements("user_test_1", "Maya Ro", "teacher@example.com");
+    assert.deepEqual(lock, accountLockStatement("user_test_1"));
+    assert.equal(lock.text, "select pg_advisory_xact_lock($1::int, hashtext($2::text))");
+    assert.deepEqual(lock.params, [ACCOUNT_LOCK_SPACE, hashClerkUserId("user_test_1")]);
+    assert.equal(ACCOUNT_LOCK_SPACE, 5);
+    assert.equal(JSON.stringify(lock).includes("user_test_1"), false);
+    assert.deepEqual(insert, createAccountStatement("user_test_1", "Maya Ro", "teacher@example.com"));
   });
 });

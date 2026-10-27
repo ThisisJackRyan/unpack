@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { db, schema } from "@/db";
 import type { Teacher } from "@/db/schema";
-import { ACCOUNT_DELETED_PATH, createAccountStatement } from "./deleted-accounts";
+import { ACCOUNT_DELETED_PATH, createAccountStatements } from "./deleted-accounts";
 import { roleRedirect, setRoleOutcome, setRoleStatements, type AccountRole, type Area, type SetRoleOutcome } from "./account-role";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
@@ -52,9 +52,9 @@ export const getOrCreateAccount = cache(async (): Promise<Account> => {
   // Upsert, not insert: two first-visit requests can race to create the
   // row. The role is never set here: the account chooses on /welcome. A
   // deleted account (a session that outlived it) is refused in the same
-  // statement (see deleted-accounts.ts): no row is created, and the
-  // person sees a friendly page instead.
-  const [rows = []] = await neonExecutor([createAccountStatement(user.id, name, email)]);
+  // statement, after the id's account lock (see deleted-accounts.ts): no
+  // row is created, and the person sees a friendly page instead.
+  const [, rows = []] = await neonExecutor(createAccountStatements(user.id, name, email));
   if (rows.length === 0) redirect(ACCOUNT_DELETED_PATH);
   const [account] = await db
     .select()
