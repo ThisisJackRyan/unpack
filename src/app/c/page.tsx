@@ -16,8 +16,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 // The student's class home: their published readings, each with the
-// student's status (Not started, In progress, Passed, Challenged, or
-// Challenge denied). Already-joined students keep access even after the
+// student's status (Not started, In progress, Waiting for your teacher,
+// Passed, or Challenge denied). Already-joined students keep access even after the
 // teacher turns the join code off; the code only gates joining.
 export default async function StudentHomePage() {
   const session = await requireStudentSession();
@@ -73,13 +73,13 @@ function ReadingCard({ reading }: { reading: StudentReadingListItem }) {
         <span className="flex min-w-0 flex-col gap-1">
           <span className="text-xl font-bold break-words text-ink-950">{reading.title}</span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <StudentReadingStatusBadge status={reading.status} />
+            <StudentReadingStatusBadge audience="student" status={reading.status} />
             <MetaLine
               as="span"
               className="text-lg text-ink-700"
               parts={[
                 questionCountLabel(reading.questionCount),
-                reading.status === "in_progress" && doneLabel(reading.passedAnswers, reading.questionCount),
+                (reading.status === "in_progress" || reading.status === "waiting") && doneLabel(reading.passedAnswers, reading.questionCount),
               ]}
             />
           </span>

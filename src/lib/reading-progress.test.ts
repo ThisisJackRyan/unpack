@@ -11,12 +11,13 @@ import {
   readingProgress,
   stageAnnouncement,
   STUDENT_READING_STATUS_LABELS,
+  TEACHER_READING_STATUS_LABELS,
   studentReadingStatus,
   type AttemptView,
   type LatestChallenge,
   type ReadingProgress,
 } from "./reading-progress";
-import { DEFAULT_LIMITS, EXTRA_TRY_CHECKS } from "./reading-limits";
+import { DEFAULT_LIMITS, EXTRA_TRY_CHECKS, type Limits } from "./reading-limits";
 import { EFFORT_CHECK_LIMIT, MAX_TRIES } from "./validate-answers";
 
 const fail = (tryNumber: number): AttemptView => ({
@@ -48,7 +49,8 @@ describe("studentReadingStatus", () => {
   it("derives the status from attempts and the challenge", () => {
     assert.equal(s({ passed: false, tries: 0, checks: 0, challenge: null }), "not_started");
     assert.equal(s({ passed: false, tries: 1, checks: 1, challenge: null }), "in_progress");
-    assert.equal(s({ passed: false, tries: 3, checks: 3, challenge: null }), "in_progress");
+    assert.equal(s({ passed: false, tries: 2, checks: 2, challenge: null }), "in_progress");
+    assert.equal(s({ passed: false, tries: 3, checks: 3, challenge: null }), "waiting");
     assert.equal(s({ passed: true, tries: 2, checks: 2, challenge: null }), "passed");
     assert.equal(s({ passed: false, tries: 3, checks: 3, challenge: open }), "challenged");
   });
@@ -63,9 +65,9 @@ describe("studentReadingStatus", () => {
     assert.equal(s({ passed: false, tries: 0, checks: EFFORT_CHECK_LIMIT, challenge: denied }), "challenge_denied");
   });
 
-  it("denied with one more try is In progress, used or not, until a new note", () => {
+  it("denied with one more try is In progress until it is used, then Waiting until a new note", () => {
     assert.equal(s({ passed: false, tries: 3, checks: 3, challenge: deniedExtra, limits: granted }), "in_progress");
-    assert.equal(s({ passed: false, tries: 4, checks: 4, challenge: deniedExtra, limits: granted }), "in_progress");
+    assert.equal(s({ passed: false, tries: 4, checks: 4, challenge: deniedExtra, limits: granted }), "waiting");
     // The extra try failed and the student sent a new note (round 2).
     assert.equal(s({ passed: false, tries: 4, checks: 4, challenge: open, limits: granted }), "challenged");
     // ...which the teacher denied for good.
@@ -78,17 +80,42 @@ describe("studentReadingStatus", () => {
     }
   });
 
-  it("is In progress once every check is used, even with no try saved, by the student's own limit", () => {
+  it("is Waiting once every check is used, even with no try saved, by the student's own limit", () => {
     assert.equal(s({ passed: false, tries: 0, checks: EFFORT_CHECK_LIMIT - 1, challenge: null }), "not_started");
-    assert.equal(s({ passed: false, tries: 0, checks: EFFORT_CHECK_LIMIT, challenge: null }), "in_progress");
+    assert.equal(s({ passed: false, tries: 0, checks: EFFORT_CHECK_LIMIT, challenge: null }), "waiting");
     assert.equal(s({ passed: false, tries: 0, checks: EFFORT_CHECK_LIMIT, challenge: open }), "challenged");
-    assert.equal(s({ passed: false, tries: 0, checks: 2, challenge: null, limits: { tries: 1, checks: 2 } }), "in_progress");
+    assert.equal(s({ passed: false, tries: 0, checks: 2, challenge: null, limits: { tries: 1, checks: 2 } }), "waiting");
+  });
+
+  // F3: the status list and the reading page agree. Waiting is exactly
+  // the stages with no answer form and no note sent yet.
+  it("is Waiting exactly when the reading page shows out of tries or the check limit", () => {
+    const fail = (n: number): AttemptView => ({ tryNumber: n, result: "fail", answers: {} });
+    const cases: Array<{ tries: number; checks: number; challenge: LatestChallenge | null; limits: Limits }> = [];
+    for (const limits of [DEFAULT_LIMITS, granted, { tries: 1, checks: 2 }])
+      for (let tries = 0; tries <= limits.tries; tries++)
+        for (let checks = tries; checks <= limits.checks + 1; checks++)
+          for (const challenge of [null, open, denied, deniedExtra]) cases.push({ tries, checks, challenge, limits });
+    for (const c of cases) {
+      const stage = answerStage(progress({ ...c, attempts: Array.from({ length: c.tries }, (_, i) => fail(i + 1)) }));
+      const status = s({ passed: false, ...c });
+      assert.equal(status === "waiting", stage.kind === "out_of_tries" || stage.kind === "check_limit", JSON.stringify(c));
+    }
   });
 
   it("has a label for each", () => {
     assert.deepEqual(Object.values(STUDENT_READING_STATUS_LABELS), [
       "Not started",
       "In progress",
+      "Waiting for your teacher",
+      "Passed",
+      "Waiting for your teacher",
+      "Challenge denied",
+    ]);
+    assert.deepEqual(Object.values(TEACHER_READING_STATUS_LABELS), [
+      "Not started",
+      "In progress",
+      "Waiting for teacher",
       "Passed",
       "Challenged",
       "Challenge denied",
@@ -304,21 +331,28 @@ describe("readingListItems", () => {
       { id: "r4", title: "D", question_count: 1, passed: false, tries: 1, challenge: null },
       { id: "r5", title: "E", question_count: 1, passed: false, tries: 0, checks: EFFORT_CHECK_LIMIT, challenge: null },
       { id: "r6", title: "F", question_count: 1, passed: false, tries: 3, challenge: "denied", extra_try: false },
-      { id: "r7", title: "G", question_count: 1, passed: false, tries: 3, challenge: "denied", extra_try: true },
+      { id: "r7", title: "G", question_count: 1, passed: false, tries: 3, challenge: "denied", extra_try: true, tries_allowed: 4, checks_allowed: 5 },
       { id: "r8", title: "H", question_count: 1, passed: false, tries: 3, challenge: "approved" },
       { id: "r9", title: "I", question_count: 1, passed: true, tries: 4, challenge: "closed" },
+      { id: "r10", title: "J", question_count: 1, passed: false, tries: 3, checks: 3, challenge: null },
+      { id: "r11", title: "K", question_count: 1, passed: false, tries: 4, challenge: "denied", extra_try: true, tries_allowed: 4, checks_allowed: 5 },
     ]);
     assert.deepEqual(items.map((i) => i.status), [
       "not_started",
       "passed",
       "challenged",
       "in_progress",
-      "in_progress",
+      // Every check used with no try saved: only the note is left.
+      "waiting",
       "challenge_denied",
       "in_progress",
       "passed",
       "passed",
+      "waiting",
+      "waiting",
     ]);
+    // The student's own tries limit, so a used one more try is Waiting.
+    assert.match(s.text, /as tries_allowed/);
     assert.deepEqual(items[0], { id: "r1", title: "A", questionCount: 3, status: "not_started", passedAnswers: 0 });
   });
 });

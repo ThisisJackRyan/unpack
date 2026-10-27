@@ -140,6 +140,7 @@ export function statusCounts(status: ClassStatus, readingId: string): Record<Stu
   const counts: Record<StudentReadingStatus, number> = {
     not_started: 0,
     in_progress: 0,
+    waiting: 0,
     passed: 0,
     challenged: 0,
     challenge_denied: 0,
@@ -148,4 +149,15 @@ export function statusCounts(status: ClassStatus, readingId: string): Record<Stu
     counts[(status.cells[cellKey(s.id, readingId)] ?? NOT_STARTED_CELL).status]++;
   }
   return counts;
+}
+
+// "0 of 2 students passed", under each reading's title on the class
+// progress table. Counts the Passed status from studentReadingStatus, the
+// same rule as the student's own Passed badge and result.
+export function passedSummary(status: ClassStatus, readingId: string): string {
+  return passedSummaryLabel(statusCounts(status, readingId).passed, status.students.length);
+}
+
+export function passedSummaryLabel(passed: number, students: number): string {
+  return `${passed} of ${students} ${students === 1 ? "student" : "students"} passed`;
 }

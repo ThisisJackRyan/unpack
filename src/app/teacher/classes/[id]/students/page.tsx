@@ -5,7 +5,7 @@ import { backLink, card, focusRing } from "@/components/ui";
 import {
   cellKey,
   NOT_STARTED_CELL,
-  statusCounts,
+  passedSummary,
   NEEDS_RESET_HELP,
   triesLabel,
   type ClassStatus,
@@ -127,7 +127,7 @@ function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
   }
   return (
     <span className="flex flex-col items-start gap-1">
-      <StudentReadingStatusBadge status={cell.status} size="sm" />
+      <StudentReadingStatusBadge audience="teacher" status={cell.status} size="sm" />
       {cell.status !== "not_started" && (
         <span className="text-base text-ink-700 tabular-nums">{triesLabel(cell)}</span>
       )}
@@ -144,11 +144,6 @@ function StudentLink({ classId, student, className }: { classId: string; student
       {student.name}
     </Link>
   );
-}
-
-// "4 of 12 passed", under each reading's title.
-function passedSummary(status: ClassStatus, readingId: string): string {
-  return `${statusCounts(status, readingId).passed} of ${status.students.length} passed`;
 }
 
 // Before any reading is published: just the names, each with Delete.

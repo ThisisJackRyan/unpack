@@ -78,7 +78,7 @@ export default async function StudentProgressPage({ params }: Props) {
                       {cell.status !== "not_started" && (
                         <span className="text-base text-ink-700 tabular-nums">{triesLabel(cell)}</span>
                       )}
-                      <StudentReadingStatusBadge status={cell.status} size="sm" />
+                      <StudentReadingStatusBadge audience="teacher" status={cell.status} size="sm" />
                     </span>
                   )}
                 </div>

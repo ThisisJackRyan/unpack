@@ -1,4 +1,4 @@
-import { STUDENT_READING_STATUS_LABELS, type StudentReadingStatus } from "@/lib/reading-progress";
+import { STUDENT_READING_STATUS_LABELS, TEACHER_READING_STATUS_LABELS, type StudentReadingStatus } from "@/lib/reading-progress";
 import { pill } from "./ui";
 
 // A student's status on a reading, in the ReadingStatusBadge style: a dot
@@ -9,6 +9,9 @@ import { pill } from "./ui";
 const TONES: Record<StudentReadingStatus, { pill: string; dot: string }> = {
   not_started: { pill: "bg-ink-100 text-ink-700", dot: "bg-ink-400" },
   in_progress: { pill: "bg-primary-50 text-primary-700", dot: "bg-primary-600" },
+  // Out of tries: amber like Challenged (the teacher is next), with a
+  // hollow dot so the two read apart on the teacher's table.
+  waiting: { pill: "bg-warning-50 text-warning-900", dot: "border-2 border-warning-600" },
   passed: { pill: "bg-success-50 text-success-800", dot: "" },
   challenged: { pill: "bg-warning-50 text-warning-900", dot: "bg-warning-500" },
   challenge_denied: { pill: "bg-white text-ink-800 ring-1 ring-ink-300 ring-inset", dot: "border-2 border-ink-500" },
@@ -16,13 +19,18 @@ const TONES: Record<StudentReadingStatus, { pill: string; dot: string }> = {
 
 export function StudentReadingStatusBadge({
   status,
+  audience,
   size = "base",
 }: {
   status: StudentReadingStatus;
+  // Whose screen: the labels differ for Waiting and Challenged (see
+  // reading-progress.ts).
+  audience: "student" | "teacher";
   // "sm" for the teacher's table.
   size?: "base" | "sm";
 }) {
   const tone = TONES[status];
+  const labels = audience === "teacher" ? TEACHER_READING_STATUS_LABELS : STUDENT_READING_STATUS_LABELS;
   return (
     <span className={`${pill} ${tone.pill} ${size === "sm" ? "text-sm" : "text-base"}`}>
       {status === "passed" ? (
@@ -36,7 +44,7 @@ export function StudentReadingStatusBadge({
       ) : (
         <span aria-hidden="true" className={`h-2 w-2 rounded-full ${tone.dot}`} />
       )}
-      {STUDENT_READING_STATUS_LABELS[status]}
+      {labels[status]}
     </span>
   );
 }

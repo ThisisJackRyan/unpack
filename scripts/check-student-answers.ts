@@ -429,6 +429,7 @@ async function checkRefusals() {
 
 async function checkChallenges(outOfTries: string) {
   console.log(`\n== CHALLENGES: ${N} parallel sends ==`);
+  check((await statusOf(outOfTries)) === "waiting", "every try failed, no note yet: status waiting (Waiting for your teacher)");
   const early = await newStudent();
   await submit(early, "fail", { delayMs: 5 });
   const tooEarly = await sendChallenge(early, readingId, "Please look.", execute);
@@ -465,7 +466,7 @@ async function checkCheckLimit() {
   check(c.attempts === 0 && c.checks === EFFORT_CHECK_LIMIT, `0 tries: attempts ${c.attempts}, checks ${c.checks}`);
   let stage = answerStage(await loadReadingProgress(none, readingId, execute));
   check(stage.kind === "check_limit" && stage.attempt === null, `0 tries at the limit, page: ${stage.kind}`);
-  check((await statusOf(none)) === "in_progress", "0 tries at the limit, status: in_progress");
+  check((await statusOf(none)) === "waiting", "0 tries at the limit, status: waiting (Waiting for your teacher)");
   const refused = await submit(none, "pass");
   check(refused.status === "too_many_checks", `0 tries at the limit, submit: ${refused.status}`);
   const settled = await Promise.allSettled(
