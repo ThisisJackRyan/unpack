@@ -60,14 +60,14 @@ export default async function StudentReadingPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-2">
-        <MetaLine className="text-lg text-zinc-600" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
-        <h1 id="reading-title" className="text-4xl font-semibold tracking-tight break-words text-zinc-950">
+        <MetaLine className="text-lg text-ink-600" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
+        <h1 id="reading-title" className="text-4xl font-semibold tracking-tight break-words text-ink-950">
           {reading.title}
         </h1>
       </div>
 
-      <article aria-labelledby="reading-title" className={`${card} rounded-2xl px-6 py-8 sm:px-10 sm:py-10`}>
-        <NoCopyText className="flex max-w-[65ch] flex-col gap-6 text-[1.1875rem] leading-[1.8] text-zinc-800 sm:text-xl sm:leading-[1.8]">
+      <article aria-labelledby="reading-title" className={`${card} px-6 py-8 sm:px-10 sm:py-10`}>
+        <NoCopyText className="flex max-w-[65ch] flex-col gap-6 text-[1.1875rem] leading-[1.8] text-ink-800 sm:text-xl sm:leading-[1.8]">
           {readingParagraphs(reading.bodyText).map((p, i) => (
             <p key={i} className="break-words whitespace-pre-line">
               {p}
@@ -83,7 +83,7 @@ export default async function StudentReadingPage({ params }: Props) {
       </p>
 
       <section aria-labelledby="questions-heading" className="flex flex-col gap-5">
-        <h2 id="questions-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+        <h2 id="questions-heading" className="text-2xl font-semibold tracking-tight text-ink-950">
           Your questions
         </h2>
 
@@ -108,8 +108,8 @@ export default async function StudentReadingPage({ params }: Props) {
         )}
 
         {view.kind === "error" && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p aria-live="polite" className="text-lg text-zinc-700">
+          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+            <p aria-live="polite" className="text-lg text-ink-700">
               {view.message}
             </p>
             <RetryButton />
@@ -119,8 +119,8 @@ export default async function StudentReadingPage({ params }: Props) {
         {/* Question writing is unavailable: coming back later is the fix,
             so no Try again. */}
         {view.kind === "unavailable" && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p role="status" className="text-lg text-zinc-700">
+          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+            <p role="status" className="text-lg text-ink-700">
               {view.message}
             </p>
           </div>

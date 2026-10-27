@@ -25,8 +25,8 @@ export default async function LearnHomePage() {
   return (
     <div className="flex flex-col gap-10">
       <div className="flex flex-col gap-2">
-        <h1 className="text-4xl font-semibold tracking-tight text-zinc-950">Your reading</h1>
-        <p className="text-lg text-zinc-600">Read something you like, then answer a few questions in your own words.</p>
+        <h1 className="text-4xl font-semibold tracking-tight text-ink-950">Your reading</h1>
+        <p className="text-lg text-ink-600">Read something you like, then answer a few questions in your own words.</p>
       </div>
 
       {history.length === 0 ? (
@@ -43,13 +43,13 @@ export default async function LearnHomePage() {
       {history.length > 0 && (
         <section aria-labelledby="recent-heading" className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id="recent-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+            <h2 id="recent-heading" className="text-2xl font-semibold tracking-tight text-ink-950">
               Recent
             </h2>
             {history.length > RECENT && (
               <Link
                 href="/learn/history"
-                className={`inline-flex min-h-11 items-center rounded-lg px-2 text-base font-semibold text-indigo-700 underline-offset-2 hover:underline ${focusRing}`}
+                className={`inline-flex min-h-11 items-center rounded-lg px-2 text-base font-semibold text-primary-700 underline-offset-2 hover:underline ${focusRing}`}
               >
                 See all {history.length}
               </Link>

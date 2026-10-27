@@ -56,7 +56,7 @@ export function ResetTriesButton({
           ({name}, {readingTitle})
         </span>
       </button>
-      <p aria-live="polite" className="text-sm font-medium text-red-700 empty:hidden">
+      <p aria-live="polite" className="text-sm font-medium text-danger-700 empty:hidden">
         {state.error ?? ""}
       </p>
     </form>

@@ -31,9 +31,9 @@ export function ClassSettingsForm({
   const warn = warnsOnGradeChange(gradeLevel, picked, draftsToClear) && isGradeLevel(picked);
 
   return (
-    <form action={dispatch} noValidate aria-busy={pending} className="flex flex-col divide-y divide-zinc-200">
+    <form action={dispatch} noValidate aria-busy={pending} className="flex flex-col divide-y divide-ink-200">
       <div className="flex flex-col gap-2 py-5 first:pt-0">
-        <label htmlFor="class-name" className="text-base font-semibold text-zinc-950">
+        <label htmlFor="class-name" className="text-base font-semibold text-ink-950">
           Class name
         </label>
         <input
@@ -48,16 +48,16 @@ export function ClassSettingsForm({
           aria-describedby={errors.name ? "class-name-error" : undefined}
           className={field}
         />
-        <p id="class-name-error" aria-live="polite" className="text-base text-red-700 empty:hidden">
+        <p id="class-name-error" aria-live="polite" className="text-base text-danger-700 empty:hidden">
           {errors.name}
         </p>
       </div>
 
       <div className="flex flex-col gap-2 py-5">
-        <label htmlFor="class-grade" className="text-base font-semibold text-zinc-950">
+        <label htmlFor="class-grade" className="text-base font-semibold text-ink-950">
           Grade level
         </label>
-        <p id="class-grade-help" className="text-sm text-zinc-600">
+        <p id="class-grade-help" className="text-sm text-ink-600">
           {CLASS_GRADE_HELP}
         </p>
         <select
@@ -76,15 +76,15 @@ export function ClassSettingsForm({
             </option>
           ))}
         </select>
-        <p id="class-grade-error" aria-live="polite" className="text-base text-red-700 empty:hidden">
+        <p id="class-grade-error" aria-live="polite" className="text-base text-danger-700 empty:hidden">
           {errors.gradeLevel}
         </p>
         {warn && isGradeLevel(picked) && (
           <p
             id="class-grade-warning"
-            className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-950"
+            className="flex gap-3 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-base text-warning-950"
           >
-            <span aria-hidden="true" className="mt-2 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+            <span aria-hidden="true" className="mt-2 h-2 w-2 shrink-0 rounded-full bg-warning-500" />
             <span>{gradeChangeWarning(draftsToClear, picked)}</span>
           </p>
         )}
@@ -93,7 +93,7 @@ export function ClassSettingsForm({
       <div className="flex flex-col gap-4 pt-5 sm:flex-row sm:items-center sm:justify-between">
         <p
           aria-live="polite"
-          className={`text-base font-medium empty:hidden ${state.error ? "text-red-700" : "text-indigo-900"}`}
+          className={`text-base font-medium empty:hidden ${state.error ? "text-danger-700" : "text-primary-900"}`}
         >
           {pending ? "" : (state.error ?? state.message ?? "")}
         </p>

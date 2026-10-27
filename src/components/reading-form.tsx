@@ -24,16 +24,16 @@ import {
   type ReadingFormValues,
 } from "./reading-form-state";
 
-const label = "text-base font-semibold text-zinc-900";
-const hint = "text-base text-zinc-600";
-const errorText = "text-base text-red-700";
+const label = "text-base font-semibold text-ink-900";
+const hint = "text-base text-ink-600";
+const errorText = "text-base text-danger-700";
 
 // A pill segmented control: a light gray track, the chosen option white.
 // The radio inside each option is visually hidden but still focusable, so
 // arrow keys move between options and the focus ring shows on the option.
-const track = "grid gap-1 rounded-xl bg-zinc-100 p-1";
+const track = "grid gap-1 rounded-xl bg-ink-100 p-1";
 const option =
-  "flex min-h-12 cursor-pointer rounded-lg px-4 text-zinc-600 transition-colors hover:text-zinc-950 has-checked:bg-white has-checked:text-zinc-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-zinc-200 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-indigo-600";
+  "flex min-h-12 cursor-pointer rounded-lg px-4 text-ink-600 transition-colors hover:text-ink-950 has-checked:bg-white has-checked:text-ink-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-ink-200 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600";
 
 const SOURCES = [
   { value: "link", label: "Paste a link" },
@@ -199,7 +199,7 @@ export function ReadingForm({
                     {" "}
                     <label
                       htmlFor="source-text"
-                      className="cursor-pointer font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
+                      className="cursor-pointer font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900"
                     >
                       {state.suggestText}
                     </label>
@@ -214,7 +214,7 @@ export function ReadingForm({
                       {" "}
                       <label
                         htmlFor="source-text"
-                        className="cursor-pointer font-semibold text-indigo-800 underline underline-offset-2 hover:text-indigo-950"
+                        className="cursor-pointer font-semibold text-primary-800 underline underline-offset-2 hover:text-primary-950"
                       >
                         {state.suggestText}
                       </label>
@@ -230,7 +230,7 @@ export function ReadingForm({
           <label htmlFor="title" className={label}>
             Title
             {create && (
-              <span className={`font-normal text-zinc-500 ${linkOnly}`}> (optional)</span>
+              <span className={`font-normal text-ink-500 ${linkOnly}`}> (optional)</span>
             )}
           </label>
           <input
@@ -285,7 +285,7 @@ export function ReadingForm({
               <p
                 id="body-count"
                 aria-live="polite"
-                className={`text-sm tabular-nums ${overLimit ? "font-semibold text-red-700" : "text-zinc-500"}`}
+                className={`text-sm tabular-nums ${overLimit ? "font-semibold text-danger-700" : "text-ink-500"}`}
               >
                 {bodyLength.toLocaleString("en-US")} /{" "}
                 {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
@@ -300,8 +300,8 @@ export function ReadingForm({
       </div>
 
       {!titleOnly && (
-        <div className="flex flex-col gap-6 border-t border-zinc-200 pt-8">
-          <h2 className="text-lg font-semibold text-zinc-950">Questions</h2>
+        <div className="flex flex-col gap-6 border-t border-ink-200 pt-8">
+          <h2 className="text-lg font-semibold text-ink-950">Questions</h2>
 
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
@@ -384,7 +384,7 @@ export function ReadingForm({
                       className="sr-only"
                     />
                     <span className="text-base font-semibold">{questionModeLabel(m)}</span>
-                    <span id={`mode-${m}-hint`} className="text-sm text-zinc-600">
+                    <span id={`mode-${m}-hint`} className="text-sm text-ink-600">
                       {questionModeHint(m)}
                     </span>
                   </label>
@@ -402,7 +402,7 @@ export function ReadingForm({
         {errors.form}
       </p>
 
-      <div className="flex flex-col-reverse gap-3 border-t border-zinc-200 pt-6 sm:flex-row sm:justify-end">
+      <div className="flex flex-col-reverse gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:justify-end">
         <Link href={cancelHref} className={secondaryButton}>
           Cancel
         </Link>

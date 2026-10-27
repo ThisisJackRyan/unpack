@@ -3,9 +3,9 @@
 import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { AGE_CONFIRMED_VALUE, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
 import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, type RoleFormState } from "./role-form-state";
-import { primaryButton, secondaryButton } from "./ui";
+import { primaryButtonLarge, secondaryButtonLarge } from "./ui";
 
-const errorText = "text-base text-red-700";
+const errorText = "text-base text-danger-700";
 
 const CHOICES: { role: AccountRole; title: string; line: string }[] = [
   { role: "teacher", title: "I’m a teacher", line: "Make a class, share a code, and see who’s done." },
@@ -88,13 +88,13 @@ export function RolePicker({
   return (
     <form action={formAction} onSubmit={onSubmit} noValidate className="group/role flex flex-col gap-6">
       <fieldset className="flex flex-col gap-3" aria-describedby={errors.role ? "role-error" : undefined}>
-        <legend className="mb-3 text-xl font-semibold text-zinc-950">{legend}</legend>
+        <legend className="mb-3 text-xl font-semibold text-ink-950">{legend}</legend>
         {/* Remount on each result so the kept choice is applied. */}
         <div key={`role-${state.role ?? initialRole ?? "none"}`} className="grid gap-3 sm:grid-cols-2">
           {CHOICES.map((c) => (
             <label
               key={c.role}
-              className="relative flex min-h-32 cursor-pointer flex-col gap-2 rounded-2xl border-2 border-zinc-200 bg-white p-5 transition-colors hover:border-indigo-300 has-checked:border-indigo-600 has-checked:bg-indigo-50/60 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-indigo-600"
+              className="relative flex min-h-32 cursor-pointer flex-col gap-2 rounded-2xl border-2 border-ink-200 bg-white p-5 transition-colors hover:border-primary-300 has-checked:border-primary-600 has-checked:bg-primary-50/60 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600"
             >
               <input
                 ref={c.role === "teacher" ? teacherRadio : undefined}
@@ -109,12 +109,12 @@ export function RolePicker({
               />
               <span
                 aria-hidden="true"
-                className="absolute top-5 right-5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-zinc-300 bg-white peer-checked:border-indigo-600 peer-checked:bg-indigo-600"
+                className="absolute top-5 right-5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-ink-300 bg-white peer-checked:border-primary-600 peer-checked:bg-primary-600"
               >
                 <span className="h-2 w-2 rounded-full bg-white" />
               </span>
-              <span className="pr-10 text-xl font-semibold text-zinc-950">{c.title}</span>
-              <span id={`role-${c.role}-line`} className="text-base text-zinc-600">
+              <span className="pr-10 text-xl font-semibold text-ink-950">{c.title}</span>
+              <span id={`role-${c.role}-line`} className="text-base text-ink-600">
                 {c.line}
               </span>
             </label>
@@ -127,7 +127,7 @@ export function RolePicker({
 
       {askAge && (
         <div
-          className={`flex-col gap-2 rounded-2xl border border-zinc-200 bg-white p-5 ${
+          className={`flex-col gap-2 rounded-2xl border border-ink-200 bg-white p-5 ${
             role === "self_learner" ? "flex" : "hidden group-has-[#role-self_learner:checked]/role:flex"
           }`}
         >
@@ -142,14 +142,14 @@ export function RolePicker({
               }}
               aria-invalid={ageError ? true : undefined}
               aria-describedby={age.describedBy}
-              className="h-6 w-6 shrink-0 cursor-pointer rounded accent-indigo-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+              className="h-6 w-6 shrink-0 cursor-pointer rounded accent-primary-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
             />
-            <span className="text-lg font-semibold text-zinc-950">I’m 13 or older</span>
+            <span className="text-lg font-semibold text-ink-950">I’m 13 or older</span>
           </label>
           {/* One note at a time: the error replaces the hint while active.
               The error line stays mounted (empty) so it is announced. */}
           {age.show === "hint" && (
-            <p id={AGE_HINT_ID} className="text-base text-zinc-600">
+            <p id={AGE_HINT_ID} className="text-base text-ink-600">
               You need to be 13 or older to read on your own. Younger readers can join a class with a code from their
               teacher.
             </p>
@@ -164,17 +164,17 @@ export function RolePicker({
         <section
           aria-labelledby="switch-warning-title"
           aria-describedby="switch-warning-body"
-          className="flex flex-col gap-4 rounded-2xl border border-amber-300 bg-amber-50 p-5"
+          className="flex flex-col gap-4 rounded-2xl border border-warning-300 bg-warning-50 p-5"
         >
           <h2
             id="switch-warning-title"
             ref={warningHeading}
             tabIndex={-1}
-            className="rounded-lg text-xl font-semibold text-amber-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
+            className="rounded-lg text-xl font-semibold text-warning-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning-600"
           >
             Your classes stay open
           </h2>
-          <p id="switch-warning-body" className="text-base text-amber-950">
+          <p id="switch-warning-body" className="text-base text-warning-950">
             While you read for yourself, your classes and join codes stay live. Students can still join with a code
             and keep working on their readings. You can switch back here any time to get to your classes.
           </p>
@@ -184,7 +184,7 @@ export function RolePicker({
               name="confirmSwitch"
               value={SWITCH_CONFIRM_VALUE}
               disabled={pending}
-              className={`${primaryButton} min-h-14 px-6 text-lg`}
+              className={`${primaryButtonLarge}`}
             >
               {pending ? "Switching…" : "Switch to reading for myself"}
             </button>
@@ -192,7 +192,7 @@ export function RolePicker({
               type="button"
               onClick={keepTeaching}
               disabled={pending}
-              className={`${secondaryButton} min-h-14 px-6 text-lg disabled:cursor-not-allowed disabled:opacity-60`}
+              className={`${secondaryButtonLarge} disabled:cursor-not-allowed disabled:opacity-60`}
             >
               Keep teaching
             </button>
@@ -210,7 +210,7 @@ export function RolePicker({
       </p>
 
       {!warning && (
-        <button type="submit" disabled={pending} className={`${primaryButton} min-h-14 px-8 text-lg sm:self-start`}>
+        <button type="submit" disabled={pending} className={`${primaryButtonLarge} sm:self-start`}>
           {pending ? "Saving…" : submitLabel}
         </button>
       )}

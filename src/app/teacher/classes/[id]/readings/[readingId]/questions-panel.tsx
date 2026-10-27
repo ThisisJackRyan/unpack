@@ -37,9 +37,9 @@ type Props = {
 type Running = { intent: QuestionIntent; questionId?: string };
 
 const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
-const quietButton = `${smallButton} text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950`;
+const quietButton = `${smallButton} text-ink-700 hover:bg-ink-100 hover:text-ink-950`;
 // primaryButton in red, for confirming a delete.
-const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-red-700 px-5 text-base font-semibold text-white transition-colors hover:bg-red-800 ${focusRing}`;
+const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-danger-700 px-5 text-base font-semibold text-white transition-colors hover:bg-danger-800 ${focusRing}`;
 
 const ROLE_LABELS: Record<QuestionRole, string> = {
   detail: "From the text",
@@ -107,12 +107,12 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           <h2
             id="questions-heading"
             tabIndex={-1}
-            className="rounded text-xl font-semibold text-zinc-950 focus:outline-none"
+            className="rounded text-xl font-semibold text-ink-950 focus:outline-none"
           >
             Questions
           </h2>
           <MetaLine
-            className="text-base text-zinc-600"
+            className="text-base text-ink-600"
             parts={[questionCountLabel(questionCount), `Written for ${gradeLabel}`]}
           />
         </div>
@@ -142,7 +142,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
             ? state.status
             : ""}
       </p>
-      <p role="alert" className="text-base text-red-700 empty:hidden">
+      <p role="alert" className="text-base text-danger-700 empty:hidden">
         {panelError}
       </p>
       {!pending && state.limit && <LimitNotice>{state.limit}</LimitNotice>}
@@ -190,7 +190,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
         )
       ) : (
         <div className="flex flex-col gap-4">
-          <p className="text-base text-zinc-700">
+          <p className="text-base text-ink-700">
             Each student gets their own {questionCountLabel(questionCount)} when they first
             open this reading. Their set is saved, so it stays the same if they try again.
           </p>
@@ -204,14 +204,14 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           ) : (
             state.sample && (
               <div className="flex flex-col gap-3">
-                <p className="text-sm font-medium text-zinc-600">
+                <p className="text-sm font-medium text-ink-600">
                   Sample only. It isn’t saved, and each student gets their own set.
                 </p>
                 <ol className="flex flex-col gap-3" aria-label="Sample questions">
                   {state.sample.map((prompt, i) => (
                     <li
                       key={i}
-                      className="flex gap-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4"
+                      className="flex gap-4 rounded-xl border border-dashed border-ink-300 bg-ink-50 p-4"
                     >
                       <QuestionNumber n={i + 1} />
                       <QuestionText
@@ -227,8 +227,8 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
         </div>
       )}
 
-      <div className="flex flex-col gap-3 border-t border-zinc-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p id="publish-hint" className="text-base text-zinc-600">
+      <div className="flex flex-col gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <p id="publish-hint" className="text-base text-ink-600">
           {canPublish
             ? "Publishing shows it to the class and locks the questions."
             : "Write the questions before you publish."}
@@ -341,12 +341,12 @@ function ConfirmButton({
         ref={dialogRef}
         aria-labelledby={`${id}-title`}
         aria-describedby={`${id}-body`}
-        className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-2xl bg-white p-6 shadow-xl backdrop:bg-zinc-950/40"
+        className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-2xl bg-white p-6 shadow-xl backdrop:bg-ink-950/40"
       >
-        <h2 id={`${id}-title`} className="text-xl font-semibold text-zinc-950">
+        <h2 id={`${id}-title`} className="text-xl font-semibold text-ink-950">
           {title}
         </h2>
-        <p id={`${id}-body`} className="mt-2 text-base text-zinc-600">
+        <p id={`${id}-body`} className="mt-2 text-base text-ink-600">
           {body}
         </p>
         <IntentForm
@@ -423,14 +423,14 @@ function QuestionCard({
   }
 
   return (
-    <li className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-xs">
+    <li className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4 shadow-xs">
       <QuestionNumber n={question.position} />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {regenerating ? (
           <div aria-hidden="true" className="flex animate-pulse flex-col gap-2 py-1">
-            <div className="h-3 w-24 rounded bg-zinc-100" />
-            <div className="h-4 w-11/12 rounded bg-zinc-200" />
-            <div className="h-4 w-2/3 rounded bg-zinc-200" />
+            <div className="h-3 w-24 rounded bg-ink-100" />
+            <div className="h-4 w-11/12 rounded bg-ink-200" />
+            <div className="h-4 w-2/3 rounded bg-ink-200" />
           </div>
         ) : editing ? (
           <IntentForm
@@ -440,7 +440,7 @@ function QuestionCard({
             track={track}
             className="flex flex-col gap-2"
           >
-            <label htmlFor={fieldId} className="text-sm font-medium text-zinc-500">
+            <label htmlFor={fieldId} className="text-sm font-medium text-ink-500">
               {ROLE_LABELS[role]}
               <span className="sr-only">, question {question.position}</span>
             </label>
@@ -455,10 +455,10 @@ function QuestionCard({
               onKeyDown={onKeyDown}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? errorId : `${fieldId}-count`}
-              className={`block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-base leading-relaxed text-zinc-950 aria-invalid:border-red-600 ${focusRing}`}
+              className={`block w-full rounded-xl border border-ink-300 bg-white px-3 py-2 text-base leading-relaxed text-ink-950 aria-invalid:border-danger-600 ${focusRing}`}
             />
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p id={`${fieldId}-count`} className="text-sm text-zinc-500 tabular-nums">
+              <p id={`${fieldId}-count`} className="text-sm text-ink-500 tabular-nums">
                 {length} / {QUESTION_MAX_LENGTH}
                 <span className="sr-only"> characters</span>
               </p>
@@ -469,7 +469,7 @@ function QuestionCard({
                 <button
                   type="submit"
                   disabled={disabled}
-                  className={`${smallButton} bg-indigo-600 text-white hover:bg-indigo-700`}
+                  className={`${smallButton} bg-primary-600 text-white hover:bg-primary-700`}
                 >
                   {saving ? "Saving…" : "Save"}
                 </button>
@@ -481,7 +481,7 @@ function QuestionCard({
         )}
 
         {error && (
-          <p id={errorId} role="alert" className="text-sm text-red-700">
+          <p id={errorId} role="alert" className="text-sm text-danger-700">
             {error}
           </p>
         )}
@@ -526,7 +526,7 @@ function QuestionCard({
               questionId={question.id}
               dispatch={dispatch}
               track={track}
-              className={`${smallButton} text-red-700 hover:bg-red-50`}
+              className={`${smallButton} text-danger-700 hover:bg-danger-50`}
             />
           </div>
         )}
@@ -538,8 +538,8 @@ function QuestionCard({
 export function QuestionText({ role, prompt }: { role: QuestionRole; prompt: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-zinc-500">{ROLE_LABELS[role]}</span>
-      <p className="text-base leading-relaxed break-words text-zinc-900">{prompt}</p>
+      <span className="text-sm font-medium text-ink-500">{ROLE_LABELS[role]}</span>
+      <p className="text-base leading-relaxed break-words text-ink-900">{prompt}</p>
     </div>
   );
 }
@@ -548,7 +548,7 @@ export function QuestionNumber({ n }: { n: number }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-sm font-semibold text-indigo-700 tabular-nums"
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-sm font-semibold text-primary-700 tabular-nums"
     >
       {n}
     </span>
@@ -560,12 +560,12 @@ function SkeletonList({ count }: { count: number }) {
   return (
     <ol aria-hidden="true" className="flex animate-pulse flex-col gap-3">
       {Array.from({ length: count }, (_, i) => (
-        <li key={i} className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4">
-          <div className="h-8 w-8 shrink-0 rounded-full bg-zinc-200" />
+        <li key={i} className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4">
+          <div className="h-8 w-8 shrink-0 rounded-full bg-ink-200" />
           <div className="flex flex-1 flex-col gap-2 py-1">
-            <div className="h-3 w-24 rounded bg-zinc-100" />
-            <div className="h-4 w-11/12 rounded bg-zinc-200" />
-            <div className="h-4 w-2/3 rounded bg-zinc-200" />
+            <div className="h-3 w-24 rounded bg-ink-100" />
+            <div className="h-4 w-11/12 rounded bg-ink-200" />
+            <div className="h-4 w-2/3 rounded bg-ink-200" />
           </div>
         </li>
       ))}
@@ -575,9 +575,9 @@ function SkeletonList({ count }: { count: number }) {
 
 function EmptyState({ title, body, children }: { title: string; body: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-10 text-center">
-      <h3 className="text-lg font-semibold text-zinc-950">{title}</h3>
-      <p className="max-w-md text-base text-zinc-600">{body}</p>
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-ink-300 bg-ink-50 px-6 py-10 text-center">
+      <h3 className="text-lg font-semibold text-ink-950">{title}</h3>
+      <p className="max-w-md text-base text-ink-600">{body}</p>
       <div className="mt-2">{children}</div>
     </div>
   );

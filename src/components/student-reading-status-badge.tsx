@@ -7,11 +7,11 @@ import { pill } from "./ui";
 // denied is neutral (a ringed zinc pill with a hollow dot), never red: it
 // is a decision, not an error.
 const TONES: Record<StudentReadingStatus, { pill: string; dot: string }> = {
-  not_started: { pill: "bg-zinc-100 text-zinc-700", dot: "bg-zinc-400" },
-  in_progress: { pill: "bg-indigo-50 text-indigo-700", dot: "bg-indigo-600" },
-  passed: { pill: "bg-emerald-50 text-emerald-800", dot: "" },
-  challenged: { pill: "bg-amber-50 text-amber-900", dot: "bg-amber-500" },
-  challenge_denied: { pill: "bg-white text-zinc-800 ring-1 ring-zinc-300 ring-inset", dot: "border-2 border-zinc-500" },
+  not_started: { pill: "bg-ink-100 text-ink-700", dot: "bg-ink-400" },
+  in_progress: { pill: "bg-primary-50 text-primary-700", dot: "bg-primary-600" },
+  passed: { pill: "bg-success-50 text-success-800", dot: "" },
+  challenged: { pill: "bg-warning-50 text-warning-900", dot: "bg-warning-500" },
+  challenge_denied: { pill: "bg-white text-ink-800 ring-1 ring-ink-300 ring-inset", dot: "border-2 border-ink-500" },
 };
 
 export function StudentReadingStatusBadge({
@@ -50,8 +50,8 @@ export const NEEDS_RESET_LABEL = "Needs a reset";
 
 export function NeedsResetBadge({ size = "base" }: { size?: "base" | "sm" }) {
   return (
-    <span className={`${pill} bg-white text-amber-900 ring-1 ring-amber-300 ring-inset ${size === "sm" ? "text-sm" : "text-base"}`}>
-      <span aria-hidden="true" className="h-2 w-2 rounded-full border-2 border-amber-500" />
+    <span className={`${pill} bg-white text-warning-900 ring-1 ring-warning-300 ring-inset ${size === "sm" ? "text-sm" : "text-base"}`}>
+      <span aria-hidden="true" className="h-2 w-2 rounded-full border-2 border-warning-500" />
       {NEEDS_RESET_LABEL}
     </span>
   );

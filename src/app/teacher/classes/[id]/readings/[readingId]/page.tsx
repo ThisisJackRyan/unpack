@@ -61,7 +61,7 @@ export default async function ReadingPage({ params }: Props) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-2">
           <ReadingStatusBadge status={reading.status} />
-          <h1 className="text-3xl font-semibold tracking-tight break-words text-zinc-950">
+          <h1 className="text-3xl font-semibold tracking-tight break-words text-ink-950">
             {reading.title}
           </h1>
         </div>
@@ -84,7 +84,7 @@ export default async function ReadingPage({ params }: Props) {
               href={reading.sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={`rounded font-medium break-all text-indigo-700 underline underline-offset-2 hover:text-indigo-900 ${focusRing}`}
+              className={`rounded font-medium break-all text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`}
             >
               {host}
               <span className="sr-only"> (opens in a new tab)</span>
@@ -108,16 +108,16 @@ export default async function ReadingPage({ params }: Props) {
           <div className="flex flex-col gap-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex flex-col gap-1">
-                <h2 id="questions-heading" className="text-xl font-semibold text-zinc-950">
+                <h2 id="questions-heading" className="text-xl font-semibold text-ink-950">
                   Questions
                 </h2>
                 <MetaLine
-                  className="text-base text-zinc-600"
+                  className="text-base text-ink-600"
                   parts={[questionCountLabel(reading.questionCount), `Written for ${gradeLabel}`]}
                 />
               </div>
               {shared && (
-                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-0.5 text-sm font-medium text-zinc-700">
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink-100 px-2.5 py-0.5 text-sm font-medium text-ink-700">
                   <LockIcon />
                   Locked
                 </span>
@@ -127,18 +127,18 @@ export default async function ReadingPage({ params }: Props) {
               <>
                 <ol className="flex flex-col gap-3" aria-label="Questions">
                   {questions.map((q) => (
-                    <li key={q.id} className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4">
+                    <li key={q.id} className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4">
                       <QuestionNumber n={q.position} />
                       <QuestionText role={questionRole(q.position, reading.questionCount)} prompt={q.prompt} />
                     </li>
                   ))}
                 </ol>
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-ink-500">
                   Questions are locked once a reading is published.
                 </p>
               </>
             ) : (
-              <p className="text-base text-zinc-700">
+              <p className="text-base text-ink-700">
                 Each student gets their own set when they first open this reading.
               </p>
             )}
@@ -156,7 +156,7 @@ export default async function ReadingPage({ params }: Props) {
         <h2 id="text-heading" className="sr-only">
           Reading text
         </h2>
-        <div className="mx-auto flex max-w-prose flex-col gap-5 text-lg leading-relaxed text-zinc-800">
+        <div className="mx-auto flex max-w-prose flex-col gap-5 text-lg leading-relaxed text-ink-800">
           {paragraphs.map((p, i) => (
             <p key={i} className="whitespace-pre-line break-words">
               {p}
@@ -167,10 +167,10 @@ export default async function ReadingPage({ params }: Props) {
 
       <section aria-labelledby="delete-reading-heading" className={`${card} flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6`}>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 id="delete-reading-heading" className="text-base font-semibold text-zinc-950">
+          <h2 id="delete-reading-heading" className="text-base font-semibold text-ink-950">
             Delete this reading
           </h2>
-          <p className="text-sm text-zinc-600">Removes it for everyone, with every student’s answers and tries.</p>
+          <p className="text-sm text-ink-600">Removes it for everyone, with every student’s answers and tries.</p>
         </div>
         <DeleteReadingButton action={deleteReadingAction.bind(null, found.id, reading.id)} title={reading.title} />
       </section>
@@ -197,14 +197,14 @@ function CapPanel({
     <section
       aria-labelledby="cap-heading"
       className={`flex flex-col gap-4 rounded-xl border p-5 sm:p-6 ${
-        raised ? "border-indigo-200 bg-indigo-50/60" : "border-amber-200 bg-amber-50"
+        raised ? "border-primary-200 bg-primary-50/60" : "border-warning-200 bg-warning-50"
       }`}
     >
       <div className="flex flex-col gap-1">
-        <h2 id="cap-heading" aria-live="polite" className="text-lg font-semibold text-zinc-950">
+        <h2 id="cap-heading" aria-live="polite" className="text-lg font-semibold text-ink-950">
           {capHeadline(view)}
         </h2>
-        <p className="text-base text-zinc-700">{capDetail(view)}</p>
+        <p className="text-base text-ink-700">{capDetail(view)}</p>
       </div>
       {(view.kind === "near" || view.kind === "full") && <RaiseCapButton action={raiseAction} raiseTo={view.raiseTo} />}
     </section>
@@ -217,36 +217,36 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
   return (
     <section aria-labelledby="student-sets-heading" className={`${card} flex flex-col gap-4 p-5 sm:p-6`}>
       <div className="flex flex-col gap-1">
-        <h2 id="student-sets-heading" className="text-xl font-semibold text-zinc-950">
+        <h2 id="student-sets-heading" className="text-xl font-semibold text-ink-950">
           Student questions
         </h2>
-        <p className="text-base text-zinc-600">
+        <p className="text-base text-ink-600">
           {sets.length === 1 ? "1 student has a set." : `${sets.length} students have a set.`}
         </p>
       </div>
       {sets.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-8 text-center text-base text-zinc-600">
+        <p className="rounded-xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-600">
           No student has opened this reading yet. Each student’s questions show up here after they open it.
         </p>
       ) : (
-        <ul className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200">
+        <ul className="divide-y divide-ink-200 overflow-hidden rounded-xl border border-ink-200">
           {sets.map((set) => (
             <li key={set.studentId}>
               <details className="group">
                 <summary
-                  className={`flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-50 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden ${focusRing}`}
+                  className={`flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 hover:bg-ink-50 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden ${focusRing}`}
                 >
-                  <span className="min-w-0 text-base font-semibold break-words text-zinc-950">{set.name}</span>
-                  <span className="flex shrink-0 items-center gap-3 text-base text-zinc-600">
+                  <span className="min-w-0 text-base font-semibold break-words text-ink-950">{set.name}</span>
+                  <span className="flex shrink-0 items-center gap-3 text-base text-ink-600">
                     {questionCountLabel(set.questions.length)}
                     <span aria-hidden="true" className="transition-transform group-open:rotate-90">
                       ›
                     </span>
                   </span>
                 </summary>
-                <ol className="flex flex-col gap-3 bg-zinc-50 px-4 py-4" aria-label={`${set.name}’s questions`}>
+                <ol className="flex flex-col gap-3 bg-ink-50 px-4 py-4" aria-label={`${set.name}’s questions`}>
                   {set.questions.map((q) => (
-                    <li key={q.id} className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4">
+                    <li key={q.id} className="flex gap-4 rounded-xl border border-ink-200 bg-white p-4">
                       <QuestionNumber n={q.position} />
                       <QuestionText role={questionRole(q.position, set.questions.length)} prompt={q.prompt} />
                     </li>
@@ -264,8 +264,8 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
 function Detail({ term, children }: { term: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-sm font-medium text-zinc-500">{term}</dt>
-      <dd className="text-base font-semibold text-zinc-950">{children}</dd>
+      <dt className="text-sm font-medium text-ink-500">{term}</dt>
+      <dd className="text-base font-semibold text-ink-950">{children}</dd>
     </div>
   );
 }

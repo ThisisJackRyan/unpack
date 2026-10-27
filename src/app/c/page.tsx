@@ -23,18 +23,18 @@ export default async function StudentHomePage() {
   return (
     <div className="flex flex-col gap-10">
       <div className="flex flex-col gap-1">
-        <p className="text-lg font-medium break-words text-indigo-700">{session.class.name}</p>
-        <h1 className="text-4xl font-semibold tracking-tight break-words text-zinc-950">
+        <p className="text-lg font-medium break-words text-primary-700">{session.class.name}</p>
+        <h1 className="text-4xl font-semibold tracking-tight break-words text-ink-950">
           Hi, {session.student.firstName}
         </h1>
       </div>
 
       <section aria-labelledby="readings-heading" className="flex flex-col gap-4">
-        <h2 id="readings-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+        <h2 id="readings-heading" className="text-2xl font-semibold tracking-tight text-ink-950">
           Readings
         </h2>
         {readings.length === 0 ? (
-          <p className={`${card} rounded-2xl px-6 py-10 text-center text-lg text-zinc-600`}>
+          <p className={`${card} px-6 py-10 text-center text-lg text-ink-600`}>
             No readings yet. Your teacher will add some soon.
           </p>
         ) : (
@@ -46,11 +46,11 @@ export default async function StudentHomePage() {
         )}
       </section>
 
-      <p className="text-base text-zinc-600">
+      <p className="text-base text-ink-600">
         Not {session.student.firstName}?{" "}
         <Link
           href="/join"
-          className={`rounded font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900 ${focusRing}`}
+          className={`rounded font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`}
         >
           Join with your name
         </Link>
@@ -64,16 +64,16 @@ function ReadingCard({ reading }: { reading: StudentReadingListItem }) {
     <li>
       <Link
         href={`/c/r/${reading.id}`}
-        className={`${card} flex min-h-20 items-center justify-between gap-4 rounded-2xl px-6 py-5 transition-colors hover:border-indigo-300 hover:bg-indigo-50/40 ${focusRing}`}
+        className={`${card} flex min-h-20 items-center justify-between gap-4 px-6 py-5 transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${focusRing}`}
       >
         <span className="flex min-w-0 flex-col gap-1">
-          <span className="text-xl font-semibold break-words text-zinc-950">{reading.title}</span>
+          <span className="text-xl font-semibold break-words text-ink-950">{reading.title}</span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <StudentReadingStatusBadge status={reading.status} />
-            <span className="text-base text-zinc-600">{questionCountLabel(reading.questionCount)}</span>
+            <span className="text-base text-ink-600">{questionCountLabel(reading.questionCount)}</span>
           </span>
         </span>
-        <span aria-hidden="true" className="text-2xl text-indigo-600">
+        <span aria-hidden="true" className="text-2xl text-primary-600">
           →
         </span>
       </Link>

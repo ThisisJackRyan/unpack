@@ -2,7 +2,7 @@
 
 import { startTransition, useActionState, useState, type FormEvent } from "react";
 import { NoCopyTextarea } from "@/components/no-copy";
-import { primaryButton } from "@/components/ui";
+import { primaryButtonLarge } from "@/components/ui";
 import { answerBox, CharacterCount, fieldError, Spinner } from "@/components/answer-parts";
 import { CHALLENGE_NOTE_MAX_LENGTH, type ChallengeFormState } from "./form-state";
 
@@ -34,13 +34,13 @@ export function ChallengeForm({
       onSubmit={onSubmit}
       noValidate
       aria-labelledby="challenge-heading"
-      className="flex flex-col gap-4 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5 sm:p-6"
+      className="flex flex-col gap-4 rounded-2xl border border-primary-200 bg-primary-50/60 p-5 sm:p-6"
     >
-      <h3 id="challenge-heading" className="text-xl font-semibold text-zinc-950">
+      <h3 id="challenge-heading" className="text-xl font-semibold text-ink-950">
         Ask your teacher to take a look
       </h3>
-      {intro && <p className="text-lg leading-relaxed text-zinc-800">{intro}</p>}
-      <label htmlFor="challenge-note" className="text-lg font-semibold text-zinc-900">
+      {intro && <p className="text-lg leading-relaxed text-ink-800">{intro}</p>}
+      <label htmlFor="challenge-note" className="text-lg font-semibold text-ink-900">
         Your note to your teacher
       </label>
       <NoCopyTextarea
@@ -62,7 +62,7 @@ export function ChallengeForm({
         </p>
         <CharacterCount id="challenge-note-count" length={note.length} max={CHALLENGE_NOTE_MAX_LENGTH} />
       </div>
-      <button type="submit" disabled={pending} className={`${primaryButton} min-h-14 w-full px-8 text-lg sm:w-auto sm:self-start`}>
+      <button type="submit" disabled={pending} className={`${primaryButtonLarge} w-full sm:w-auto sm:self-start`}>
         {pending && <Spinner />}
         {pending ? "Sending…" : "Send to my teacher"}
       </button>

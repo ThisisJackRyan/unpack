@@ -14,8 +14,8 @@ export default async function WelcomePage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
       <div className="flex flex-col gap-2">
-        <h1 className="text-4xl font-semibold tracking-tight text-zinc-950">Welcome to unpack</h1>
-        <p className="text-lg text-zinc-600">Pick one to get started. You can change it later in Settings.</p>
+        <h1 className="text-4xl font-semibold tracking-tight text-ink-950">Welcome to unpack</h1>
+        <p className="text-lg text-ink-600">Pick one to get started. You can change it later in Settings.</p>
       </div>
       <RolePicker
         action={chooseRoleAction}

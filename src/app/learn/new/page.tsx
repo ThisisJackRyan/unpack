@@ -24,13 +24,13 @@ export default async function NewSelfReadingPage() {
         <span aria-hidden="true">←</span> Back to your reading
       </Link>
       <div className="flex flex-col gap-2">
-        <h1 className="text-4xl font-semibold tracking-tight text-zinc-950">New reading</h1>
+        <h1 className="text-4xl font-semibold tracking-tight text-ink-950">New reading</h1>
         {state.remaining > 0 && <AllowanceLeft state={state} allowance={currentAllowance()} />}
       </div>
       {state.remaining === 0 ? (
         <AllowanceLimit state={state} now={new Date()} timeZone={timeZone} utcLabel={fallback} />
       ) : (
-        <div className={`${card} rounded-2xl p-6 sm:p-8`}>
+        <div className={`${card} p-6 sm:p-8`}>
           <ReadingForm
             mode="solo"
             action={createSelfReadingAction}

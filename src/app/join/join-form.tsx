@@ -9,10 +9,10 @@ import { TurnstileWidget } from "./turnstile-widget";
 
 const initialState: JoinState = {};
 
-const label = "text-lg font-semibold text-zinc-900";
-const hint = "text-base text-zinc-600";
+const label = "text-lg font-semibold text-ink-900";
+const hint = "text-base text-ink-600";
 // Red, like every form error (red is for errors and destructive actions).
-const error = "text-base font-medium text-red-700";
+const error = "text-base font-medium text-danger-700";
 
 // One big code field, then the two name fields, then the bot check (only
 // when it's on: `botCheckSiteKey` is set), then one full-width button.

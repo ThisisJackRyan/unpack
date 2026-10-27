@@ -3,8 +3,102 @@
 /* Light-only for now: no dark override, so pages render consistently. */
 :root {
   --background: #ffffff;
-  --foreground: #18181b;
+  --foreground: #16142a;
   color-scheme: light;
+}
+
+/*
+ * The one palette. Tailwind's default colors are switched off, so every
+ * color class in src uses one of these tokens (src/lib/palette.test.ts
+ * checks that, and that every text and background pair the app uses meets
+ * WCAG AA). Hex only, so the test can read them.
+ *
+ * primary: a cheerful violet blue, for actions, links and focus rings.
+ * sunny and lagoon: decorative accents (illustrations, dots, tints), never
+ * text on white. success: green, for passed and done. warning: amber, for
+ * limits, near-full and "not yet". danger: red, for errors and destructive
+ * actions only. ink: the neutral, a hint of violet.
+ */
+@theme {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  --color-primary-50: #f4f2ff;
+  --color-primary-100: #e9e5ff;
+  --color-primary-200: #d4ccff;
+  --color-primary-300: #b3a7fb;
+  --color-primary-400: #8f80f4;
+  --color-primary-500: #7262ec;
+  --color-primary-600: #5847e0;
+  --color-primary-700: #4b3bc9;
+  --color-primary-800: #3d2fa8;
+  --color-primary-900: #302583;
+  --color-primary-950: #1f1858;
+
+  --color-sunny-50: #fffaeb;
+  --color-sunny-100: #fff3cc;
+  --color-sunny-200: #ffe299;
+  --color-sunny-300: #ffd166;
+  --color-sunny-400: #ffbf3c;
+  --color-sunny-500: #f5a524;
+
+  --color-lagoon-50: #e9fbfb;
+  --color-lagoon-100: #ccf4f4;
+  --color-lagoon-200: #9ce6e7;
+  --color-lagoon-300: #5fd0d3;
+  --color-lagoon-500: #1aa7ad;
+  --color-lagoon-700: #0b6670;
+
+  --color-success-50: #ecfaf2;
+  --color-success-100: #d3f3e1;
+  --color-success-200: #a8e6c4;
+  --color-success-300: #6fd19c;
+  --color-success-500: #22a565;
+  --color-success-600: #15803d;
+  --color-success-700: #116b40;
+  --color-success-800: #0f5a37;
+  --color-success-900: #0c4a2e;
+  --color-success-950: #062b1a;
+
+  --color-warning-50: #fff7e6;
+  --color-warning-100: #ffedc2;
+  --color-warning-200: #fddc8f;
+  --color-warning-300: #fbc65a;
+  --color-warning-500: #e08e0b;
+  --color-warning-600: #c97a06;
+  --color-warning-700: #a3530a;
+  --color-warning-800: #8a4508;
+  --color-warning-900: #713809;
+  --color-warning-950: #3f1e04;
+
+  --color-danger-50: #fff1f1;
+  --color-danger-100: #ffe0e0;
+  --color-danger-200: #fdc0c0;
+  --color-danger-300: #f99a9a;
+  --color-danger-600: #c4262f;
+  --color-danger-700: #a91e27;
+  --color-danger-800: #8c1820;
+  --color-danger-900: #731419;
+  --color-danger-950: #430a0d;
+
+  --color-ink-50: #f7f6fc;
+  --color-ink-100: #efedf7;
+  --color-ink-200: #e2dfee;
+  --color-ink-300: #cbc7dc;
+  --color-ink-400: #8a86a1;
+  --color-ink-500: #686482;
+  --color-ink-600: #5b5873;
+  --color-ink-700: #47445e;
+  --color-ink-800: #33314a;
+  --color-ink-900: #24223a;
+  --color-ink-950: #16142a;
+
+  /* The chunky bottom "lip" under buttons and cards. */
+  --shadow-lip-primary: 0 4px 0 0 #3d2fa8;
+  --shadow-lip-ink: 0 4px 0 0 #8a86a1;
+  --shadow-lip-danger: 0 4px 0 0 #8c1820;
+  --shadow-card: 0 3px 0 0 #e2dfee;
 }
 
 @theme inline {

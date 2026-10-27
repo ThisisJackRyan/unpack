@@ -3,7 +3,7 @@ import Link from "next/link";
 import { atClassLimit, listClasses } from "@/lib/classes";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { getOrCreateTeacher } from "@/lib/teacher";
-import { card, focusRing, primaryButton } from "@/components/ui";
+import { card, focusRing, primaryButton, primaryButtonLarge } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Your classes",
@@ -17,12 +17,12 @@ export default async function TeacherClassesPage() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+        <h1 className="text-3xl font-semibold tracking-tight text-ink-950">
           Your classes
         </h1>
         {classes.length > 0 &&
           (limitReached ? (
-            <p className="text-base text-zinc-600">Free plan includes 1 class</p>
+            <p className="text-base text-ink-600">Free plan includes 1 class</p>
           ) : (
             <Link href="/teacher/classes/new" className={primaryButton}>
               New class
@@ -33,22 +33,22 @@ export default async function TeacherClassesPage() {
       {classes.length === 0 ? (
         <EmptyState />
       ) : (
-        <ul className={`${card} divide-y divide-zinc-200 overflow-hidden`}>
+        <ul className={`${card} divide-y divide-ink-200 overflow-hidden`}>
           {classes.map((c) => (
             <li key={c.id}>
               <Link
                 href={`/teacher/classes/${c.id}`}
-                className={`flex min-h-16 items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-zinc-50 focus-visible:-outline-offset-2 ${focusRing}`}
+                className={`flex min-h-16 items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-ink-50 focus-visible:-outline-offset-2 ${focusRing}`}
               >
                 <span className="flex min-w-0 flex-col">
-                  <span className="truncate text-lg font-semibold text-zinc-950">
+                  <span className="truncate text-lg font-semibold text-ink-950">
                     {c.name}
                   </span>
-                  <span className="text-base text-zinc-600">
+                  <span className="text-base text-ink-600">
                     {gradeLevelLabel(c.gradeLevel)}
                   </span>
                 </span>
-                <span className="shrink-0 rounded-lg bg-zinc-100 px-3 py-1.5 font-mono text-base font-semibold tracking-widest text-zinc-900">
+                <span className="shrink-0 rounded-lg bg-ink-100 px-3 py-1.5 font-mono text-base font-semibold tracking-widest text-ink-900">
                   <span className="sr-only">Join code </span>
                   {c.joinCode}
                 </span>
@@ -94,15 +94,15 @@ function EmptyState() {
           strokeLinecap="round"
         />
       </svg>
-      <h2 className="text-xl font-semibold text-zinc-950">
+      <h2 className="text-xl font-semibold text-ink-950">
         Create your first class
       </h2>
-      <p className="max-w-sm text-base text-zinc-600">
+      <p className="max-w-sm text-base text-ink-600">
         Students join with a short code. No accounts needed.
       </p>
       <Link
         href="/teacher/classes/new"
-        className={`${primaryButton} mt-2 min-h-14 px-7 text-lg`}
+        className={`${primaryButtonLarge} mt-2`}
       >
         Create a class
       </Link>

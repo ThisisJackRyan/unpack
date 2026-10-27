@@ -19,10 +19,10 @@ export default function LearnError({
       role="alert"
       className={`${card} flex flex-col items-center gap-3 px-6 py-14 text-center`}
     >
-      <h1 className="text-2xl font-semibold text-zinc-950">
+      <h1 className="text-2xl font-semibold text-ink-950">
         Something went wrong
       </h1>
-      <p className="text-base text-zinc-600">
+      <p className="text-base text-ink-600">
         We couldn’t load this page. Please try again.
       </p>
       <button

@@ -32,10 +32,10 @@ export default async function ChallengesPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-1">
-        <h1 id="queue-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-zinc-950 focus:outline-none">
+        <h1 id="queue-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink-950 focus:outline-none">
           Challenges
         </h1>
-        <p className="text-lg text-zinc-600">
+        <p className="text-lg text-ink-600">
           Students who think they did their best can ask you to look. Accept counts the reading as passed.
         </p>
       </div>
@@ -43,7 +43,7 @@ export default async function ChallengesPage({ params }: Props) {
       <ChallengeQueue action={decideChallengeAction.bind(null, found.id)} items={items} />
 
       {items.length === 0 && (
-        <p className={`${card} px-6 py-12 text-center text-lg text-zinc-600`}>
+        <p className={`${card} px-6 py-12 text-center text-lg text-ink-600`}>
           You’re all caught up. New challenges show up here.
         </p>
       )}

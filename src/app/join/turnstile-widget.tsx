@@ -65,7 +65,7 @@ export function TurnstileWidget({ siteKey, resetKey }: { siteKey: string; resetK
       <Script src={TURNSTILE_SCRIPT_URL} strategy="afterInteractive" onReady={() => setLoaded(true)} onError={() => setFailed(true)} />
       {/* Turnstile labels its own frame for screen readers. */}
       <div ref={container} className="min-h-[65px]" />
-      <p aria-live="polite" className="text-base font-medium text-red-700 empty:hidden">
+      <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">
         {failed ? "The check didn’t load. Refresh the page and try again." : ""}
       </p>
     </div>

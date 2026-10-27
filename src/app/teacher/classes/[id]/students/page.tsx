@@ -62,14 +62,14 @@ export default async function ClassProgressPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-1">
-        <h1 id="progress-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-zinc-950 focus:outline-none">
+        <h1 id="progress-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink-950 focus:outline-none">
           Class progress
         </h1>
-        <p className="text-lg text-zinc-600">
+        <p className="text-lg text-ink-600">
           Each student on each published reading. Challenged readings wait for you in{" "}
           <Link
             href={challengesHref}
-            className={`rounded font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900 ${focusRing}`}
+            className={`rounded font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`}
           >
             Challenges
           </Link>
@@ -80,12 +80,12 @@ export default async function ClassProgressPage({ params }: Props) {
       <ProgressAnnouncer headingId="progress-heading" />
 
       {status.students.length === 0 ? (
-        <p className={`${card} px-6 py-12 text-center text-lg text-zinc-600`}>
+        <p className={`${card} px-6 py-12 text-center text-lg text-ink-600`}>
           No students yet. Share the join code, and they’ll show up here.
         </p>
       ) : status.readings.length === 0 ? (
         <>
-          <p className={`${card} px-6 py-12 text-center text-lg text-zinc-600`}>
+          <p className={`${card} px-6 py-12 text-center text-lg text-ink-600`}>
             No published readings yet. Publish one, and progress shows up here.
           </p>
           <StudentList status={status} actions={actions} />
@@ -111,7 +111,7 @@ function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
     return (
       <span className="flex flex-col items-start gap-1.5">
         <NeedsResetBadge size="sm" />
-        <span className="text-sm text-zinc-600">{NEEDS_RESET_HELP}</span>
+        <span className="text-sm text-ink-600">{NEEDS_RESET_HELP}</span>
         <ResetTriesButton
           action={target.actions.onReset}
           studentId={target.student.id}
@@ -126,7 +126,7 @@ function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
     <span className="flex flex-col items-start gap-1">
       <StudentReadingStatusBadge status={cell.status} size="sm" />
       {cell.status !== "not_started" && (
-        <span className="text-sm text-zinc-600 tabular-nums">{triesLabel(cell)}</span>
+        <span className="text-sm text-ink-600 tabular-nums">{triesLabel(cell)}</span>
       )}
     </span>
   );
@@ -152,13 +152,13 @@ function passedSummary(status: ClassStatus, readingId: string): string {
 function StudentList({ status, actions }: { status: ClassStatus; actions: Actions }) {
   return (
     <section aria-labelledby="students-heading" className="flex flex-col gap-3">
-      <h2 id="students-heading" className="text-xl font-semibold text-zinc-950">
+      <h2 id="students-heading" className="text-xl font-semibold text-ink-950">
         Students
       </h2>
-      <ul className={`${card} divide-y divide-zinc-200`}>
+      <ul className={`${card} divide-y divide-ink-200`}>
         {status.students.map((s) => (
           <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-2">
-            <StudentLink classId={actions.classId} student={s} className="text-base font-semibold text-zinc-950" />
+            <StudentLink classId={actions.classId} student={s} className="text-base font-semibold text-ink-950" />
             <DeleteStudentButton action={actions.onDelete} studentId={s.id} name={s.name} />
           </li>
         ))}
@@ -173,14 +173,14 @@ function ProgressTable({ status, actions }: { status: ClassStatus; actions: Acti
       <table className="w-full border-collapse text-left">
         <caption className="sr-only">Each student’s status on each reading, with tries used</caption>
         <thead>
-          <tr className="border-b border-zinc-200 bg-zinc-50">
-            <th scope="col" className="sticky left-0 bg-zinc-50 px-5 py-3 text-sm font-semibold text-zinc-600">
+          <tr className="border-b border-ink-200 bg-ink-50">
+            <th scope="col" className="sticky left-0 bg-ink-50 px-5 py-3 text-sm font-semibold text-ink-600">
               Student
             </th>
             {status.readings.map((r) => (
               <th key={r.id} scope="col" className="min-w-40 px-4 py-3 align-bottom">
-                <span className="line-clamp-2 text-sm font-semibold text-zinc-900">{r.title}</span>
-                <span className="block text-sm font-normal text-zinc-500 tabular-nums">{passedSummary(status, r.id)}</span>
+                <span className="line-clamp-2 text-sm font-semibold text-ink-900">{r.title}</span>
+                <span className="block text-sm font-normal text-ink-500 tabular-nums">{passedSummary(status, r.id)}</span>
               </th>
             ))}
             <th scope="col" className="px-4 py-3">
@@ -188,10 +188,10 @@ function ProgressTable({ status, actions }: { status: ClassStatus; actions: Acti
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-200">
+        <tbody className="divide-y divide-ink-200">
           {status.students.map((s) => (
             <tr key={s.id}>
-              <th scope="row" className="sticky left-0 bg-white px-5 py-3 text-base font-semibold whitespace-nowrap text-zinc-950">
+              <th scope="row" className="sticky left-0 bg-white px-5 py-3 text-base font-semibold whitespace-nowrap text-ink-950">
                 <StudentLink classId={actions.classId} student={s} className="" />
               </th>
               {status.readings.map((r) => (
@@ -216,15 +216,15 @@ function ProgressCards({ status, actions }: { status: ClassStatus; actions: Acti
       {status.students.map((s) => (
         <li key={s.id} className={`${card} flex flex-col gap-3 px-5 py-4`}>
           <div className="flex items-center justify-between gap-4">
-            <h2 className="text-lg font-semibold text-zinc-950">
+            <h2 className="text-lg font-semibold text-ink-950">
               <StudentLink classId={actions.classId} student={s} className="" />
             </h2>
             <DeleteStudentButton action={actions.onDelete} studentId={s.id} name={s.name} />
           </div>
-          <ul className="flex flex-col divide-y divide-zinc-100">
+          <ul className="flex flex-col divide-y divide-ink-100">
             {status.readings.map((r) => (
               <li key={r.id} className="flex items-start justify-between gap-4 py-2.5">
-                <span className="min-w-0 text-base break-words text-zinc-800">{r.title}</span>
+                <span className="min-w-0 text-base break-words text-ink-800">{r.title}</span>
                 <Cell cell={cellOf(status, s.id, r.id)} target={{ student: s, reading: r, actions }} />
               </li>
             ))}

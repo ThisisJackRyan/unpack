@@ -23,7 +23,7 @@ export default async function NewReadingPage({ params }: Props) {
         <span aria-hidden="true">←</span>{" "}
         <span className="break-words">Back to {found.name}</span>
       </Link>
-      <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+      <h1 className="text-3xl font-semibold tracking-tight text-ink-950">
         Add a reading
       </h1>
       <div className={`${card} p-6 sm:p-8`}>

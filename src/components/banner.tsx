@@ -8,11 +8,11 @@ export function Banner({ tone, title, children }: { tone: "done" | "info"; title
   return (
     <div
       className={`flex gap-4 rounded-2xl border px-5 py-5 ${
-        done ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-indigo-200 bg-indigo-50 text-indigo-950"
+        done ? "border-success-200 bg-success-50 text-success-950" : "border-primary-200 bg-primary-50 text-primary-950"
       }`}
     >
       {done && (
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-success-600 text-white">
           <CheckIcon className="h-6 w-6" />
         </span>
       )}

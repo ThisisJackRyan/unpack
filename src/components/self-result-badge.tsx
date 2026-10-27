@@ -5,9 +5,9 @@ import { pill } from "./ui";
 // style: a dot (a check when passed) and a text label, so it never relies
 // on color. Moved on is neutral, never red: it is a choice, not an error.
 const TONES: Record<SelfReadingResult, { pill: string; dot: string }> = {
-  in_progress: { pill: "bg-indigo-50 text-indigo-700", dot: "bg-indigo-600" },
-  passed: { pill: "bg-emerald-50 text-emerald-800", dot: "" },
-  moved_on: { pill: "bg-white text-zinc-800 ring-1 ring-zinc-300 ring-inset", dot: "border-2 border-zinc-500" },
+  in_progress: { pill: "bg-primary-50 text-primary-700", dot: "bg-primary-600" },
+  passed: { pill: "bg-success-50 text-success-800", dot: "" },
+  moved_on: { pill: "bg-white text-ink-800 ring-1 ring-ink-300 ring-inset", dot: "border-2 border-ink-500" },
 };
 
 export function SelfResultBadge({ result }: { result: SelfReadingResult }) {

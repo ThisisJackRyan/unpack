@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { StudentShell } from "@/components/student-shell";
-import { card, primaryButton } from "@/components/ui";
+import { card, primaryButtonLarge } from "@/components/ui";
 import { botCheckSiteKey } from "@/lib/join-bot-check";
 import { getStudentSession } from "@/lib/student-auth";
 import { JoinForm } from "./join-form";
@@ -20,15 +20,15 @@ export default async function JoinPage() {
         {session && (
           <section
             aria-labelledby="current-class-heading"
-            className={`${card} flex flex-col gap-5 rounded-2xl p-6`}
+            className={`${card} flex flex-col gap-5 p-6`}
           >
             <h1
               id="current-class-heading"
-              className="text-2xl font-semibold tracking-tight break-words text-zinc-950"
+              className="text-2xl font-semibold tracking-tight break-words text-ink-950"
             >
               You’re in {session.class.name}
             </h1>
-            <Link href="/c" className={`${primaryButton} min-h-14 w-full text-lg`}>
+            <Link href="/c" className={`${primaryButtonLarge} w-full`}>
               Go to my class
             </Link>
           </section>
@@ -37,21 +37,21 @@ export default async function JoinPage() {
         <section aria-labelledby="join-heading" className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">
             {session ? (
-              <h2 id="join-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+              <h2 id="join-heading" className="text-2xl font-semibold tracking-tight text-ink-950">
                 Join a different class
               </h2>
             ) : (
-              <h1 id="join-heading" className="text-4xl font-semibold tracking-tight text-zinc-950">
+              <h1 id="join-heading" className="text-4xl font-semibold tracking-tight text-ink-950">
                 Join your class
               </h1>
             )}
-            <p className="text-lg text-zinc-600">
+            <p className="text-lg text-ink-600">
               {session
                 ? `This device will leave ${session.class.name} when you join a different class.`
                 : "Type the code your teacher gave you."}
             </p>
           </div>
-          <div className={`${card} rounded-2xl p-6 sm:p-8`}>
+          <div className={`${card} p-6 sm:p-8`}>
             <JoinForm secondary={Boolean(session)} botCheckSiteKey={botCheckSiteKey()} />
           </div>
         </section>

@@ -18,7 +18,7 @@ export function RaiseCapButton({ action, raiseTo }: { action: Action; raiseTo: n
       </button>
       <p
         aria-live="polite"
-        className={`text-base font-medium empty:hidden ${state.error ? "text-red-700" : "text-indigo-900"}`}
+        className={`text-base font-medium empty:hidden ${state.error ? "text-danger-700" : "text-primary-900"}`}
       >
         {pending ? "" : (state.error ?? state.message ?? "")}
       </p>

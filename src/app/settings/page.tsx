@@ -20,8 +20,8 @@ export default async function SettingsPage() {
       <Link href={back.href} className={`${backLink} self-start`}>
         <span aria-hidden="true">←</span> {back.label}
       </Link>
-      <h1 className="text-4xl font-semibold tracking-tight text-zinc-950">Settings</h1>
-      <div className={`${card} flex flex-col gap-6 rounded-2xl p-6 sm:p-8`}>
+      <h1 className="text-4xl font-semibold tracking-tight text-ink-950">Settings</h1>
+      <div className={`${card} flex flex-col gap-6 p-6 sm:p-8`}>
         <RolePicker
           action={switchRoleAction}
           legend="Use unpack as"
@@ -30,7 +30,7 @@ export default async function SettingsPage() {
           ageConfirmed={account.ageConfirmedAt !== null}
           confirmSwitch={account.role === "teacher"}
         />
-        <p className="border-t border-zinc-200 pt-5 text-base text-zinc-600">
+        <p className="border-t border-ink-200 pt-5 text-base text-ink-600">
           Switching only changes which home you see. Nothing is deleted: your classes and your own readings stay saved,
           and switching back brings them right back.
         </p>

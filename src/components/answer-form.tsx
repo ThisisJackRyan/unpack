@@ -2,7 +2,7 @@
 
 import { startTransition, useActionState, useState, type FormEvent } from "react";
 import { NoCopyTextarea } from "@/components/no-copy";
-import { pill, primaryButton } from "@/components/ui";
+import { pill, primaryButtonLarge } from "@/components/ui";
 import { passedCountLabel, type AttemptView } from "@/lib/reading-progress";
 import type { StudentQuestion } from "@/lib/student-questions-core";
 import {
@@ -62,15 +62,15 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={pending} className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        <span className={`${pill} bg-indigo-50 px-3 py-1 text-base font-semibold text-indigo-800`}>
+        <span className={`${pill} bg-primary-50 px-3 py-1 text-base font-semibold text-primary-800`}>
           {extraTry ? "1 try left" : `Try ${tryNumber} of ${maxTries}`}
         </span>
-        <span className="text-base text-zinc-600">Copy and paste are off. Use your own words.</span>
+        <span className="text-base text-ink-600">Copy and paste are off. Use your own words.</span>
       </div>
 
       {extraTry ? (
-        <div className="flex gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-indigo-950">
-          <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-indigo-700" />
+        <div className="flex gap-3 rounded-2xl border border-primary-200 bg-primary-50 px-5 py-4 text-primary-950">
+          <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-primary-700" />
           <div className="flex flex-col gap-1">
             <p className="text-lg font-semibold">Your teacher gave you one more try.</p>
             <p className="text-lg">
@@ -81,8 +81,8 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
           </div>
         </div>
       ) : previous && (
-        <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950">
-          <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-amber-700" />
+        <div className="flex gap-3 rounded-2xl border border-warning-200 bg-warning-50 px-5 py-4 text-warning-950">
+          <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-warning-700" />
           <div className="flex flex-col gap-1">
             <p className="text-lg font-semibold">Not yet. {passedCountLabel(previous)}</p>
             <p className="text-lg">Read the tips under your answers. Then fix them and check again.</p>
@@ -99,10 +99,10 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
           const value = values[q.id] ?? "";
           const describedBy = [nudge && `${id}-nudge`, `${id}-count`, error && `${id}-error`].filter(Boolean).join(" ");
           return (
-            <li key={q.id} className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6">
+            <li key={q.id} className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-white p-5 sm:p-6">
               <div className="flex gap-4">
                 <QuestionNumber position={q.position} />
-                <label htmlFor={id} className="pt-1.5 text-lg leading-relaxed font-medium break-words text-zinc-900">
+                <label htmlFor={id} className="pt-1.5 text-lg leading-relaxed font-medium break-words text-ink-900">
                   <span className="sr-only">Question {q.position}: </span>
                   {q.prompt}
                 </label>
@@ -140,7 +140,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
         })}
       </ol>
 
-      <p aria-live="polite" className="text-lg font-medium text-zinc-800 empty:hidden">
+      <p aria-live="polite" className="text-lg font-medium text-ink-800 empty:hidden">
         {state.message}
       </p>
       {state.limit && <LimitNotice large>{state.limit}</LimitNotice>}
@@ -153,12 +153,12 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
           type="submit"
           disabled={pending}
           aria-describedby="check-time"
-          className={`${primaryButton} min-h-14 w-full px-8 text-lg sm:w-auto sm:self-start`}
+          className={`${primaryButtonLarge} w-full sm:w-auto sm:self-start`}
         >
           {pending && <Spinner />}
           {pending ? "Checking your answers…" : "Check my answers"}
         </button>
-        <p id="check-time" className="text-base text-zinc-600">
+        <p id="check-time" className="text-base text-ink-600">
           This can take up to a minute.
         </p>
       </div>

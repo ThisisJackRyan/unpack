@@ -18,12 +18,12 @@ export function AccountShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-zinc-50 text-lg text-zinc-900">
-      <header className="border-b border-zinc-200 bg-white">
+    <div className="flex min-h-full flex-1 flex-col bg-ink-50 text-lg text-ink-900">
+      <header className="border-b border-ink-200 bg-white">
         <div className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between gap-4 px-6">
           <Link
             href={homeHref}
-            className={`rounded-lg text-xl font-semibold tracking-tight text-zinc-950 ${focusRing}`}
+            className={`rounded-lg text-xl font-semibold tracking-tight text-ink-950 ${focusRing}`}
           >
             unpack
           </Link>
@@ -34,7 +34,7 @@ export function AccountShell({
                   <Link
                     key={l.href}
                     href={l.href}
-                    className={`inline-flex min-h-11 items-center rounded-lg px-3 text-base font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-950 ${focusRing}`}
+                    className={`inline-flex min-h-11 items-center rounded-lg px-3 text-base font-medium text-ink-600 transition-colors hover:bg-ink-100 hover:text-ink-950 ${focusRing}`}
                   >
                     {l.label}
                   </Link>

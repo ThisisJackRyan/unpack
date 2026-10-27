@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { primaryButton } from "@/components/ui";
+import { primaryButtonLarge } from "@/components/ui";
 
 // While another request writes this student's questions, the page asks
 // again every retryAfterMs (router.refresh re-runs the server lookup and
@@ -32,7 +32,7 @@ export function PendingRefresh({
 
   return (
     <div className="flex flex-col gap-5">
-      <p aria-live="polite" className="text-lg font-medium text-zinc-700">
+      <p aria-live="polite" className="text-lg font-medium text-ink-700">
         {waiting ? "Getting your questions ready…" : "This is taking longer than usual."}
       </p>
       {waiting ? children : <TryAgainButton onClick={() => setTries(0)} />}
@@ -49,7 +49,7 @@ export function RetryButton() {
 
 function TryAgainButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`${primaryButton} min-h-14 self-start px-7 text-lg`}>
+    <button type="button" onClick={onClick} className={`${primaryButtonLarge} self-start`}>
       Try again
     </button>
   );

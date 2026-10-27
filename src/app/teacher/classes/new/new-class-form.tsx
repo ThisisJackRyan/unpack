@@ -18,7 +18,7 @@ export function NewClassForm() {
   return (
     <form action={formAction} noValidate className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <label htmlFor="name" className="text-base font-semibold text-zinc-900">
+        <label htmlFor="name" className="text-base font-semibold text-ink-900">
           Class name
         </label>
         <input
@@ -33,7 +33,7 @@ export function NewClassForm() {
           aria-describedby={errors.name ? "name-error" : undefined}
           className={field}
         />
-        <p id="name-error" aria-live="polite" className="text-base text-red-700">
+        <p id="name-error" aria-live="polite" className="text-base text-danger-700">
           {errors.name}
         </p>
       </div>
@@ -41,7 +41,7 @@ export function NewClassForm() {
       <div className="flex flex-col gap-2">
         <label
           htmlFor="gradeLevel"
-          className="text-base font-semibold text-zinc-900"
+          className="text-base font-semibold text-ink-900"
         >
           Grade level
         </label>
@@ -68,13 +68,13 @@ export function NewClassForm() {
         <p
           id="grade-error"
           aria-live="polite"
-          className="text-base text-red-700"
+          className="text-base text-danger-700"
         >
           {errors.gradeLevel}
         </p>
       </div>
 
-      <p aria-live="polite" className="text-base text-red-700 empty:hidden">
+      <p aria-live="polite" className="text-base text-danger-700 empty:hidden">
         {errors.form}
       </p>
 

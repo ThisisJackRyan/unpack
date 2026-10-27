@@ -18,9 +18,9 @@ export function AllowanceLimit({
 }) {
   const when = state.nextFreeAt ? formatNextFree(state.nextFreeAt, now, timeZone, utcLabel) : "soon";
   return (
-    <div role="status" className="flex gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-5 text-amber-950">
-      <span aria-hidden="true" className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6 text-amber-700">
+    <div role="status" className="flex gap-4 rounded-2xl border border-warning-200 bg-warning-50 px-5 py-5 text-warning-950">
+      <span aria-hidden="true" className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-warning-100">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6 text-warning-700">
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -34,5 +34,5 @@ export function AllowanceLimit({
 }
 
 export function AllowanceLeft({ state, allowance }: { state: AllowanceState; allowance: ReadingAllowance }) {
-  return <p className="text-base text-zinc-600">{allowanceRemainingLabel(state, allowance)}</p>;
+  return <p className="text-base text-ink-600">{allowanceRemainingLabel(state, allowance)}</p>;
 }
