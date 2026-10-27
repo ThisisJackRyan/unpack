@@ -28,7 +28,7 @@ import { generateSessionToken, hashSessionToken } from "./student-session-token"
 import { CLASS_NOT_FOUND_MESSAGE, type JoinErrors, type JoinValues } from "./validate-join";
 import { hashJoinCode } from "./client-ip";
 
-export const NAME_TAKEN_MESSAGE = "Someone already has that name. Add another letter.";
+export const NAME_TAKEN_MESSAGE = "Someone already has that name. If it’s you, open unpack on the device you joined with, or add another letter.";
 
 const NAME_KEY_CONSTRAINT = "students_class_id_name_key_unique";
 
