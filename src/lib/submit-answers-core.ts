@@ -32,10 +32,26 @@
 //    an open challenge in the same transaction (status closed), so the
 //    teacher's queue never asks about a student who has since passed.
 // 5. On a model error or timeout, finish the claim with no attempt: the try
-//    isn't used up, but the effort_checks row still counts toward
-//    EFFORT_CHECK_LIMIT, so a broken model can't be retried forever. Once
-//    the limit is reached without a pass, the challenge opens (see
-//    challenges-core.ts), so the limit never strands a student.
+//    isn't used up. Whether the check still counts toward
+//    EFFORT_CHECK_LIMIT depends on whether the model replied
+//    (effortFailureCounts):
+//    - It replied, but not usably (no tool call, the wrong answers, a
+//      refusal): outcome "error", and it counts, so a model that keeps
+//      answering badly can't be retried forever. Once the limit is reached
+//      without a pass, the challenge opens (see challenges-core.ts), so the
+//      limit never strands a student.
+//    - No reply at all (not set up, out of credits (402), any other
+//      gateway refusal, an outage or 5xx, a network error, or a timeout):
+//      outcome "given_back". That's our setup's or the provider's fault,
+//      not the student's, so it doesn't count toward the limit. It counts
+//      toward a short window instead: once a student has
+//      EFFORT_GIVEN_BACK_WINDOW_LIMIT given-back checks on a reading in the
+//      last EFFORT_GIVEN_BACK_WINDOW_MINUTES, the claim refuses ("paused")
+//      until the oldest leaves the window, so an outage can't be hammered
+//      (a timed-out call may still be billed). The claim counts them under
+//      the same lock, so the window is exact. Only checks that failed with
+//      no reply are ever marked, so the checks the model answered are never
+//      undercounted.
 // 6. When the commit throws, finish the claim the same way, best effort,
 //    so the student isn't told "busy" for EFFORT_CLAIM_STALE_SECONDS. The
 //    release only touches an unfinished claim, so if the commit did land
@@ -52,11 +68,11 @@
 // Every database error propagates, so the caller fails closed.
 
 import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
-import type { EffortCheckInput, EffortVerdict } from "./ai/effort-check";
+import { EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { hasPgCode, isUniqueViolation } from "./pg-errors";
-import { checksAllowedSql, effortLockStatement, limitsFromRow, triesAllowedSql } from "./reading-limits";
+import { checksAllowedSql, countedCheckSql, effortLockStatement, limitsFromRow, triesAllowedSql } from "./reading-limits";
 import type { StudentQuestion } from "./student-questions-core";
 import {
   ANSWERS_STALE_MESSAGE,
@@ -84,6 +100,15 @@ export const TOO_MANY_CHECKS_MESSAGE = "We couldn’t check your answers. Send a
 // Calm on purpose: during an outage, quick retries only use up checks.
 export const CHECK_FAILED_MESSAGE =
   "We couldn’t check your answers just now. Wait a minute, then try again. This didn’t use up a try.";
+// "paused": checking has failed a few times in a row (an outage). The
+// time it frees up is added after (see retryAtSentence).
+export const CHECKS_PAUSED_MESSAGE =
+  "Checking answers isn’t working right now, so let’s take a short break. This didn’t use up a try.";
+
+// The outage window for given-back checks (see step 5 above): 3 in 10
+// minutes per student per reading, room for a blip and a retry or two.
+export const EFFORT_GIVEN_BACK_WINDOW_LIMIT = 3;
+export const EFFORT_GIVEN_BACK_WINDOW_MINUTES = 10;
 
 export type SubmitContext = {
   bodyText: string;
@@ -104,7 +129,9 @@ export type ClaimOutcome =
   | "already_passed"
   | "out_of_tries"
   | "busy"
-  | "too_many_checks";
+  | "too_many_checks"
+  // EFFORT_GIVEN_BACK_WINDOW_LIMIT given-back checks in the window.
+  | "paused";
 
 export type SaveInput = {
   studentId: string;
@@ -118,13 +145,22 @@ export type SaveInput = {
 export type AttemptStore = {
   loadContext(studentId: string, readingId: string): Promise<SubmitLookup>;
   claim(studentId: string, readingId: string, claimId: string): Promise<ClaimOutcome>;
-  // Finishes the claim with no attempt (outcome "error").
-  release(studentId: string, readingId: string, claimId: string): Promise<void>;
+  // Finishes the claim with no attempt: outcome "given_back" when
+  // givenBack (the model never replied), else "error".
+  release(studentId: string, readingId: string, claimId: string, givenBack?: boolean): Promise<void>;
+  // When the next check frees up after "paused" (the oldest given-back
+  // check in the window, plus the window), if the store can say.
+  pausedUntil?(studentId: string, readingId: string): Promise<Date | null>;
   // The saved try number, or null when the claim was no longer live.
   commit(input: SaveInput): Promise<number | null>;
 };
 
-export type EffortChecker = (input: EffortCheckInput) => Promise<EffortVerdict[]>;
+export type EffortCheckHooks = {
+  // Called each time the model replies (see checkEffort's option).
+  onModelResponse: () => void;
+};
+
+export type EffortChecker = (input: EffortCheckInput, hooks?: EffortCheckHooks) => Promise<EffortVerdict[]>;
 
 export type SubmitDeps = {
   store: AttemptStore;
@@ -145,7 +181,17 @@ export type SubmitResult =
   | { status: "out_of_tries" }
   | { status: "busy" }
   | { status: "too_many_checks" }
+  | { status: "paused"; retryAt: Date | null }
   | { status: "check_failed" };
+
+// Whether a failed check counts toward EFFORT_CHECK_LIMIT (step 5 above):
+// only when the model replied at least once. Unusable output is only ever
+// thrown after a reply, so it counts even from a checker that doesn't
+// report replies.
+export function effortFailureCounts(error: unknown, modelResponded: boolean): boolean {
+  if (modelResponded) return true;
+  return error instanceof EffortCheckError && error.kind === "failed";
+}
 
 // The model must return one verdict per answer, in order; checkEffort
 // guarantees it, and this holds the line for any other checker.
@@ -185,21 +231,30 @@ export async function submitAnswersWith(
 
   const claimId = deps.newId();
   const claim = await store.claim(studentId, readingId, claimId);
+  if (claim === "paused") {
+    return { status: "paused", retryAt: (await store.pausedUntil?.(studentId, readingId)) ?? null };
+  }
   if (claim !== "claimed") return { status: claim };
 
   const prompts = new Map(context.questions.map((q) => [q.id, q.prompt]));
   let results: AnswerResult[] | null;
+  let modelResponded = false;
   try {
-    const verdicts = await deps.check({
-      bodyText: context.bodyText,
-      gradeLevel: context.gradeLevel,
-      items: answers.map((a) => ({ questionId: a.questionId, question: prompts.get(a.questionId) ?? "", answer: a.text })),
-    });
+    const verdicts = await deps.check(
+      {
+        bodyText: context.bodyText,
+        gradeLevel: context.gradeLevel,
+        items: answers.map((a) => ({ questionId: a.questionId, question: prompts.get(a.questionId) ?? "", answer: a.text })),
+      },
+      { onModelResponse: () => (modelResponded = true) },
+    );
+    // Verdicts came back, so a reply did too.
+    modelResponded = true;
     results = matchVerdicts(answers, verdicts);
     if (!results) throw new Error("effort check returned the wrong answers");
   } catch (error) {
     deps.onError?.(error);
-    await store.release(studentId, readingId, claimId);
+    await store.release(studentId, readingId, claimId, !effortFailureCounts(error, modelResponded));
     return { status: "check_failed" };
   }
 
@@ -315,7 +370,15 @@ function liveClaim(n: number): string {
 )`;
 }
 
-const CHECKS = `(select count(*) from effort_checks where student_id = $1::uuid and reading_id = $2::uuid)`;
+// The checks that count toward the limit: every one the model answered.
+const CHECKS = `(select count(*) from effort_checks where student_id = $1::uuid and reading_id = $2::uuid and ${countedCheckSql()})`;
+
+// The given-back checks in the outage window ($n: its minutes).
+function givenBackRecent(n: number): string {
+  return `(select count(*) from effort_checks
+  where student_id = $1::uuid and reading_id = $2::uuid and outcome = 'given_back'
+    and created_at > now() - make_interval(mins => $${n}::int))`;
+}
 
 // The claim, as ONE READ COMMITTED transaction:
 // 1. Lock (student, reading), so this student's submits for this reading
@@ -329,7 +392,7 @@ export function claimStatements(studentId: string, readingId: string, claimId: s
   return [
     effortLockStatement(studentId, readingId),
     {
-      // $3 claim id, $4 stale seconds.
+      // $3 claim id, $4 stale seconds, $5 window minutes, $6 window limit.
       text: `insert into effort_checks (id, student_id, reading_id)
 select $3::uuid, $1::uuid, $2::uuid
 where ${ELIGIBLE}
@@ -337,19 +400,28 @@ and ${NOT_PASSED}
 and ${TRIES} < ${TRIES_ALLOWED}
 and not ${liveClaim(4)}
 and ${CHECKS} < ${CHECKS_ALLOWED}
+and ${givenBackRecent(5)} < $6::int
 returning id`,
-      params: [studentId, readingId, claimId, EFFORT_CLAIM_STALE_SECONDS],
+      params: [
+        studentId,
+        readingId,
+        claimId,
+        EFFORT_CLAIM_STALE_SECONDS,
+        EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+        EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+      ],
     },
     {
-      // $3 stale seconds.
+      // $3 stale seconds, $4 window minutes.
       text: `select ${ELIGIBLE} as eligible,
   not ${NOT_PASSED} as passed,
   ${TRIES}::int as tries,
   ${liveClaim(3)} as live,
   ${CHECKS}::int as checks,
   ${TRIES_ALLOWED} as tries_allowed,
-  ${CHECKS_ALLOWED} as checks_allowed`,
-      params: [studentId, readingId, EFFORT_CLAIM_STALE_SECONDS],
+  ${CHECKS_ALLOWED} as checks_allowed,
+  ${givenBackRecent(4)}::int as given_back_recent`,
+      params: [studentId, readingId, EFFORT_CLAIM_STALE_SECONDS, EFFORT_GIVEN_BACK_WINDOW_MINUTES],
     },
   ];
 }
@@ -366,16 +438,48 @@ export function claimOutcome(results: Record<string, unknown>[][]): ClaimOutcome
   if (Number(row.tries ?? 0) >= limits.tries) return "out_of_tries";
   if (row.live === true) return "busy";
   if (Number(row.checks ?? 0) >= limits.checks) return "too_many_checks";
+  if (Number(row.given_back_recent ?? 0) >= EFFORT_GIVEN_BACK_WINDOW_LIMIT) return "paused";
   return "busy";
 }
 
-// Finishes a claim with no attempt, if it is still unfinished. $3 claim id.
-export function releaseStatement(studentId: string, readingId: string, claimId: string): Statement {
+// Finishes a claim with no attempt, if it is still unfinished: given back
+// ($4) when the model never replied, else an error. $3 claim id.
+export function releaseStatement(studentId: string, readingId: string, claimId: string, givenBack = false): Statement {
   return {
-    text: `update effort_checks set finished_at = now(), outcome = 'error'
+    text: `update effort_checks set finished_at = now(),
+  outcome = case when $4::boolean then 'given_back' else 'error' end
 where id = $3::uuid and student_id = $1::uuid and reading_id = $2::uuid and finished_at is null`,
-    params: [studentId, readingId, claimId],
+    params: [studentId, readingId, claimId, givenBack],
   };
+}
+
+// When the next check frees up: the oldest given-back check in the window,
+// plus the window. Null when none is in the window. Shared with the
+// self-learner store (`table` is effort_checks or self_effort_checks, and
+// `owner` its student or account column). $1 owner, $2 reading.
+export function pausedUntilStatement(
+  ownerId: string,
+  readingId: string,
+  table: "effort_checks" | "self_effort_checks" = "effort_checks",
+  owner: "student_id" | "account_id" = "student_id",
+): Statement {
+  return {
+    text: `select min(created_at) + make_interval(mins => $3::int) as retry_at
+from ${table}
+where ${owner} = $1::uuid and reading_id = $2::uuid and outcome = 'given_back'
+  and created_at > now() - make_interval(mins => $3::int)`,
+    params: [ownerId, readingId, EFFORT_GIVEN_BACK_WINDOW_MINUTES],
+  };
+}
+
+export function retryAtFromRows(results: Record<string, unknown>[][]): Date | null {
+  const value = results[0]?.[0]?.retry_at;
+  if (value instanceof Date) return value;
+  if (typeof value === "string" && value) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
 }
 
 // The commit, as ONE transaction:
@@ -469,8 +573,11 @@ export function postgresAttemptStore(execute: StatementExecutor): AttemptStore {
     async claim(studentId, readingId, claimId) {
       return claimOutcome(await execute(claimStatements(studentId, readingId, claimId)));
     },
-    async release(studentId, readingId, claimId) {
-      await execute([releaseStatement(studentId, readingId, claimId)]);
+    async release(studentId, readingId, claimId, givenBack) {
+      await execute([releaseStatement(studentId, readingId, claimId, givenBack)]);
+    },
+    async pausedUntil(studentId, readingId) {
+      return retryAtFromRows(await execute([pausedUntilStatement(studentId, readingId)]));
     },
     async commit(input) {
       return committedTry(await execute(commitStatements(input)));
@@ -492,6 +599,8 @@ export function submitMessage(status: Exclude<SubmitResult["status"], "checked" 
       return TOO_MANY_CHECKS_MESSAGE;
     case "check_failed":
       return CHECK_FAILED_MESSAGE;
+    case "paused":
+      return CHECKS_PAUSED_MESSAGE;
     case "stale":
     case "not_found":
       return ANSWERS_STALE_MESSAGE;

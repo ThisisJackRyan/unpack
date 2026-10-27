@@ -16,6 +16,14 @@
 import type { Statement } from "./link-rate-limit";
 import { EFFORT_CHECK_LIMIT, MAX_TRIES } from "./validate-answers";
 
+// Whether an effort_checks (or self_effort_checks) row counts toward the
+// check limit: every check except one given back (it failed before the
+// model replied: not set up, out of credits, an outage, or a timeout; see
+// submit-answers-core.ts). `alias` is the table's alias, if any.
+export function countedCheckSql(alias?: string): string {
+  return `${alias ? `${alias}.` : ""}outcome is distinct from 'given_back'`;
+}
+
 // Checks granted with one more try: 1 for the try, plus 1 spare in case
 // the model fails (a failed check doesn't use the try). If both fail, the
 // student is at the check limit again and can send a new note.

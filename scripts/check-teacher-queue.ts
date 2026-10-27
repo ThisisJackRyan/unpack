@@ -48,7 +48,7 @@ import { EXTRA_TRY_CHECKS } from "@/lib/reading-limits";
 import { answerStage, type StudentReadingStatus } from "@/lib/reading-progress";
 import { listReadingsWithStatus, loadReadingProgress } from "@/lib/reading-progress-db";
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
-import { EFFORT_CHECK_LIMIT } from "@/lib/submit-answers-core";
+import { EFFORT_CHECK_LIMIT, type EffortCheckHooks } from "@/lib/submit-answers-core";
 import { MAX_TRIES, type AnswerEntry } from "@/lib/validate-answers";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
@@ -84,13 +84,20 @@ function throttled(limit: number): StatementExecutor {
 }
 const execute = throttled(DB_CONCURRENCY);
 
-type Mode = "pass" | "fail" | "error";
+// "error": the model replied, but not usably (counts toward the check
+// limit). "outage": it never replied (given back; see
+// submit-answers-core.ts).
+type Mode = "pass" | "fail" | "error" | "outage";
 let modelCalls = 0;
 function fakeChecker(mode: Mode, delayMs = DELAY_MS) {
-  return async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+  return async (input: EffortCheckInput, hooks?: EffortCheckHooks): Promise<EffortVerdict[]> => {
     modelCalls++;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (mode === "error") throw new Error("fake model failure");
+    if (mode === "outage") throw new Error("fake model outage");
+    if (mode === "error") {
+      hooks?.onModelResponse();
+      throw new Error("fake unusable reply");
+    }
     return input.items.map((item, i) => {
       const pass = mode === "pass" || i < input.items.length - 1;
       return { questionId: item.questionId, pass, nudge: pass ? "" : "Look at the end of the story again." };

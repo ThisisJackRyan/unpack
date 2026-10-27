@@ -37,8 +37,8 @@ export async function submitAnswersAction(
 ): Promise<AnswerFormState> {
   const session = await getStudentSession();
   if (!session) redirect("/join");
-  // Without AI Gateway credentials every check would fail and still count
-  // toward the limit, so don't start one.
+  // Without AI Gateway credentials every check would fail (given back,
+  // but filling the outage window), so don't start one.
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
   let result: SubmitResult;

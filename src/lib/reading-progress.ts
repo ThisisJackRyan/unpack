@@ -5,7 +5,7 @@
 // both go through studentReadingStatus.
 
 import type { Statement } from "./link-rate-limit";
-import { DEFAULT_LIMITS, latestChallengeSql, limitsFromRow, checksAllowedSql, triesAllowedSql, type Limits } from "./reading-limits";
+import { countedCheckSql, DEFAULT_LIMITS, latestChallengeSql, limitsFromRow, checksAllowedSql, triesAllowedSql, type Limits } from "./reading-limits";
 import { MAX_TRIES } from "./validate-answers";
 
 // closed: auto-closed because the student passed (see
@@ -175,7 +175,7 @@ left join lateral ${latestChallengeSql("$1::uuid", "$2::uuid")} lc on true`,
       params: [studentId, readingId],
     },
     {
-      text: `select count(*)::int as checks from effort_checks where student_id = $1::uuid and reading_id = $2::uuid`,
+      text: `select count(*)::int as checks from effort_checks where student_id = $1::uuid and reading_id = $2::uuid and ${countedCheckSql()}`,
       params: [studentId, readingId],
     },
   ];
@@ -220,7 +220,7 @@ export function readingListStatement(classId: string, studentId: string): Statem
   ) as passed,
   (select count(*)::int from attempts a where a.reading_id = r.id and a.student_id = $2::uuid) as tries,
   lc.status as challenge, lc.extra_try,
-  (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid) as checks,
+  (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid and ${countedCheckSql("e")}) as checks,
   ${checksAllowedSql("$2::uuid", "r.id")} as checks_allowed
 from readings r
 left join lateral ${latestChallengeSql("$2::uuid", "r.id")} lc on true

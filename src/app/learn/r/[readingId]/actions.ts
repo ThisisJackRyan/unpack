@@ -21,8 +21,8 @@ export async function submitSelfAnswersAction(
   formData: FormData,
 ): Promise<AnswerFormState> {
   const account = await requireSelfLearner();
-  // Without AI Gateway credentials every check would fail and still count
-  // toward the limit.
+  // Without AI Gateway credentials every check would fail (given back,
+  // but filling the outage window), so don't start one.
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
   let result: SubmitResult;

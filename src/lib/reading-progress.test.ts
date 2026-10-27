@@ -271,7 +271,7 @@ describe("readingListItems", () => {
   it("lists published readings in the class with each status", () => {
     const s = readingListStatement("c1", "s1");
     assert.match(s.text, /where r\.class_id = \$1::uuid and r\.status = 'published'/);
-    assert.match(s.text, /from effort_checks e where e\.reading_id = r\.id and e\.student_id = \$2::uuid\) as checks/);
+    assert.match(s.text, /from effort_checks e where e\.reading_id = r\.id and e\.student_id = \$2::uuid and e\.outcome is distinct from 'given_back'\) as checks/);
     assert.match(s.text, /left join lateral \(select lc\.status[\s\S]*where lc\.student_id = \$2::uuid and lc\.reading_id = r\.id/);
     assert.deepEqual(s.params, ["c1", "s1"]);
     const items = readingListItems([

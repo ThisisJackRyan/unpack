@@ -55,7 +55,7 @@ describe("challengeSendStatements", () => {
     assert.match(
       insert.text,
       new RegExp(
-        `and \\(\\(select count\\(\\*\\) from attempts\\s+where [^)]*result = 'fail'\\) >= coalesce\\(\\(select g\\.tries_allowed[\\s\\S]*?, ${MAX_TRIES}\\) or \\(select count\\(\\*\\) from effort_checks where student_id = \\$1::uuid and reading_id = \\$2::uuid\\) >= coalesce\\(\\(select g\\.checks_allowed[\\s\\S]*?, ${EFFORT_CHECK_LIMIT}\\)\\)`,
+        `and \\(\\(select count\\(\\*\\) from attempts\\s+where [^)]*result = 'fail'\\) >= coalesce\\(\\(select g\\.tries_allowed[\\s\\S]*?, ${MAX_TRIES}\\) or \\(select count\\(\\*\\) from effort_checks where student_id = \\$1::uuid and reading_id = \\$2::uuid and outcome is distinct from 'given_back'\\) >= coalesce\\(\\(select g\\.checks_allowed[\\s\\S]*?, ${EFFORT_CHECK_LIMIT}\\)\\)`,
       ),
     );
     // No check running (the second-tab race at the last check).

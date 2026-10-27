@@ -47,7 +47,13 @@ import { neonExecutor } from "@/lib/neon-executor";
 import { answerStage } from "@/lib/reading-progress";
 import { listReadingsWithStatus, loadReadingProgress } from "@/lib/reading-progress-db";
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
-import { EFFORT_CHECK_LIMIT, EFFORT_CLAIM_STALE_SECONDS } from "@/lib/submit-answers-core";
+import {
+  EFFORT_CHECK_LIMIT,
+  EFFORT_CLAIM_STALE_SECONDS,
+  EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+  EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+  type EffortCheckHooks,
+} from "@/lib/submit-answers-core";
 import { MAX_TRIES, type AnswerEntry } from "@/lib/validate-answers";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
@@ -87,14 +93,21 @@ function throttled(limit: number): StatementExecutor {
 const execute = throttled(DB_CONCURRENCY);
 
 // The fake effort checker. "pass" passes every answer; "fail" fails the
-// last one with a nudge; "error" throws like a model outage.
-type Mode = "pass" | "fail" | "error";
+// last one with a nudge.
+// "error": the model replied, but not usably (counts toward the check
+// limit). "outage": it never replied (given back; see
+// submit-answers-core.ts).
+type Mode = "pass" | "fail" | "error" | "outage";
 let modelCalls = 0;
 function fakeChecker(mode: Mode, delayMs = DELAY_MS) {
-  return async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+  return async (input: EffortCheckInput, hooks?: EffortCheckHooks): Promise<EffortVerdict[]> => {
     modelCalls++;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (mode === "error") throw new Error("fake model failure");
+    if (mode === "outage") throw new Error("fake model outage");
+    if (mode === "error") {
+      hooks?.onModelResponse();
+      throw new Error("fake unusable reply");
+    }
     return input.items.map((item, i) => {
       const pass = mode === "pass" || i < input.items.length - 1;
       return { questionId: item.questionId, pass, nudge: pass ? "" : "Look at the end of the story again." };
@@ -291,6 +304,63 @@ async function checkModelFailureAndLimit() {
   );
 }
 
+// A check that fails with no model reply (not set up, out of credits, an
+// outage, a timeout) is given back: it never counts toward the limit, and
+// only a short window pauses checking during an outage.
+async function checkGivenBack() {
+  console.log("\n== GIVEN-BACK CHECKS (NO MODEL REPLY) ==");
+  const student = await newStudent();
+  for (let i = 0; i < EFFORT_GIVEN_BACK_WINDOW_LIMIT; i++) {
+    const r = await submit(student, "outage", { delayMs: 5 });
+    check(r.status === "check_failed", `outage ${i + 1}: ${r.status}`);
+  }
+  const rows = (await sql`
+    select outcome from effort_checks where student_id = ${student} and reading_id = ${readingId}`) as { outcome: string }[];
+  check(
+    rows.length === EFFORT_GIVEN_BACK_WINDOW_LIMIT && rows.every((r) => r.outcome === "given_back"),
+    `every outage check is marked given_back (${rows.map((r) => r.outcome).join(", ")})`,
+  );
+  const before = modelCalls;
+  const paused = await submit(student, "pass");
+  const minutes = paused.status === "paused" && paused.retryAt ? (paused.retryAt.getTime() - Date.now()) / 60_000 : NaN;
+  check(
+    paused.status === "paused" && modelCalls === before && minutes > EFFORT_GIVEN_BACK_WINDOW_MINUTES - 1 && minutes <= EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+    `the ${EFFORT_GIVEN_BACK_WINDOW_LIMIT + 1}th submit in the window is paused, no model call, frees up in ${minutes.toFixed(1)} min`,
+  );
+  const stage = answerStage(await loadReadingProgress(student, readingId));
+  check(stage.kind === "answer", `given-back checks never move the student toward the note to the teacher: ${stage.kind}`);
+
+  // Past the window, more outages: still never the check limit.
+  for (let round = 0; round < 3; round++) {
+    await sql`update effort_checks set created_at = created_at - make_interval(mins => ${EFFORT_GIVEN_BACK_WINDOW_MINUTES + 1})
+      where student_id = ${student} and reading_id = ${readingId}`;
+    for (let i = 0; i < EFFORT_GIVEN_BACK_WINDOW_LIMIT; i++) await submit(student, "outage", { delayMs: 5 });
+  }
+  await sql`update effort_checks set created_at = created_at - make_interval(mins => ${EFFORT_GIVEN_BACK_WINDOW_MINUTES + 1})
+    where student_id = ${student} and reading_id = ${readingId}`;
+  const total = await one<{ n: number; counted: number }>(sql`
+    select count(*)::int as n, count(*) filter (where outcome is distinct from 'given_back')::int as counted
+    from effort_checks where student_id = ${student} and reading_id = ${readingId}`);
+  const after = await submit(student, "fail", { delayMs: 5 });
+  check(
+    total.n === 4 * EFFORT_GIVEN_BACK_WINDOW_LIMIT && total.counted === 0 && after.status === "checked" && after.tryNumber === 1,
+    `${total.n} given-back checks (more than the limit of ${EFFORT_CHECK_LIMIT}), ${total.counted} counted, and the next real check is try 1: ${after.status}`,
+  );
+
+  // A burst during an outage: one check at a time, never past the window.
+  const burst = await newStudent();
+  const callsBefore = modelCalls;
+  for (let wave = 0; wave < 3; wave++) {
+    await Promise.allSettled(Array.from({ length: 10 }, () => submit(burst, "outage", { delayMs: 5 })));
+  }
+  const burstRows = await one<{ n: number }>(sql`
+    select count(*)::int as n from effort_checks where student_id = ${burst} and reading_id = ${readingId}`);
+  check(
+    burstRows.n === EFFORT_GIVEN_BACK_WINDOW_LIMIT && modelCalls - callsBefore === EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+    `30 outage submits in 3 waves: ${burstRows.n} checks and ${modelCalls - callsBefore} model calls (max ${EFFORT_GIVEN_BACK_WINDOW_LIMIT})`,
+  );
+}
+
 async function checkStaleClaim() {
   console.log("\n== STALE AND LIVE CLAIMS ==");
   const student = await newStudent();
@@ -431,6 +501,7 @@ async function main(): Promise<void> {
     await checkNormalFlow();
     const outOfTries = await checkRace();
     await checkModelFailureAndLimit();
+    await checkGivenBack();
     await checkStaleClaim();
     await checkRefusals();
     await checkChallenges(outOfTries);

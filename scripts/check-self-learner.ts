@@ -41,7 +41,13 @@ import { QuestionWriterError } from "@/lib/ai/questions";
 import { deletedAccountRows, deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import { neonExecutor } from "@/lib/neon-executor";
 import { selfClaimCheckStatements, selfCommitStatements, soloStage } from "@/lib/self-answers-core";
-import { claimOutcome, committedTry } from "@/lib/submit-answers-core";
+import {
+  claimOutcome,
+  committedTry,
+  EFFORT_CHECK_LIMIT,
+  EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+  EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+} from "@/lib/submit-answers-core";
 import { allowanceFor } from "@/lib/self-allowance";
 import {
   createSelfReading,
@@ -399,6 +405,38 @@ async function checkSoloFlow() {
   );
 }
 
+// A check with no model reply (an outage, not set up, out of credits) is
+// given back: never toward the self-learner's check cap, and it never
+// moves the reading on.
+async function checkGivenBackChecks() {
+  console.log("\n== (e3) GIVEN-BACK CHECKS ==");
+  const readingId = await rawReading(bId, "Outage");
+  const questions = await readyQuestions(bId, readingId);
+  const outage = async (): Promise<EffortVerdict[]> => {
+    throw new Error("fake model outage");
+  };
+  const statuses: string[] = [];
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < EFFORT_GIVEN_BACK_WINDOW_LIMIT; i++) {
+      statuses.push((await submitSelfAnswers(bId, readingId, answersFor(questions), { check: outage })).status);
+    }
+    const paused = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: checker(true) });
+    statuses.push(paused.status);
+    await sql`update self_effort_checks set created_at = created_at - make_interval(mins => ${EFFORT_GIVEN_BACK_WINDOW_MINUTES + 1})
+      where reading_id = ${readingId}`;
+  }
+  const rows = await one<{ n: number; counted: number; status: string }>(sql`
+    select count(*)::int as n, count(*) filter (where e.outcome is distinct from 'given_back')::int as counted, r.status
+    from self_readings r left join self_effort_checks e on e.reading_id = r.id
+    where r.id = ${readingId} group by r.status`);
+  check(
+    rows.n === 3 * EFFORT_GIVEN_BACK_WINDOW_LIMIT && rows.counted === 0 && rows.status === "in_progress",
+    `${rows.n} given-back checks (cap ${EFFORT_CHECK_LIMIT}): ${rows.counted} counted, reading ${rows.status}; each window ended paused (${statuses.filter((x) => x === "paused").length}x)`,
+  );
+  const pass = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: checker(true) });
+  check(pass.status === "checked" && pass.passed && pass.tryNumber === 1, `then a real check is try 1 and passes: ${pass.status}`);
+}
+
 // A role switch or another account's id between the read and the write:
 // the claim and the commit re-check both in the statement, so nothing is
 // saved.
@@ -515,6 +553,7 @@ async function main(): Promise<void> {
     await checkAllowance();
     await checkFailedGenerations();
     await checkSoloFlow();
+    await checkGivenBackChecks();
     await checkRoleAndOwnerAtWrite();
     await checkDelete();
   } finally {

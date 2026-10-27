@@ -258,7 +258,12 @@ describe("self store statements", () => {
   it("the claim enforces 3 tries, one live check, and the check limit", () => {
     const [, insert] = selfClaimCheckStatements(ACCOUNT, READING, "c1");
     assert.match(insert.text, /^insert into self_effort_checks \(id, account_id, reading_id\)/);
-    assert.deepEqual(insert.params, [ACCOUNT, READING, "c1", EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES, EFFORT_CHECK_LIMIT]);
+    assert.deepEqual(insert.params, [ACCOUNT, READING, "c1", EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES, EFFORT_CHECK_LIMIT, 10, 3]);
+    assert.match(insert.text, /and outcome is distinct from 'given_back'\) < \$6::int/);
+    assert.match(insert.text, /outcome = 'given_back'\n    and created_at > now\(\) - make_interval\(mins => \$7::int\)\) < \$8::int/);
+    const [, release] = selfReleaseCheckStatements(ACCOUNT, READING, "c1", true);
+    assert.match(release.text, /outcome = case when \$4::boolean then 'given_back' else 'error' end/);
+    assert.deepEqual(release.params, [ACCOUNT, READING, "c1", true]);
   });
 
   it("the commit and the release end by settling the status", () => {

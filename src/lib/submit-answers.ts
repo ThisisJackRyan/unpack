@@ -21,7 +21,9 @@ import type { AnswerEntry } from "./validate-answers";
 export type { SubmitResult } from "./submit-answers-core";
 
 // The real checker: the configured model, all answers in one call.
-const modelChecker: EffortChecker = (input) => checkEffort(getEffortCheckModel(), input);
+// It reports each reply, so a failure with no reply is given back.
+const modelChecker: EffortChecker = (input, hooks) =>
+  checkEffort(getEffortCheckModel(), input, { onModelResponse: hooks?.onModelResponse });
 
 export type SubmitAnswersOptions = {
   // For scripts/check-student-answers.ts: a fake checker (no model

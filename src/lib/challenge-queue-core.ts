@@ -25,7 +25,7 @@
 
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { studentDisplayName } from "./class-status";
-import { checksAllowedSql, effortLockSql, EXTRA_TRY_CHECKS, limitsFromRow, triesAllowedSql } from "./reading-limits";
+import { checksAllowedSql, countedCheckSql, effortLockSql, EXTRA_TRY_CHECKS, limitsFromRow, triesAllowedSql } from "./reading-limits";
 
 export const CHALLENGE_DECISIONS = ["accept", "deny"] as const;
 export type ChallengeDecision = (typeof CHALLENGE_DECISIONS)[number];
@@ -81,7 +81,7 @@ export function decideStatements(input: DecideInput): Statement[] {
   tries_allowed = case when $5::boolean then
     (select count(*)::int from attempts a where a.student_id = ch.student_id and a.reading_id = ch.reading_id) + 1 end,
   checks_allowed = case when $5::boolean then
-    (select count(*)::int from effort_checks e where e.student_id = ch.student_id and e.reading_id = ch.reading_id) + $6::int end
+    (select count(*)::int from effort_checks e where e.student_id = ch.student_id and e.reading_id = ch.reading_id and ${countedCheckSql("e")}) + $6::int end
 from readings r, classes c
 where ch.id = $1::uuid and r.id = ch.reading_id and c.id = r.class_id
   and c.id = $3::uuid and c.teacher_id = $2::uuid
@@ -182,7 +182,7 @@ export function queueStatements(classId: string, teacherId: string): Statement[]
       text: `select ch.id, ch.round, ch.note, ch.created_at, s.id as student_id, s.first_name, s.last_initials,
   r.id as reading_id, r.title,
   (select count(*)::int from attempts a where a.student_id = ch.student_id and a.reading_id = ch.reading_id) as tries,
-  (select count(*)::int from effort_checks e where e.student_id = ch.student_id and e.reading_id = ch.reading_id) as checks,
+  (select count(*)::int from effort_checks e where e.student_id = ch.student_id and e.reading_id = ch.reading_id and ${countedCheckSql("e")}) as checks,
   ${triesAllowedSql("ch.student_id", "ch.reading_id")} as tries_allowed,
   ${checksAllowedSql("ch.student_id", "ch.reading_id")} as checks_allowed,
   (select max(a.try_number) from attempts a where a.student_id = ch.student_id and a.reading_id = ch.reading_id) as last_try

@@ -1,19 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
-import type { EffortCheckInput, EffortVerdict } from "./ai/effort-check";
+import { EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
+import { QuestionWriterError } from "./ai/questions";
 import type { Statement } from "./link-rate-limit";
 import {
   ALREADY_PASSED_MESSAGE,
   CHECK_BUSY_MESSAGE,
   CHECK_FAILED_MESSAGE,
+  CHECKS_PAUSED_MESSAGE,
   claimOutcome,
   claimStatements,
   commitStatements,
   committedTry,
   EFFORT_CHECK_LIMIT,
   EFFORT_CLAIM_STALE_SECONDS,
+  EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+  EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+  effortFailureCounts,
   OUT_OF_TRIES_MESSAGE,
+  pausedUntilStatement,
   postgresAttemptStore,
   releaseStatement,
   submitAnswersWith,
@@ -22,6 +28,7 @@ import {
   submitMessage,
   TOO_MANY_CHECKS_MESSAGE,
   type AttemptStore,
+  type EffortChecker,
   type SubmitResult,
 } from "./submit-answers-core";
 import { ANSWER_EMPTY_MESSAGE, ANSWERS_STALE_MESSAGE, MAX_TRIES } from "./validate-answers";
@@ -53,6 +60,10 @@ function fakeStore(options: { eligible?: boolean; questions?: typeof QUESTIONS }
   let now = 0;
   const live = () => checks.some((c) => !c.finished && now - c.createdAt < EFFORT_CLAIM_STALE_SECONDS);
   const passed = () => attempts.some((a) => a.passed);
+  // Given-back checks don't count toward the limit, only the window.
+  const counted = () => checks.filter((c) => c.outcome !== "given_back").length;
+  const givenBackRecent = () =>
+    checks.filter((c) => c.outcome === "given_back" && now - c.createdAt < EFFORT_GIVEN_BACK_WINDOW_MINUTES * 60);
   const store: AttemptStore = {
     async loadContext() {
       await tick();
@@ -75,14 +86,19 @@ function fakeStore(options: { eligible?: boolean; questions?: typeof QUESTIONS }
       if (passed()) return "already_passed";
       if (attempts.length >= limits.tries) return "out_of_tries";
       if (live()) return "busy";
-      if (checks.length >= limits.checks) return "too_many_checks";
+      if (counted() >= limits.checks) return "too_many_checks";
+      if (givenBackRecent().length >= EFFORT_GIVEN_BACK_WINDOW_LIMIT) return "paused";
       checks.push({ id: claimId, createdAt: now, finished: false, outcome: null });
       return "claimed";
     },
-    async release(_s, _r, claimId) {
+    async release(_s, _r, claimId, givenBack) {
       await tick();
       const c = checks.find((x) => x.id === claimId);
-      if (c && !c.finished) Object.assign(c, { finished: true, outcome: "error" });
+      if (c && !c.finished) Object.assign(c, { finished: true, outcome: givenBack ? "given_back" : "error" });
+    },
+    async pausedUntil() {
+      const oldest = Math.min(...givenBackRecent().map((c) => c.createdAt));
+      return new Date((oldest + EFFORT_GIVEN_BACK_WINDOW_MINUTES * 60) * 1000);
     },
     async commit(input) {
       await tick();
@@ -96,23 +112,31 @@ function fakeStore(options: { eligible?: boolean; questions?: typeof QUESTIONS }
     },
   };
   // Deny with one more try (see reading-limits.ts): exactly 1 try left.
-  const grantExtraTry = () => Object.assign(limits, { tries: attempts.length + 1, checks: checks.length + 2 });
+  const grantExtraTry = () => Object.assign(limits, { tries: attempts.length + 1, checks: counted() + 2 });
   return { store, checks, attempts, grantExtraTry, advance: (s: number) => void (now += s) };
 }
 
 // Fake effort checker: passes everything unless told otherwise, takes a
 // moment like a real call, and counts calls.
-function fakeChecker(verdict: (input: EffortCheckInput) => EffortVerdict[] | Error = passAll, delayMs = 5) {
+// With `replied`, a thrown error comes after the model replied (like a
+// 5xx on the retry after an unusable reply), reported through the hook.
+function fakeChecker(verdict: (input: EffortCheckInput) => EffortVerdict[] | Error = passAll, delayMs = 5, replied = false) {
   let calls = 0;
-  const check = async (input: EffortCheckInput) => {
+  const check: EffortChecker = async (input, hooks) => {
     calls++;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     const out = verdict(input);
-    if (out instanceof Error) throw out;
+    if (out instanceof Error) {
+      if (replied) hooks?.onModelResponse();
+      throw out;
+    }
     return out;
   };
   return { check, calls: () => calls };
 }
+
+// A reply came back but wasn't usable: counts toward the limit.
+const badOutput = () => new EffortCheckError("failed", "invalid output: expected exactly 2 results");
 
 function passAll(input: EffortCheckInput): EffortVerdict[] {
   return input.items.map((i) => ({ questionId: i.questionId, pass: true, nudge: "" }));
@@ -129,7 +153,7 @@ function failSecond(input: EffortCheckInput): EffortVerdict[] {
 let ids = 0;
 const newId = () => `id${++ids}`;
 
-function submit(store: AttemptStore, check: (input: EffortCheckInput) => Promise<EffortVerdict[]>, entries = ANSWERS) {
+function submit(store: AttemptStore, check: EffortChecker, entries = ANSWERS) {
   return submitAnswersWith(STUDENT, READING, entries, { store, check, newId });
 }
 
@@ -212,7 +236,7 @@ describe("submitAnswersWith", () => {
 
   it("one more try at the check limit: a model failure keeps the try, the 2nd failure ends it", async () => {
     const { store, attempts, checks, grantExtraTry } = fakeStore();
-    const broken = fakeChecker(() => new Error("model down"));
+    const broken = fakeChecker(badOutput);
     for (let i = 0; i < EFFORT_CHECK_LIMIT; i++) await submit(store, broken.check);
     assert.deepEqual(await submit(store, broken.check), { status: "too_many_checks" });
     grantExtraTry();
@@ -276,10 +300,10 @@ describe("submitAnswersWith", () => {
     assert.equal(checker.calls(), checks.length);
   });
 
-  it("a model failure doesn't use a try but counts toward the limit", async () => {
+  it("a failure after a model reply doesn't use a try but counts toward the limit", async () => {
     const { store, attempts, checks } = fakeStore();
     const errors: unknown[] = [];
-    const failing = fakeChecker(() => new Error("model down"));
+    const failing = fakeChecker(() => new Error("500 on the retry"), 5, true);
     const r = await submitAnswersWith(STUDENT, READING, ANSWERS, {
       store,
       check: failing.check,
@@ -294,9 +318,9 @@ describe("submitAnswersWith", () => {
     assert.equal(next.status === "checked" && next.tryNumber, 1);
   });
 
-  it("stops at EFFORT_CHECK_LIMIT checks, failures included", async () => {
+  it("stops at EFFORT_CHECK_LIMIT checks, failures the model replied to included", async () => {
     const { store, checks } = fakeStore();
-    const failing = fakeChecker(() => new Error("model down"));
+    const failing = fakeChecker(badOutput);
     for (let i = 0; i < EFFORT_CHECK_LIMIT; i++) {
       assert.deepEqual(await submit(store, failing.check), { status: "check_failed" });
     }
@@ -307,11 +331,53 @@ describe("submitAnswersWith", () => {
     assert.equal(checks.length, EFFORT_CHECK_LIMIT);
   });
 
-  it("treats wrong verdicts from the checker as a failed check", async () => {
-    const { store, attempts } = fakeStore();
+  it("treats wrong verdicts from the checker as a failed check (counted: a reply came back)", async () => {
+    const { store, attempts, checks } = fakeStore();
     const r = await submit(store, fakeChecker((input) => passAll(input).slice(0, 1)).check);
     assert.deepEqual(r, { status: "check_failed" });
     assert.equal(attempts.length, 0);
+    assert.equal(checks[0].outcome, "error");
+  });
+
+  it("a failure with no model reply is given back: never toward the limit, only the short window", async () => {
+    const { store, attempts, checks, advance } = fakeStore();
+    // Not set up (no credentials), out of credits (402 maps to
+    // not_configured), busy, an outage, a timeout: no reply in any.
+    const noReply = [
+      new QuestionWriterError("not_configured", "no AI Gateway API key or OIDC token"),
+      new QuestionWriterError("not_configured", "402"),
+      new Error("fetch failed"),
+    ];
+    for (const error of noReply) {
+      assert.deepEqual(await submit(store, fakeChecker(() => error).check), { status: "check_failed" });
+    }
+    assert.deepEqual(
+      checks.map((c) => c.outcome),
+      ["given_back", "given_back", "given_back"],
+    );
+    // The window is full: paused, with when it frees up, and no model call.
+    const working = fakeChecker();
+    const paused = await submit(store, working.check);
+    assert.deepEqual(paused, { status: "paused", retryAt: new Date(EFFORT_GIVEN_BACK_WINDOW_MINUTES * 60 * 1000) });
+    assert.equal(working.calls(), 0);
+    assert.equal(submitMessage("paused"), CHECKS_PAUSED_MESSAGE);
+    // After the window, checking works again, and all 6 checks are left.
+    advance(EFFORT_GIVEN_BACK_WINDOW_MINUTES * 60);
+    for (let i = 0; i < EFFORT_CHECK_LIMIT; i++) {
+      advance(EFFORT_GIVEN_BACK_WINDOW_MINUTES * 60);
+      assert.deepEqual(await submit(store, fakeChecker(() => new Error("timeout")).check), { status: "check_failed" });
+    }
+    assert.equal(attempts.length, 0);
+    const after = await submit(store, fakeChecker(failSecond).check);
+    assert.equal(after.status === "checked" && after.tryNumber, 1, "given-back checks never reach the limit");
+  });
+
+  it("effortFailureCounts: only a reply (or unusable output) counts", () => {
+    assert.equal(effortFailureCounts(new Error("fetch failed"), false), false);
+    assert.equal(effortFailureCounts(new QuestionWriterError("not_configured", "402"), false), false);
+    assert.equal(effortFailureCounts(new EffortCheckError("timeout", "deadline"), false), false);
+    assert.equal(effortFailureCounts(new Error("fetch failed"), true), true);
+    assert.equal(effortFailureCounts(badOutput(), false), true);
   });
 
   it("a stale claim stops blocking, and its holder can't save", async () => {
@@ -462,9 +528,11 @@ describe("claim statements", () => {
     assert.match(insert.text, /and not exists \(\s*select 1 from effort_checks[\s\S]*finished_at is null and created_at > now\(\) - make_interval\(secs => \$4::int\)/);
     assert.match(
       insert.text,
-      new RegExp(`from effort_checks where student_id = \\$1::uuid and reading_id = \\$2::uuid\\) < coalesce\\(\\(select g\\.checks_allowed from challenges g[\\s\\S]*?limit 1\\), ${EFFORT_CHECK_LIMIT}\\)`),
+      new RegExp(`from effort_checks where student_id = \\$1::uuid and reading_id = \\$2::uuid and outcome is distinct from 'given_back'\\) < coalesce\\(\\(select g\\.checks_allowed from challenges g[\\s\\S]*?limit 1\\), ${EFFORT_CHECK_LIMIT}\\)`),
     );
-    assert.deepEqual(insert.params, [STUDENT, READING, "c1", EFFORT_CLAIM_STALE_SECONDS]);
+    // At most 3 given-back checks in 10 minutes.
+    assert.match(insert.text, /outcome = 'given_back'\n    and created_at > now\(\) - make_interval\(mins => \$5::int\)\) < \$6::int/);
+    assert.deepEqual(insert.params, [STUDENT, READING, "c1", EFFORT_CLAIM_STALE_SECONDS, EFFORT_GIVEN_BACK_WINDOW_MINUTES, EFFORT_GIVEN_BACK_WINDOW_LIMIT]);
   });
 
   it("lowercase the lock key, so an uppercase id from the URL shares the lock", () => {
@@ -646,9 +714,19 @@ describe("postgresAttemptStore", () => {
     assert.deepEqual(calls[3], [releaseStatement(STUDENT, READING, "c1")]);
   });
 
-  it("releases with outcome error, only an unfinished claim", () => {
+  it("releases as error, or given back when the model never replied, only an unfinished claim", () => {
     const s = releaseStatement(STUDENT, READING, "c1");
-    assert.match(s.text, /set finished_at = now\(\), outcome = 'error'/);
+    assert.match(s.text, /set finished_at = now\(\),\n  outcome = case when \$4::boolean then 'given_back' else 'error' end/);
     assert.match(s.text, /finished_at is null/);
+    assert.deepEqual(s.params, [STUDENT, READING, "c1", false]);
+    assert.deepEqual(releaseStatement(STUDENT, READING, "c1", true).params, [STUDENT, READING, "c1", true]);
+  });
+
+  it("pausedUntil: the oldest given-back check in the window, plus the window", () => {
+    const s = pausedUntilStatement(STUDENT, READING);
+    assert.match(s.text, /^select min\(created_at\) \+ make_interval\(mins => \$3::int\) as retry_at\nfrom effort_checks/);
+    assert.match(s.text, /outcome = 'given_back'\n  and created_at > now\(\) - make_interval\(mins => \$3::int\)/);
+    assert.deepEqual(s.params, [STUDENT, READING, EFFORT_GIVEN_BACK_WINDOW_MINUTES]);
+    assert.match(pausedUntilStatement("a1", READING, "self_effort_checks", "account_id").text, /from self_effort_checks\nwhere account_id = \$1::uuid/);
   });
 });
