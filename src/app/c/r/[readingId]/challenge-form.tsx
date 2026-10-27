@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useState, type FormEvent } from "react";
+import { PaperPlane } from "@/components/illustrations";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { primaryButtonLarge } from "@/components/ui";
 import { answerBox, CharacterCount, fieldError, Spinner } from "@/components/answer-parts";
@@ -34,11 +35,14 @@ export function ChallengeForm({
       onSubmit={onSubmit}
       noValidate
       aria-labelledby="challenge-heading"
-      className="flex flex-col gap-4 rounded-2xl border border-primary-200 bg-primary-50/60 p-5 sm:p-6"
+      className="flex flex-col gap-4 rounded-3xl border-2 border-primary-200 bg-primary-50 p-5 sm:p-6"
     >
-      <h3 id="challenge-heading" className="text-xl font-semibold text-ink-950">
-        Ask your teacher to take a look
-      </h3>
+      <div className="flex items-center justify-between gap-4">
+        <h3 id="challenge-heading" className="text-2xl font-bold text-ink-950">
+          Ask your teacher to take a look
+        </h3>
+        <PaperPlane className="h-16 w-20 shrink-0" />
+      </div>
       {intro && <p className="text-lg leading-relaxed text-ink-800">{intro}</p>}
       <label htmlFor="challenge-note" className="text-lg font-semibold text-ink-900">
         Your note to your teacher

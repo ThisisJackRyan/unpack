@@ -187,7 +187,7 @@ export function ReadingForm({
                 defaultValue={values.url}
                 aria-invalid={errors.url ? true : undefined}
                 aria-describedby={describedBy("url-hint", errors.url && "url-error")}
-                className={field}
+                className={`${field} text-lg`}
               />
               <p id="url-hint" className={hint}>
                 We’ll pull the article text from the page.
@@ -242,7 +242,7 @@ export function ReadingForm({
             defaultValue={values.title}
             aria-invalid={errors.title ? true : undefined}
             aria-describedby={describedBy(create && "title-hint", errors.title && "title-error")}
-            className={field}
+            className={`${field} text-lg`}
           />
           {create && (
             <p id="title-hint" className={`${hint} ${linkOnly}`}>
@@ -316,7 +316,7 @@ export function ReadingForm({
                 defaultValue={values.gradeLevel}
                 aria-invalid={errors.gradeLevel ? true : undefined}
                 aria-describedby={describedBy(solo && "grade-hint", errors.gradeLevel && "grade-error")}
-                className={field}
+                className={`${field} text-lg`}
               >
                 {solo ? (
                   <option value="" disabled>
@@ -352,7 +352,7 @@ export function ReadingForm({
                 defaultValue={values.questionCount}
                 aria-invalid={errors.questionCount ? true : undefined}
                 aria-describedby={errors.questionCount ? "count-error" : undefined}
-                className={field}
+                className={`${field} text-lg`}
               >
                 {QUESTION_COUNTS.map((n) => (
                   <option key={n} value={String(n)}>

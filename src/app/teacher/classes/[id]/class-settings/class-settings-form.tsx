@@ -46,7 +46,7 @@ export function ClassSettingsForm({
           defaultValue={state.values?.name ?? name}
           aria-invalid={errors.name ? true : undefined}
           aria-describedby={errors.name ? "class-name-error" : undefined}
-          className={field}
+          className={`${field} text-lg`}
         />
         <p id="class-name-error" aria-live="polite" className="text-base text-danger-700 empty:hidden">
           {errors.name}
@@ -68,7 +68,7 @@ export function ClassSettingsForm({
           onChange={(e) => setPicked(e.target.value)}
           aria-invalid={errors.gradeLevel ? true : undefined}
           aria-describedby={`class-grade-help${warn ? " class-grade-warning" : ""}${errors.gradeLevel ? " class-grade-error" : ""}`}
-          className={field}
+          className={`${field} text-lg`}
         >
           {GRADE_LEVELS.map((level) => (
             <option key={level} value={level}>

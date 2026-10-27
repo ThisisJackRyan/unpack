@@ -1,4 +1,4 @@
-import { focusRing, pill } from "@/components/ui";
+import { card, focusRing, pill } from "@/components/ui";
 import type { SavedAnswer } from "@/lib/reading-progress";
 import type { StudentQuestion } from "@/lib/student-questions-core";
 
@@ -41,12 +41,12 @@ export function LightbulbIcon({ className = "h-5 w-5" }: { className?: string })
 
 export function ResultBadge({ pass }: { pass: boolean }) {
   return pass ? (
-    <span className={`${pill} bg-success-50 px-3 py-1 text-base text-success-800`}>
+    <span className={`${pill} bg-success-50 px-3 py-1 text-lg text-success-800`}>
       <CheckIcon />
       Looks good
     </span>
   ) : (
-    <span className={`${pill} bg-warning-50 px-3 py-1 text-base text-warning-900`}>
+    <span className={`${pill} bg-warning-50 px-3 py-1 text-lg text-warning-900`}>
       <RetryIcon />
       Needs more
     </span>
@@ -55,7 +55,7 @@ export function ResultBadge({ pass }: { pass: boolean }) {
 
 export function Nudge({ id, text }: { id?: string; text: string }) {
   return (
-    <p id={id} className="flex gap-2.5 rounded-xl bg-warning-50 px-4 py-3 text-lg leading-relaxed text-warning-950">
+    <p id={id} className="flex gap-2.5 rounded-2xl bg-warning-50 px-4 py-3 text-lg leading-relaxed text-warning-950">
       <LightbulbIcon className="mt-1 h-5 w-5 shrink-0 text-warning-700" />
       <span>
         <span className="font-semibold">Tip: </span>
@@ -69,7 +69,7 @@ export function QuestionNumber({ position }: { position: number }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-50 text-lg font-semibold text-primary-700 tabular-nums"
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-100 text-lg font-bold text-primary-800 tabular-nums"
     >
       {position}
     </span>
@@ -92,18 +92,18 @@ export function AnswerReview({
       {questions.map((q) => {
         const answer = answers[q.id];
         return (
-          <li key={q.id} className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-white p-5 sm:p-6">
+          <li key={q.id} className={`${card} flex flex-col gap-4 p-5 sm:p-6`}>
             <div className="flex gap-4">
               <QuestionNumber position={q.position} />
-              <p className="pt-1.5 text-lg leading-relaxed font-medium break-words text-ink-900">
+              <p className="pt-1.5 text-xl leading-relaxed font-semibold break-words text-ink-950">
                 <span className="sr-only">Question {q.position}: </span>
                 {q.prompt}
               </p>
             </div>
             {answer && (
               <div className="flex flex-col gap-3 sm:pl-14">
-                <p className="text-base font-medium text-ink-600">Your answer</p>
-                <p className="rounded-xl bg-ink-50 px-4 py-3 text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">
+                <p className="text-lg font-semibold text-ink-600">Your answer</p>
+                <p className="rounded-2xl bg-ink-50 px-4 py-3 text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">
                   {answer.text}
                 </p>
                 {showResults && (
@@ -125,7 +125,7 @@ export function AnswerReview({
 export function CharacterCount({ id, length, max }: { id: string; length: number; max: number }) {
   const near = length >= max * 0.9;
   return (
-    <p id={id} className={`text-base tabular-nums ${near ? "font-medium text-warning-800" : "text-ink-500"}`}>
+    <p id={id} className={`text-lg tabular-nums ${near ? "font-medium text-warning-800" : "text-ink-500"}`}>
       <span aria-hidden="true">
         {length.toLocaleString("en-US")} / {max.toLocaleString("en-US")}
       </span>
@@ -136,9 +136,9 @@ export function CharacterCount({ id, length, max }: { id: string; length: number
   );
 }
 
-export const answerBox = `block min-h-32 w-full resize-y rounded-xl border border-ink-300 bg-white px-4 py-3 text-lg leading-relaxed text-ink-950 aria-invalid:border-warning-600 aria-invalid:bg-warning-50/30 disabled:bg-ink-50 ${focusRing}`;
+export const answerBox = `block min-h-32 w-full resize-y rounded-2xl border-2 border-ink-400 bg-white px-4 py-3 text-lg leading-relaxed text-ink-950 aria-invalid:border-warning-600 aria-invalid:bg-warning-50/30 disabled:bg-ink-50 ${focusRing}`;
 
-export const fieldError = "text-base font-medium text-warning-900";
+export const fieldError = "text-lg font-medium text-warning-900";
 
 // For a button while its action runs.
 export function Spinner() {

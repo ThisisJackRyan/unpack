@@ -1,4 +1,6 @@
-// Shared Tailwind class strings, for every area. The colors are the theme
+// Shared Tailwind class strings, for every area. Tailwind orders same-property
+// utilities by name, not by where they sit in a class string, so `pill` and
+// `field` leave the text size to the caller. The colors are the theme
 // tokens in src/app/globals.css: primary is the one accent for actions;
 // ink is the neutral. Buttons are chunky, with a bottom "lip" that presses
 // in (the press only moves when motion is allowed).
@@ -24,12 +26,12 @@ export const secondarySmallButton = `inline-flex min-h-11 items-center justify-c
 
 export const backLink = `inline-flex min-h-12 items-center gap-1 rounded-xl text-base font-semibold text-primary-700 hover:text-primary-900 ${focusRing}`;
 
-export const card = "rounded-3xl border-2 border-ink-200 bg-white";
+export const card = "rounded-3xl border-2 border-ink-200 bg-white shadow-card";
 
-export const field = `block min-h-12 w-full rounded-2xl border-2 bg-white border-ink-400 px-4 text-lg text-ink-950 aria-invalid:border-danger-600 ${focusRing}`;
+export const field = `block min-h-12 w-full rounded-2xl border-2 bg-white border-ink-400 px-4 text-ink-950 aria-invalid:border-danger-600 ${focusRing}`;
 
 export const pill =
-  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-semibold";
+  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 font-semibold";
 
 // An inline text link in a sentence.
 export const textLink = `rounded font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`;

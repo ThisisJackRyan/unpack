@@ -90,14 +90,14 @@ function ChallengeCard({
           <span className="font-medium text-ink-700">{item.readingTitle}</span>
         </h2>
         <p className="flex flex-wrap items-center gap-2 text-sm text-ink-600">
-          <span className={`${pill} bg-ink-100 text-ink-700 tabular-nums`}>
+          <span className={`${pill} bg-ink-100 text-ink-700 text-sm tabular-nums`}>
             {item.tries} of {item.triesAllowed} {item.triesAllowed === 1 ? "try" : "tries"} used
           </span>
-          <span className={`${pill} bg-ink-100 text-ink-700 tabular-nums`}>
+          <span className={`${pill} bg-ink-100 text-ink-700 text-sm tabular-nums`}>
             {item.checks} of {item.checksAllowed} checks used
           </span>
           {item.round > 1 && (
-            <span className={`${pill} bg-primary-50 text-primary-700`}>Note {item.round}, after one more try</span>
+            <span className={`${pill} bg-primary-50 text-primary-700 text-sm`}>Note {item.round}, after one more try</span>
           )}
         </p>
       </div>
@@ -124,11 +124,11 @@ function ChallengeCard({
                   </p>
                   <div className="flex flex-col items-start gap-1.5">
                     {q.answer.pass ? (
-                      <span className={`${pill} bg-success-50 text-success-800`}>
+                      <span className={`${pill} bg-success-50 text-success-800 text-sm`}>
                         <span aria-hidden="true">✓</span> AI check: pass
                       </span>
                     ) : (
-                      <span className={`${pill} bg-warning-50 text-warning-900`}>
+                      <span className={`${pill} bg-warning-50 text-warning-900 text-sm`}>
                         <span aria-hidden="true" className="h-2 w-2 rounded-full bg-warning-500" /> AI check: not yet
                       </span>
                     )}

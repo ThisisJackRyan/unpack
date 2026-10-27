@@ -60,14 +60,14 @@ export default async function StudentReadingPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-2">
-        <MetaLine className="text-lg text-ink-600" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
-        <h1 id="reading-title" className="text-4xl font-semibold tracking-tight break-words text-ink-950">
+        <MetaLine className="text-lg font-medium text-ink-600" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
+        <h1 id="reading-title" className="text-4xl font-bold tracking-tight break-words text-ink-950">
           {reading.title}
         </h1>
       </div>
 
-      <article aria-labelledby="reading-title" className={`${card} px-6 py-8 sm:px-10 sm:py-10`}>
-        <NoCopyText className="flex max-w-[65ch] flex-col gap-6 text-[1.1875rem] leading-[1.8] text-ink-800 sm:text-xl sm:leading-[1.8]">
+      <article aria-labelledby="reading-title" className={`${card} px-6 py-8 sm:px-12 sm:py-12`}>
+        <NoCopyText className="flex max-w-[65ch] flex-col gap-7 text-xl leading-[1.85] text-ink-900 sm:text-[1.375rem]">
           {readingParagraphs(reading.bodyText).map((p, i) => (
             <p key={i} className="break-words whitespace-pre-line">
               {p}
@@ -83,7 +83,7 @@ export default async function StudentReadingPage({ params }: Props) {
       </p>
 
       <section aria-labelledby="questions-heading" className="flex flex-col gap-5">
-        <h2 id="questions-heading" className="text-2xl font-semibold tracking-tight text-ink-950">
+        <h2 id="questions-heading" className="text-2xl font-bold tracking-tight text-ink-950">
           Your questions
         </h2>
 

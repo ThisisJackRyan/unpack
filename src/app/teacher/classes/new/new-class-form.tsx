@@ -31,7 +31,7 @@ export function NewClassForm() {
           defaultValue={state.values?.name}
           aria-invalid={errors.name ? true : undefined}
           aria-describedby={errors.name ? "name-error" : undefined}
-          className={field}
+          className={`${field} text-lg`}
         />
         <p id="name-error" aria-live="polite" className="text-base text-danger-700">
           {errors.name}
@@ -54,7 +54,7 @@ export function NewClassForm() {
           defaultValue={state.values?.gradeLevel ?? ""}
           aria-invalid={errors.gradeLevel ? true : undefined}
           aria-describedby={errors.gradeLevel ? "grade-error" : undefined}
-          className={field}
+          className={`${field} text-lg`}
         >
           <option value="" disabled>
             Choose a grade

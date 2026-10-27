@@ -74,7 +74,7 @@ export function JoinForm({
           defaultValue={values?.firstName}
           aria-invalid={errors.firstName ? true : undefined}
           aria-describedby="firstName-error"
-          className={field}
+          className={`${field} text-lg`}
         />
         <p id="firstName-error" aria-live="polite" className={error}>
           {errors.firstName}
@@ -101,7 +101,7 @@ export function JoinForm({
           defaultValue={values?.lastInitials}
           aria-invalid={errors.lastInitials ? true : undefined}
           aria-describedby="lastInitials-hint lastInitials-error"
-          className={`${field} max-w-32`}
+          className={`${field} max-w-32 text-lg`}
         />
         <p id="lastInitials-error" aria-live="polite" className={error}>
           {errors.lastInitials}

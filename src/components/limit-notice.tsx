@@ -6,7 +6,7 @@ export function LimitNotice({ children, large = false }: { children: React.React
   return (
     <div
       role="status"
-      className={`flex gap-3 rounded-2xl border border-warning-200 bg-warning-50 text-warning-950 ${large ? "px-5 py-4 text-lg" : "px-4 py-3 text-base"}`}
+      className={`flex gap-3 rounded-2xl border-2 border-warning-200 bg-warning-50 text-warning-950 ${large ? "px-5 py-4 text-lg" : "px-4 py-3 text-base"}`}
     >
       <svg
         aria-hidden="true"
