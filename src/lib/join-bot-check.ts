@@ -38,7 +38,8 @@ import { JOIN_DISABLED_MESSAGE, logJoinBlockedConfig, type JoinBlockedConfig } f
 // with kid-friendly copy. Nothing is stored.
 //
 // Order in the join action (src/app/join/actions.ts): form validation (no
-// network), then this check, then the rate limits, then the insert. A
+// network), then the server setup check (join-config.ts), then this check,
+// then the rate limits, then the insert. A
 // refused bot check never reaches the rate limits, so a bot that can't
 // pass Turnstile can't use up a real code's 100 tries per 10 minutes or a
 // school's shared IP budget. Each Turnstile token is single use, so every
