@@ -40,6 +40,9 @@ const TEXT_PAIRS: [fg: string, bg: string][] = [
     (fg): [string, string][] => ["white", "ink-50", "ink-100", "primary-50"].map((bg) => [fg, bg]),
   ),
   ["ink-950", "sunny-200"],
+  // The sunny "Join a class" button and its hover.
+  ["ink-950", "sunny-300"],
+  ["ink-950", "sunny-400"],
   ["ink-950", "lagoon-100"],
   // Primary links, labels and tinted panels.
   ["primary-700", "white"],
@@ -136,6 +139,7 @@ describe("palette", () => {
     assert.match(css, new RegExp(`--shadow-lip-primary: 0 4px 0 0 ${hex("primary-800")};`));
     assert.match(css, new RegExp(`--shadow-lip-danger: 0 4px 0 0 ${hex("danger-800")};`));
     assert.match(css, new RegExp(`--shadow-lip-ink: 0 4px 0 0 ${hex("ink-400")};`));
+    assert.match(css, new RegExp(`--shadow-lip-sunny: 0 4px 0 0 ${hex("sunny-500")};`));
   });
 
   // Tailwind's own palette is switched off in globals.css, so a leftover

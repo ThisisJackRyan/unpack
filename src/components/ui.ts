@@ -17,6 +17,14 @@ export const primaryButton = `inline-flex min-h-12 items-center justify-center g
 // alignment are up to the page.
 export const primaryButtonLarge = primaryButton.replace("min-h-12", "min-h-14").replace("text-base", "text-lg").replace("px-6", "px-8");
 
+// The same weight as primaryButtonLarge in a second, sunny color, for the
+// students' way in ("Join a class") next to the main action.
+export const accentButtonLarge = primaryButtonLarge
+  .replace("bg-primary-600", "bg-sunny-300")
+  .replace("text-white", "text-ink-950")
+  .replace("shadow-lip-primary", "shadow-lip-sunny")
+  .replace("hover:bg-primary-700", "hover:bg-sunny-400");
+
 export const secondaryButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-ink-400 bg-white px-6 text-base font-bold text-ink-900 shadow-lip-ink hover:bg-ink-50 ${press} ${focusRing}`;
 
 export const secondaryButtonLarge = secondaryButton.replace("min-h-12", "min-h-14").replace("text-base", "text-lg").replace("px-6", "px-8");

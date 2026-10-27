@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { OpenBook, ReadingBuddy, Sparkle } from "@/components/illustrations";
 import { Logo } from "@/components/logo";
-import { primaryButtonLarge, secondaryButtonLarge, textLink } from "@/components/ui";
+import { accentButtonLarge, primaryButtonLarge, secondaryButtonLarge } from "@/components/ui";
 import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 
 // The public landing page. "Get started" goes to our own /sign-up page and
 // "Sign in" to /sign-in (Clerk components, not Clerk's hosted pages). Both
 // land on /home, which sends each account to its home: /welcome to choose,
-// /teacher, or /learn. Students don't sign in: they join with a class code.
+// /teacher, or /learn. Students don't sign in: "Join a class" goes to
+// /join, where they type a class code.
 export default function Home() {
   return (
     <div className="flex flex-1 flex-col bg-ink-50 text-ink-900">
@@ -27,20 +28,18 @@ export default function Home() {
               with friendly tips when you need another go.
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <Link href={SIGN_UP_PATH} className={primaryButtonLarge}>
               Get started
+            </Link>
+            <Link href="/join" className={accentButtonLarge}>
+              Join a class
             </Link>
             <Link href={SIGN_IN_PATH} className={secondaryButtonLarge}>
               Sign in
             </Link>
           </div>
-          <p className="text-lg text-ink-700">
-            Joining a class?{" "}
-            <Link href="/join" className={textLink}>
-              Enter your class code
-            </Link>
-          </p>
+          <p className="text-lg text-ink-700">Students don’t need an account: join with the code from your teacher.</p>
         </div>
         <div aria-hidden="true" className="relative mx-auto flex items-end justify-center rounded-[2.5rem] bg-primary-100 px-6 pt-12 pb-8 sm:px-10 sm:pt-14 sm:pb-10">
           <OpenBook className="h-32 w-40 sm:h-48 sm:w-60" />
