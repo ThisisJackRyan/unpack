@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import Anthropic from "@anthropic-ai/sdk";
+import { GatewayRateLimitError, GatewayResponseError } from "@ai-sdk/gateway";
+import { APICallError } from "ai";
+import type { ModelReply, ModelRequest } from "./model";
 import { PRIVACY_RULE, QUESTIONS_TOOL_NAME } from "./prompts";
 import {
   buildQuestionRequest,
@@ -8,25 +10,30 @@ import {
   QUESTION_ERROR_MESSAGES,
   questionErrorKind,
   questionErrorLogFields,
+  QUESTIONS_TOOL,
   QuestionWriterError,
   writeQuestionSet,
   writeReplacementQuestion,
   type QuestionModel,
 } from "./questions";
-import { QUESTION_WRITE_DEADLINE_MS } from "./settings";
+import { QUESTION_EFFORT, QUESTION_MAX_TOKENS, QUESTION_WRITE_DEADLINE_MS } from "./settings";
+import { gatewayErrors, retried } from "./test-fixtures";
 
 const BODY = "Mia found a fox in the snow. ".repeat(20);
 
-function toolUse(input: unknown, name = QUESTIONS_TOOL_NAME) {
-  return { type: "tool_use", id: "toolu_1", name, input };
+type Call = ModelReply["toolCalls"][number];
+
+function toolUse(input: unknown, name = QUESTIONS_TOOL_NAME): Call {
+  return { toolName: name, input };
 }
 
-function message(content: unknown[], stop_reason = "tool_use") {
-  return { content, stop_reason } as unknown as Anthropic.Message;
+// finishReason is the AI SDK's; raw is Anthropic's stop_reason.
+function message(toolCalls: Call[], finishReason = "tool-calls", rawFinishReason?: string): ModelReply {
+  return { finishReason, rawFinishReason, toolCalls };
 }
 
-function fakeModel(responses: (Anthropic.Message | Error)[]) {
-  const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
+function fakeModel(responses: (ModelReply | Error)[]) {
+  const calls: ModelRequest[] = [];
   const model: QuestionModel = {
     model: "claude-sonnet-5-5",
     create: async (params) => {
@@ -48,17 +55,20 @@ describe("parseQuestionsResponse", () => {
     assert.deepEqual(r, { ok: true, questions: ["A?", "B?", "C?"] });
   });
 
-  it("finds the tool call after thinking and text blocks", () => {
+  it("finds the tool call by name, not position", () => {
     const r = parseQuestionsResponse(
-      message([
-        { type: "thinking", thinking: "", signature: "sig" },
-        { type: "redacted_thinking", data: "x" },
-        { type: "text", text: "Here you go." },
-        toolUse({ questions: THREE }),
-      ]),
+      message([toolUse({ questions: ["x"] }, "other_tool"), toolUse({ questions: THREE })]),
       3,
     );
     assert.deepEqual(r, { ok: true, questions: THREE });
+  });
+
+  it("rejects a call the SDK couldn't parse", () => {
+    const r = parseQuestionsResponse(
+      message([{ toolName: QUESTIONS_TOOL_NAME, input: '{"questions": ["A?"', invalid: true }]),
+      3,
+    );
+    assert.equal(r.ok, false);
   });
 
   it("ignores a tool call with another name", () => {
@@ -67,19 +77,26 @@ describe("parseQuestionsResponse", () => {
   });
 
   it("rejects a missing tool block", () => {
-    const r = parseQuestionsResponse(message([{ type: "text", text: "1. Why?" }], "end_turn"), 3);
+    const r = parseQuestionsResponse(message([], "stop", "end_turn"), 3);
     assert.deepEqual(r, { ok: false, problem: `no ${QUESTIONS_TOOL_NAME} tool call` });
   });
 
   it("says when output was cut off", () => {
-    const r = parseQuestionsResponse(message([{ type: "thinking", thinking: "" }], "max_tokens"), 3);
-    assert.equal(r.ok, false);
-    assert.match((r as { problem: string }).problem, /cut off/);
+    for (const reply of [message([], "length", "max_tokens"), message([], "length"), message([], "other", "max_tokens")]) {
+      const r = parseQuestionsResponse(reply, 3);
+      assert.equal(r.ok, false);
+      assert.match((r as { problem: string }).problem, /cut off/);
+    }
   });
 
   it("rejects a refusal even with a tool block", () => {
-    const r = parseQuestionsResponse(message([toolUse({ questions: THREE })], "refusal"), 3);
-    assert.equal(r.ok, false);
+    for (const reply of [
+      message([toolUse({ questions: THREE })], "content-filter", "refusal"),
+      message([toolUse({ questions: THREE })], "content-filter"),
+      message([toolUse({ questions: THREE })], "other", "refusal"),
+    ]) {
+      assert.deepEqual(parseQuestionsResponse(reply, 3), { ok: false, problem: "the model declined" });
+    }
   });
 
   it("rejects the wrong count", () => {
@@ -120,25 +137,36 @@ describe("parseQuestionsResponse", () => {
 });
 
 describe("buildQuestionRequest", () => {
-  const req = buildQuestionRequest("claude-sonnet-5-5", "prompt");
+  const req = buildQuestionRequest("anthropic/claude-sonnet-5.5", "prompt");
 
-  it("uses the tool with auto tool choice and strict input", () => {
-    assert.deepEqual(req.tool_choice, { type: "auto", disable_parallel_tool_use: true });
-    assert.equal(req.tools?.length, 1);
-    const tool = req.tools![0] as Anthropic.Tool;
-    assert.equal(tool.name, QUESTIONS_TOOL_NAME);
-    assert.equal(tool.strict, true);
-    assert.equal(tool.input_schema.additionalProperties, false);
+  it("uses the one strict tool, with the same name, description, and schema", () => {
+    assert.equal(req.tool, QUESTIONS_TOOL);
+    assert.equal(req.tool.name, QUESTIONS_TOOL_NAME);
+    assert.equal(req.tool.strict, true);
+    assert.equal(req.tool.inputSchema.additionalProperties, false);
+    assert.deepEqual(req.tool.inputSchema.required, ["questions"]);
+    assert.equal(
+      req.tool.description,
+      "Submit the finished questions, in order. Call this exactly once with every question.",
+    );
+  });
+
+  it("keeps the output limit and low effort", () => {
+    assert.equal(req.maxOutputTokens, QUESTION_MAX_TOKENS);
+    assert.equal(req.maxOutputTokens, 8_000);
+    assert.equal(req.effort, QUESTION_EFFORT);
+    assert.equal(req.effort, "low");
   });
 
   it("sends no sampling params, thinking config, or prefill", () => {
     const body = req as unknown as Record<string, unknown>;
-    for (const key of ["temperature", "top_p", "top_k", "thinking"]) {
+    for (const key of ["temperature", "top_p", "top_k", "topP", "topK", "thinking"]) {
       assert.equal(key in body, false, key);
     }
     assert.equal(req.messages.length, 1);
     assert.equal(req.messages[0].role, "user");
-    assert.equal(req.model, "claude-sonnet-5-5");
+    assert.equal(req.messages[0].content, "prompt");
+    assert.equal(req.model, "anthropic/claude-sonnet-5.5");
   });
 });
 
@@ -165,7 +193,7 @@ describe("writeQuestionSet", () => {
 
   it("gives up after the one retry with a failed error", async () => {
     const { model, calls } = fakeModel([
-      message([{ type: "text", text: "no" }], "end_turn"),
+      message([], "stop", "end_turn"),
       message([toolUse({ questions: [] })]),
       message([toolUse({ questions: THREE })]),
     ]);
@@ -177,12 +205,12 @@ describe("writeQuestionSet", () => {
     assert.equal(calls.length, 2);
   });
 
-  it("does not retry API errors itself (the SDK already did)", async () => {
+  it("does not retry gateway errors itself (the SDK already did)", async () => {
     const { model, calls } = fakeModel([
-      new Anthropic.RateLimitError(429, {}, "slow", new Headers()),
+      gatewayErrors.rateLimited(),
       message([toolUse({ questions: THREE })]),
     ]);
-    await assert.rejects(writeQuestionSet(model, input), Anthropic.RateLimitError);
+    await assert.rejects(writeQuestionSet(model, input), (e: unknown) => GatewayRateLimitError.isInstance(e));
     assert.equal(calls.length, 1);
   });
 });
@@ -241,7 +269,8 @@ describe("privacy rule in requests", () => {
 });
 
 // A model call that never answers: it only settles when its signal aborts,
-// the way the SDK does (APIUserAbortError).
+// the way the gateway provider does (fetch's abort, wrapped in a
+// GatewayResponseError).
 function hangingModel(options: { honorSignal?: boolean } = {}) {
   let calls = 0;
   const model: QuestionModel = {
@@ -250,7 +279,11 @@ function hangingModel(options: { honorSignal?: boolean } = {}) {
       calls++;
       return new Promise((_, reject) => {
         if (options.honorSignal === false) return;
-        signal.addEventListener("abort", () => reject(new Anthropic.APIUserAbortError()), { once: true });
+        signal.addEventListener(
+          "abort",
+          () => reject(new GatewayResponseError({ statusCode: 500, cause: signal.reason })),
+          { once: true },
+        );
       });
     },
   };
@@ -291,7 +324,7 @@ describe("write deadline", () => {
     const { model, calls } = hangingModel();
     const started = Date.now();
     await assert.rejects(writeQuestionSet(model, input, { deadlineMs: 30 }), (error: unknown) => {
-      // The SDK's APIUserAbortError or the deadline's TimeoutError,
+      // The gateway's wrapped abort or the deadline's TimeoutError,
       // whichever settles first; both are a timeout.
       assert.equal(questionErrorKind(error), "timeout");
       assert.equal(QUESTION_ERROR_MESSAGES[questionErrorKind(error)], "That took too long. Try again.");
@@ -333,7 +366,9 @@ describe("write deadline", () => {
   });
 
   it("maps every abort shape to timeout", () => {
-    assert.equal(questionErrorKind(new Anthropic.APIUserAbortError()), "timeout");
+    assert.equal(questionErrorKind(new GatewayResponseError({ cause: new DOMException("aborted", "AbortError") })), "timeout");
+    assert.equal(questionErrorKind(gatewayErrors.requestTimeout()), "timeout");
+    assert.equal(questionErrorKind(retried(gatewayErrors.requestTimeout())), "timeout");
     assert.equal(questionErrorKind(new DOMException("deadline", "TimeoutError")), "timeout");
     assert.equal(questionErrorKind(new DOMException("aborted", "AbortError")), "timeout");
     const signal = AbortSignal.abort(new DOMException("deadline", "TimeoutError"));
@@ -342,42 +377,46 @@ describe("write deadline", () => {
 });
 
 describe("questionErrorKind", () => {
-  const headers = new Headers({ "request-id": "req_123" });
+  // Every failure the gateway or the SDK reports, and what the user sees.
+  const table: [string, unknown, string][] = [
+    ["no credentials (401)", gatewayErrors.noCredentials(), "not_configured"],
+    ["bad key (401)", gatewayErrors.badKey(), "not_configured"],
+    ["401 as rethrown by generateText (dev)", gatewayErrors.wrappedAuthDev(), "not_configured"],
+    ["401 as rethrown by generateText (production)", gatewayErrors.wrappedAuthProduction(), "not_configured"],
+    ["no permission (403)", gatewayErrors.forbidden(), "not_configured"],
+    ["unknown model (404)", gatewayErrors.unknownModel(), "not_configured"],
+    ["rate limited (429)", gatewayErrors.rateLimited(), "busy"],
+    ["overloaded (529)", gatewayErrors.overloaded(), "busy"],
+    ["server error (500)", gatewayErrors.serverError(), "failed"],
+    ["unavailable (503)", gatewayErrors.unavailable(), "failed"],
+    ["bad request (400)", gatewayErrors.badRequest(), "failed"],
+    ["network error", gatewayErrors.network(), "failed"],
+    ["per-request timeout", gatewayErrors.requestTimeout(), "timeout"],
+    ["write deadline", new DOMException("deadline", "TimeoutError"), "timeout"],
+  ];
 
-  it("maps timeouts", () => {
-    assert.equal(questionErrorKind(new Anthropic.APIConnectionTimeoutError()), "timeout");
-  });
+  for (const [name, error, kind] of table) {
+    it(`maps ${name} to ${kind}, alone or after the SDK's retries`, () => {
+      assert.equal(questionErrorKind(error), kind);
+      assert.equal(questionErrorKind(retried(error)), kind);
+    });
+  }
 
-  it("maps connection errors to failed", () => {
-    assert.equal(questionErrorKind(new Anthropic.APIConnectionError({ message: "x" })), "failed");
-  });
-
-  it("maps 429 and 529 to busy", () => {
-    assert.equal(questionErrorKind(new Anthropic.RateLimitError(429, {}, "x", headers)), "busy");
-    const overloaded = Anthropic.APIError.generate(
-      529,
-      { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
-      undefined,
-      headers,
-    );
-    assert.equal(questionErrorKind(overloaded), "busy");
-  });
-
-  it("maps 401, 403, and 404 to not configured", () => {
-    for (const status of [401, 403, 404]) {
-      const error = Anthropic.APIError.generate(status, {}, "x", headers);
-      assert.equal(questionErrorKind(error), "not_configured", String(status));
-    }
-  });
-
-  it("maps 500 and 400 to failed", () => {
-    for (const status of [500, 400]) {
-      assert.equal(questionErrorKind(Anthropic.APIError.generate(status, {}, "x", headers)), "failed");
-    }
+  it("maps a bare APICallError by status, and an overloaded body to busy", () => {
+    const api = (statusCode: number, data?: unknown) =>
+      new APICallError({ message: "x", url: "https://example.test", requestBodyValues: {}, statusCode, data });
+    assert.equal(questionErrorKind(api(401)), "not_configured");
+    assert.equal(questionErrorKind(api(403)), "not_configured");
+    assert.equal(questionErrorKind(api(404)), "not_configured");
+    assert.equal(questionErrorKind(api(429)), "busy");
+    assert.equal(questionErrorKind(api(529)), "busy");
+    assert.equal(questionErrorKind(api(500, { error: { type: "overloaded_error" } })), "busy");
+    assert.equal(questionErrorKind(api(500)), "failed");
+    assert.equal(questionErrorKind(api(400)), "failed");
   });
 
   it("maps a missing key and unknown errors", () => {
-    assert.equal(questionErrorKind(new QuestionWriterError("not_configured", "no key")), "not_configured");
+    assert.equal(questionErrorKind(new QuestionWriterError("not_configured", "no credentials")), "not_configured");
     assert.equal(questionErrorKind(new Error("boom")), "failed");
     assert.equal(questionErrorKind("boom"), "failed");
   });
@@ -396,10 +435,26 @@ describe("questionErrorKind", () => {
   });
 
   it("logs only safe fields", () => {
-    const error = new Anthropic.RateLimitError(429, {}, `secret ${BODY}`, headers);
+    const error = new GatewayRateLimitError({ message: `secret ${BODY}`, statusCode: 429, generationId: "gen_123" });
     const fields = questionErrorLogFields(error);
-    assert.deepEqual(Object.keys(fields).sort(), ["kind", "name", "requestId", "status", "type"]);
-    assert.equal(fields.requestId, "req_123");
+    assert.deepEqual(Object.keys(fields).sort(), ["generationId", "kind", "name", "status", "type"]);
+    assert.equal(fields.generationId, "gen_123");
+    assert.equal(fields.status, 429);
+    assert.equal(fields.type, "rate_limit_exceeded");
     assert.equal(JSON.stringify(fields).includes("Mia"), false);
+  });
+
+  it("logs the last try's status and cause names after retries, nothing else", () => {
+    const fields = questionErrorLogFields(retried(gatewayErrors.requestTimeout()));
+    assert.deepEqual(fields, {
+      kind: "timeout",
+      name: "AI_RetryError",
+      tries: 2,
+      retryReason: "maxRetriesExceeded",
+      lastName: "GatewayResponseError",
+      status: 500,
+      type: "response_error",
+      causeName: "TimeoutError",
+    });
   });
 });

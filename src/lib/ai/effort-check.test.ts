@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import Anthropic from "@anthropic-ai/sdk";
 import { EFFORT_TOOL_NAME, NUDGE_MAX_LENGTH } from "./effort-prompts";
 import {
   buildEffortRequest,
@@ -13,23 +12,27 @@ import {
   parseEffortResponse,
   type EffortCheckInput,
 } from "./effort-check";
-import type { QuestionModel } from "./questions";
+import type { ModelReply, ModelRequest, QuestionModel } from "./model";
 import { EFFORT_CHECK_DEADLINE_MS, EFFORT_CHECK_EFFORT, EFFORT_CHECK_MAX_TOKENS } from "./settings";
+import { gatewayErrors, retried } from "./test-fixtures";
 
 const BODY = "Mia found a fox in the snow. ".repeat(20);
 
-function toolUse(input: unknown, name = EFFORT_TOOL_NAME) {
-  return { type: "tool_use", id: "toolu_1", name, input };
+type Call = ModelReply["toolCalls"][number];
+
+function toolUse(input: unknown, name = EFFORT_TOOL_NAME): Call {
+  return { toolName: name, input };
 }
 
-function message(content: unknown[], stop_reason = "tool_use") {
-  return { content, stop_reason } as unknown as Anthropic.Message;
+// finishReason is the AI SDK's; raw is Anthropic's stop_reason.
+function message(toolCalls: Call[], finishReason = "tool-calls", rawFinishReason?: string): ModelReply {
+  return { finishReason, rawFinishReason, toolCalls };
 }
 
 const r = (answer: number, pass: boolean, nudge = "") => ({ answer, pass, nudge });
 
-function fakeModel(responses: (Anthropic.Message | Error)[]) {
-  const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
+function fakeModel(responses: (ModelReply | Error)[]) {
+  const calls: ModelRequest[] = [];
   const model: QuestionModel = {
     model: "claude-sonnet-5-5",
     create: async (params) => {
@@ -102,9 +105,9 @@ describe("parseEffortResponse", () => {
     });
   });
 
-  it("finds the tool call after thinking and text blocks", () => {
+  it("finds the tool call by name, not position", () => {
     const p = parseEffortResponse(
-      message([{ type: "thinking", thinking: "", signature: "s" }, { type: "text", text: "Done." }, toolUse({ results: [r(1, true)] })]),
+      message([toolUse({ results: [] }, "submit_questions"), toolUse({ results: [r(1, true)] })]),
       1,
     );
     assert.equal(p.ok, true);
@@ -152,15 +155,22 @@ describe("parseEffortResponse", () => {
   });
 
   it("rejects no tool call, a cut off answer, a refusal, and the wrong shape", () => {
-    assert.deepEqual(parseEffortResponse(message([{ type: "text", text: "pass" }], "end_turn"), 1), {
+    assert.deepEqual(parseEffortResponse(message([], "stop", "end_turn"), 1), {
       ok: false,
       problem: `no ${EFFORT_TOOL_NAME} tool call`,
     });
     assert.match(
-      (parseEffortResponse(message([], "max_tokens"), 1) as { problem: string }).problem,
+      (parseEffortResponse(message([], "length", "max_tokens"), 1) as { problem: string }).problem,
       /cut off/,
     );
-    assert.equal(parseEffortResponse(message([toolUse({ results: [r(1, true)] })], "refusal"), 1).ok, false);
+    assert.deepEqual(parseEffortResponse(message([toolUse({ results: [r(1, true)] })], "content-filter", "refusal"), 1), {
+      ok: false,
+      problem: "the model declined",
+    });
+    assert.equal(
+      parseEffortResponse(message([{ toolName: EFFORT_TOOL_NAME, input: '{"results": [', invalid: true }]), 1).ok,
+      false,
+    );
     assert.equal(parseEffortResponse(message([toolUse({ results: [r(1, true)] }, "submit_questions")]), 1).ok, false);
     for (const input of [{}, { results: "pass" }, { results: [{ answer: 1, pass: "yes", nudge: "" }] }, null]) {
       assert.equal(parseEffortResponse(message([toolUse(input)]), 1).ok, false);
@@ -169,15 +179,18 @@ describe("parseEffortResponse", () => {
 });
 
 describe("buildEffortRequest", () => {
-  it("uses the strict tool, auto choice, and the effort check's own limits", () => {
-    const req = buildEffortRequest("claude-sonnet-5-5", "prompt");
-    assert.equal(req.max_tokens, EFFORT_CHECK_MAX_TOKENS);
-    assert.deepEqual(req.output_config, { effort: EFFORT_CHECK_EFFORT });
-    assert.deepEqual(req.tool_choice, { type: "auto", disable_parallel_tool_use: true });
-    assert.deepEqual(req.tools, [EFFORT_TOOL]);
+  it("uses the strict tool and the effort check's own limits", () => {
+    const req = buildEffortRequest("anthropic/claude-sonnet-5.5", "prompt");
+    assert.equal(req.maxOutputTokens, EFFORT_CHECK_MAX_TOKENS);
+    assert.equal(req.maxOutputTokens, 6_000);
+    assert.equal(req.effort, EFFORT_CHECK_EFFORT);
+    assert.equal(req.effort, "low");
+    assert.equal(req.tool, EFFORT_TOOL);
     assert.equal(EFFORT_TOOL.strict, true);
+    assert.equal(EFFORT_TOOL.inputSchema.additionalProperties, false);
     assert.equal("temperature" in req, false);
     assert.equal(req.messages.length, 1);
+    assert.equal(req.model, "anthropic/claude-sonnet-5.5");
   });
 });
 
@@ -220,11 +233,25 @@ describe("checkEffort", () => {
     assert.equal(calls.length, 2);
   });
 
-  it("passes API errors through without a second call", async () => {
-    const error = new Anthropic.RateLimitError(429, { type: "error" }, "slow down", new Headers());
-    const { model, calls } = fakeModel([error]);
+  it("passes gateway errors through without a second call", async () => {
+    const { model, calls } = fakeModel([gatewayErrors.rateLimited()]);
     await assert.rejects(checkEffort(model, INPUT), (e: unknown) => effortErrorKind(e) === "busy");
     assert.equal(calls.length, 1);
+  });
+
+  it("maps gateway failures the same way as question writing", () => {
+    assert.equal(effortErrorKind(gatewayErrors.noCredentials()), "not_configured");
+    assert.equal(effortErrorKind(gatewayErrors.unknownModel()), "not_configured");
+    assert.equal(effortErrorKind(gatewayErrors.overloaded()), "busy");
+    assert.equal(effortErrorKind(retried(gatewayErrors.unavailable())), "failed");
+    assert.equal(effortErrorKind(gatewayErrors.network()), "failed");
+    assert.equal(effortErrorKind(retried(gatewayErrors.requestTimeout())), "timeout");
+    assert.deepEqual(effortErrorLogFields(gatewayErrors.forbidden()), {
+      kind: "not_configured",
+      name: "GatewayForbiddenError",
+      status: 403,
+      type: "forbidden",
+    });
   });
 
   it("ends at the deadline, even if the call ignores its signal", async () => {
