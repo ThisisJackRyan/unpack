@@ -82,10 +82,10 @@ export function JoinForm({
 
       <div className="flex flex-col gap-2">
         <label htmlFor="lastInitials" className={label}>
-          First 1 or 2 letters of your last name
+          First letter of your last name
         </label>
         <p id="lastInitials-hint" className={hint}>
-          For Maya Rodriguez, type Ro.
+          For Maya Rodriguez, type R. If your teacher asks for 2 letters, type Ro.
         </p>
         <input
           id="lastInitials"
