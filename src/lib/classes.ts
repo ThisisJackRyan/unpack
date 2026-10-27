@@ -14,6 +14,7 @@ import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import { classGradeChangeStatements, insertedCount } from "./shared-questions";
 import { deleteStudentWith, type DeleteStudentResult } from "./student-delete";
+import { resetStudentQuestionCallsWith, type ResetStudentTriesResult } from "./student-question-reset";
 
 // Server-only class queries, always scoped to the owning teacher.
 
@@ -175,4 +176,16 @@ export async function deleteStudent(
 ): Promise<DeleteStudentResult> {
   if (!isUuid(classId) || !isUuid(studentId)) return { status: "not_found" };
   return deleteStudentWith(classId, teacherId, studentId, execute);
+}
+
+// "Let them try again" (see student-question-reset.ts).
+export async function resetStudentQuestionCalls(
+  classId: string,
+  teacherId: string,
+  studentId: string,
+  readingId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<ResetStudentTriesResult> {
+  if (!isUuid(classId) || !isUuid(studentId) || !isUuid(readingId)) return { status: "not_found" };
+  return resetStudentQuestionCallsWith(classId, teacherId, studentId, readingId, execute);
 }

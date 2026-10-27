@@ -10,9 +10,18 @@
 // emptied by its ON DELETE CASCADE foreign key, all at once or not at all:
 // questions.student_id, question_generations, student_question_calls,
 // attempts (and answers through attempt_id and question_id),
-// effort_checks, and challenges. Another teacher's request, a student in
-// another class, or one already deleted matches nothing: "not_found", and
-// nothing changes.
+// effort_checks, and challenges.
+//
+// Outcomes:
+// - "deleted": this call deleted the student.
+// - "already_gone": the class is this teacher's, but no such student is
+//   in it (a second click after the first delete, or two tabs). A no-op
+//   success: the teacher wanted them gone, and they are. We keep no
+//   record of deleted ids, so an id that never existed in this class gets
+//   the same answer; it changes nothing and reveals nothing beyond the
+//   teacher's own class.
+// - "not_found": the class isn't this teacher's (another teacher's, or no
+//   such class). Nothing changes.
 //
 // The student's session is the session_token_hash on that row, so it ends
 // with it: their cookie finds no student, and they're sent to the join
@@ -30,16 +39,21 @@ export function studentDeletedMessage(name: string): string {
 // $1 class, $2 teacher, $3 student.
 export function deleteStudentStatement(classId: string, teacherId: string, studentId: string): Statement {
   return {
-    text: `delete from students s
-using classes c
-where s.id = $3::uuid and s.class_id = $1::uuid
-  and c.id = s.class_id and c.teacher_id = $2::uuid
-returning s.id`,
+    text: `with owned as (
+  select id from classes where id = $1::uuid and teacher_id = $2::uuid
+),
+deleted as (
+  delete from students s
+  using owned
+  where s.id = $3::uuid and s.class_id = owned.id
+  returning s.id
+)
+select (select count(*) from owned)::int as owned, (select count(*) from deleted)::int as deleted`,
     params: [classId, teacherId, studentId],
   };
 }
 
-export type DeleteStudentResult = { status: "deleted" } | { status: "not_found" };
+export type DeleteStudentResult = { status: "deleted" } | { status: "already_gone" } | { status: "not_found" };
 
 export async function deleteStudentWith(
   classId: string,
@@ -48,5 +62,7 @@ export async function deleteStudentWith(
   execute: StatementExecutor,
 ): Promise<DeleteStudentResult> {
   const [rows = []] = await execute([deleteStudentStatement(classId, teacherId, studentId)]);
-  return rows.length > 0 ? { status: "deleted" } : { status: "not_found" };
+  const row = rows[0];
+  if (Number(row?.deleted ?? 0) > 0) return { status: "deleted" };
+  return Number(row?.owned ?? 0) > 0 ? { status: "already_gone" } : { status: "not_found" };
 }

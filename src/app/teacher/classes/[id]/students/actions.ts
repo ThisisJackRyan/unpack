@@ -8,8 +8,9 @@ import type { DeleteStudentState } from "./state";
 
 // Deletes one student and everything under them. Ownership (this class is
 // the teacher's, and the student is in it) is checked in the delete itself
-// (student-delete.ts), in one transaction. Not found (another teacher, or
-// a second click after it's gone) changes nothing.
+// (student-delete.ts), in one transaction. A second click after it's gone
+// is a no-op success; another teacher's class is not found and changes
+// nothing.
 export async function deleteStudentAction(
   classId: string,
   _prev: DeleteStudentState,
@@ -23,7 +24,7 @@ export async function deleteStudentAction(
     revalidatePath(`/teacher/classes/${classId}`);
     revalidatePath(`/teacher/classes/${classId}/students`);
     revalidatePath(`/teacher/classes/${classId}/challenges`);
-    return result.status === "deleted" ? { deleted: true } : { error: STUDENT_DELETE_FAILED_MESSAGE };
+    return result.status === "not_found" ? { error: STUDENT_DELETE_FAILED_MESSAGE } : { deleted: true };
   } catch (error) {
     // Name, code, and message only: a Postgres error's detail can echo a
     // row, including a student's name.
