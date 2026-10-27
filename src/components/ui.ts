@@ -27,4 +27,8 @@ const dangerFocusRing =
 
 export const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-red-600 px-5 text-base font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
 
+// The full-size opener of a delete's confirm (the reading delete): red
+// text and border on white, so the solid red stays for the confirm.
+export const dangerOutlineButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-5 text-base font-semibold text-red-700 transition-colors hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
+
 export const dangerGhostButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;

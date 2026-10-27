@@ -2,18 +2,25 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { countOpenChallenges } from "@/lib/challenge-queue";
+import { countDraftsClearedByGradeChange } from "@/lib/classes";
+import { READING_DELETED_FLAG, READING_DELETED_MESSAGE } from "@/lib/reading-delete";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel, questionModeLabel } from "@/lib/question-modes";
 import { listReadings, type ReadingListItem } from "@/lib/readings";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { backLink, card, focusRing, primaryButton } from "@/components/ui";
+import { saveClassSettingsAction } from "./class-settings/actions";
+import { ClassSettingsForm } from "./class-settings/class-settings-form";
 import { CopyButton } from "./copy-button";
 import { newJoinCodeAction, setJoinCodeActiveAction } from "./join-code/actions";
 import { JoinCodeSettings } from "./join-code/join-code-settings";
 import { loadClass } from "./loaders";
 
-type Props = { params: Promise<{ id: string }> };
+type Props = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
@@ -21,14 +28,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: found.name };
 }
 
-export default async function ClassDetailPage({ params }: Props) {
+export default async function ClassDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { notice } = await searchParams;
   const found = await loadClass(id);
   const teacher = await getOrCreateTeacher();
-  const [readings, openChallenges] = await Promise.all([
+  const [readings, openChallenges, draftsToClear] = await Promise.all([
     listReadings(found.id, teacher.id),
     countOpenChallenges(found.id, teacher.id),
+    countDraftsClearedByGradeChange(found.id, teacher.id),
   ]);
+  const readingDeleted = notice === READING_DELETED_FLAG;
   const newReadingHref = `/teacher/classes/${found.id}/readings/new`;
   const host = (await headers()).get("host");
   const joinUrl = host ? `${host}/join` : "/join";
@@ -38,6 +48,15 @@ export default async function ClassDetailPage({ params }: Props) {
       <Link href="/teacher" className={`${backLink} self-start`}>
         <span aria-hidden="true">←</span> Back to classes
       </Link>
+
+      {readingDeleted && (
+        <p
+          role="status"
+          className="rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-3 text-base font-medium text-indigo-950"
+        >
+          {READING_DELETED_MESSAGE}
+        </p>
+      )}
 
       <div className="flex flex-col gap-1">
         <h1 className="text-3xl font-semibold tracking-tight break-words text-zinc-950">
@@ -141,6 +160,21 @@ export default async function ClassDetailPage({ params }: Props) {
             ))}
           </ul>
         )}
+      </section>
+
+      <section aria-labelledby="class-settings-heading" className={`${card} flex flex-col gap-5 p-5 sm:p-6`}>
+        <div className="flex flex-col gap-1">
+          <h2 id="class-settings-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+            Class settings
+          </h2>
+          <p className="text-base text-zinc-600">The class’s name and the grade its questions are written for.</p>
+        </div>
+        <ClassSettingsForm
+          name={found.name}
+          gradeLevel={found.gradeLevel}
+          draftsToClear={draftsToClear}
+          action={saveClassSettingsAction.bind(null, found.id)}
+        />
       </section>
     </div>
   );
