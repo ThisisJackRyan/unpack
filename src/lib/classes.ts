@@ -12,7 +12,12 @@ import {
 } from "./join-code-settings";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
-import { classGradeChangeStatements, insertedCount } from "./shared-questions";
+import {
+  classGradeChangeStatements,
+  clearedDraftCount,
+  draftsClearedByGradeChangeStatement,
+  insertedCount,
+} from "./shared-questions";
 import { deleteStudentWith, type DeleteStudentResult } from "./student-delete";
 import { resetStudentQuestionCallsWith, type ResetStudentTriesResult } from "./student-question-reset";
 
@@ -129,17 +134,33 @@ export async function getClassForTeacher(
   return row;
 }
 
-// Changes the class's grade and clears the shared questions of its drafts
-// that follow the class grade (see classGradeChangeStatements). Returns
-// false when the class isn't the teacher's. Not called by any page yet.
-export async function updateClassGrade(
+export type UpdateClassSettingsResult = { status: "saved"; clearedDrafts: number } | { status: "not_found" };
+
+// The class settings form: name and grade in one transaction, ownership
+// checked in it (see classGradeChangeStatements). A grade change clears
+// the shared questions of drafts on the class grade and pins the old grade
+// on published readings; saving the same grade clears and pins nothing.
+export async function updateClassSettings(
   classId: string,
   teacherId: string,
-  gradeLevel: GradeLevel,
+  values: { name: string; gradeLevel: GradeLevel },
   execute: StatementExecutor = neonExecutor,
-): Promise<boolean> {
-  if (!isUuid(classId)) return false;
-  return insertedCount(await execute(classGradeChangeStatements(classId, teacherId, gradeLevel))) === 1;
+): Promise<UpdateClassSettingsResult> {
+  if (!isUuid(classId)) return { status: "not_found" };
+  const results = await execute(classGradeChangeStatements(classId, teacherId, values.gradeLevel, values.name));
+  if (insertedCount(results) !== 1) return { status: "not_found" };
+  return { status: "saved", clearedDrafts: clearedDraftCount(results) };
+}
+
+// How many drafts a grade change would clear now, for the form's warning.
+export async function countDraftsClearedByGradeChange(
+  classId: string,
+  teacherId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<number> {
+  if (!isUuid(classId)) return 0;
+  const [rows = []] = await execute([draftsClearedByGradeChangeStatement(classId, teacherId)]);
+  return Number(rows[0]?.drafts ?? 0);
 }
 
 // The join code controls and the student delete, scoped to the owning

@@ -1,6 +1,6 @@
 # unpack: Student data and privacy (v1, Oct 27, 2026)
 
-unpack is used by children, so we collect as little as we can and say exactly what we keep. This page lists every place student data is stored, column by column, why it's there, who can see it, and how long it stays. It covers the code as of PR 11; update it with any change to `src/db/schema.ts`.
+unpack is used by children, so we collect as little as we can and say exactly what we keep. This page lists every place student data is stored, column by column, why it's there, who can see it, and how long it stays. It covers the code as of PR 12; update it with any change to `src/db/schema.ts`.
 
 ## What a student gives us
 
@@ -41,7 +41,7 @@ reading_id, student_id, status (pending/done), claim_token (a random UUID), clai
 
 ### `student_question_calls` (added in PR 11)
 
-id, reading_id, student_id, created_at: one row per counted AI call made for a student's own question set, for the "Try again" limit. No text. A call that fails without a response from the model (outage, bad key, timeout) has its row deleted when it ends. Kept until the student or reading is deleted (the all-time limit needs them), or until the teacher uses "Let them try again", which deletes that student's rows for that reading. Cascade from `students` and `readings`.
+id, reading_id, student_id, created_at, given_back (added in PR 12): one row per AI call made for a student's own question set, for the "Try again" limit. No text. A call that fails without a response from the model (outage, bad key, timeout) has its row marked given_back when it ends: it still counts toward the 10-minute window, not toward the all-time limit. Kept until the student or reading is deleted (the all-time limit needs them), or until the teacher uses "Let them try again", which deletes that student's rows for that reading. Cascade from `students` and `readings`.
 
 ### `attempts` (one row per try)
 
@@ -65,7 +65,7 @@ id, key_kind (ip/code), key_hash, created_at. For an IP, key_hash is an HMAC-SHA
 
 ### Not student data
 
-`teachers`, `classes`, `readings`, `link_fetch_attempts`, and `question_generation_attempts` hold teacher data and teacher-side counters only.
+`teachers`, `classes`, `readings`, `link_fetch_attempts`, `question_generation_attempts`, and `reading_cap_raises` (added in PR 12: which teacher raised a reading's student limit, when, and from and to what) hold teacher data and teacher-side counters only.
 
 ## Services that receive student data
 
@@ -73,11 +73,12 @@ id, key_kind (ip/code), key_hash, created_at. For an IP, key_hash is an HMAC-SHA
 - **Cloudflare Turnstile** (only when the bot check is turned on): the widget runs in the student's browser on the join page, so Cloudflare receives what any browser request carries (the IP address, browser and device signals) to decide whether it's a person, per Cloudflare's Turnstile terms and privacy policy. Our server sends Cloudflare only the widget's token and our secret, **not** the IP address and not the name.
 - **Vercel** (hosting) sees requests, including IP addresses, in its request logs, per Vercel's terms. Our own error logs carry only error names, codes, and ids (no names, answers, or notes).
 - **Neon** (database) stores everything above.
-- **Clerk** holds teacher accounts only; no student data.
+- **Clerk** holds teacher accounts only; no student data. The teacher's name and email in `teachers` are synced from Clerk: on their first visit, and by the Clerk webhook (`/api/webhooks/clerk`) whenever the Clerk account is created or changed (a change only updates an existing row, so a late change event can't bring back a deleted teacher). When a teacher's Clerk account is deleted, the webhook deletes, in one transaction, their classes (which cascades to the classes' readings and every student and all student work in them, notes to the teacher included) and then their `teachers` row (which cascades to their own logs: link fetches, question generations, and limit raises). A repeat delete changes nothing. Webhook logs carry only the event type and outcome, never a name, email, or id.
 
 ## How long it stays
 
-- Student rows and everything under them stay until a teacher deletes them, or the class or teacher account is deleted (each cascades to the class's students and all their work).
+- Student rows and everything under them stay until a teacher deletes them, or the class or teacher account is deleted (each cascades to the class's students and all their work). Deleting the teacher's Clerk account deletes the teacher account here too (through the Clerk webhook).
+- **A teacher can delete a reading** from its page (Delete reading, then confirm). It deletes, in one transaction, the reading, its questions (shared and every student's own), and every student's generation rows, call counts, tries, answers, effort checks, and notes to the teacher for that reading. Students and their work on other readings are kept.
 - **A teacher can delete one student** from the Class progress page (Delete, then confirm "Delete {name}"). It deletes, in one transaction, the student row (ending their session), their own question sets and generation rows, their call counts, tries, answers, effort checks, and notes to the teacher. Nothing of any other student changes.
 - `join_attempts` rows: pruned by later joins after 10 minutes (see above).
 - **Backups:** Neon keeps a restore history (point-in-time restore) for the project's restore window, which depends on the Neon plan and settings. Deleted rows can be recovered from it, and stay in it, until that window passes. Keep the window as short as operations allow.

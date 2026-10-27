@@ -149,6 +149,33 @@ describe("expectedHostnames", () => {
     ]);
   });
 
+  it("in production with no list, also accepts the branch URL (a Preview deploy), deduplicated", () => {
+    const preview = {
+      NODE_ENV: "production",
+      VERCEL_ENV: "preview",
+      VERCEL_PROJECT_PRODUCTION_URL: "unpack.example.org",
+      VERCEL_BRANCH_URL: "unpack-git-feat-team.vercel.app",
+      VERCEL_URL: "unpack-abc123-team.vercel.app",
+    };
+    assert.deepEqual(expectedHostnames(preview, REAL.TURNSTILE_SECRET_KEY), [
+      "unpack.example.org",
+      "unpack-git-feat-team.vercel.app",
+      "unpack-abc123-team.vercel.app",
+    ]);
+    assert.deepEqual(
+      expectedHostnames({ ...PROD, VERCEL_BRANCH_URL: "Unpack-Git-Main-Team.vercel.app", VERCEL_URL: "unpack-git-main-team.vercel.app" }, REAL.TURNSTILE_SECRET_KEY),
+      ["unpack-git-main-team.vercel.app"],
+    );
+    assert.deepEqual(
+      expectedHostnames({ ...PROD, VERCEL_BRANCH_URL: "unpack-git-feat-team.vercel.app", TURNSTILE_EXPECTED_HOSTNAMES: "preview.example.org" }, REAL.TURNSTILE_SECRET_KEY),
+      ["preview.example.org"],
+    );
+  });
+
+  it("ignores the branch URL outside production with no list", () => {
+    assert.equal(expectedHostnames({ ...DEV, VERCEL_BRANCH_URL: "unpack-git-feat-team.vercel.app" }, REAL.TURNSTILE_SECRET_KEY), null);
+  });
+
   it("skips the check in production off Vercel with no list, and outside production with no list", () => {
     assert.equal(expectedHostnames(PROD, REAL.TURNSTILE_SECRET_KEY), null);
     assert.equal(expectedHostnames({ ...DEV, VERCEL_URL: "unpack-abc123.vercel.app" }, REAL.TURNSTILE_SECRET_KEY), null);

@@ -114,8 +114,12 @@ function hostOf(value: string): string {
 // check:
 // - TURNSTILE_EXPECTED_HOSTNAMES (comma-separated) when set, anywhere.
 // - Else, in production, the deploy's own hostnames from Vercel
-//   (VERCEL_PROJECT_PRODUCTION_URL, the production domain, and
-//   VERCEL_URL, this deployment's URL), when Vercel sets them.
+//   (VERCEL_PROJECT_PRODUCTION_URL, the production domain;
+//   VERCEL_BRANCH_URL, the branch's stable URL, which preview links
+//   usually point at; and VERCEL_URL, this deployment's URL), when Vercel
+//   sets them. Vercel builds previews with NODE_ENV=production too, so
+//   this covers Preview. A custom preview domain still needs
+//   TURNSTILE_EXPECTED_HOSTNAMES set for the Preview environment.
 // - Else null: off Vercel with no list, or outside production with no
 //   list, the hostname isn't checked (the action and the secret still
 //   are).
@@ -126,7 +130,7 @@ export function expectedHostnames(env: Env, secretKey: string): string[] | null 
   const listed = (env.TURNSTILE_EXPECTED_HOSTNAMES ?? "").split(",").map(hostOf).filter(Boolean);
   if (listed.length > 0) return listed;
   if (!isProductionEnv(env)) return null;
-  const vercel = [env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_URL].map((v) => hostOf(v ?? "")).filter(Boolean);
+  const vercel = [env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_BRANCH_URL, env.VERCEL_URL].map((v) => hostOf(v ?? "")).filter(Boolean);
   return vercel.length > 0 ? [...new Set(vercel)] : null;
 }
 

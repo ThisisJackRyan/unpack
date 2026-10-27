@@ -50,6 +50,13 @@
       "when": 1793099525216,
       "tag": "0006_abuse_protection",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793107676220,
+      "tag": "0007_teacher_gaps",
+      "breakpoints": true
     }
   ]
 }

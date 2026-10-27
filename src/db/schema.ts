@@ -356,14 +356,16 @@ export const questionGenerations = pgTable(
 // the claim (or stale takeover) that is about to call the model, and only
 // then, so cached opens and throttled ones add nothing. created_at is set
 // to the claim's claimed_at, so a call that ends without a response from
-// the model (an outage, a bad key, a timeout) deletes exactly its own row
-// with its claim: only answered calls stay counted. The "Try again"
-// throttle counts these rows: STUDENT_GENERATION_WINDOW_LIMIT per student
-// per reading per STUDENT_GENERATION_WINDOW_MINUTES, and
-// STUDENT_GENERATION_CALL_LIMIT for all time. Kept (the lifetime cap needs
-// them) until the student or reading is deleted, or the teacher's "Let
-// them try again" clears that student's rows for that reading
-// (src/lib/student-question-reset.ts). Only ids and a time.
+// the model (an outage, a bad key, a timeout) can find exactly its own row
+// with its claim and mark it given_back. The "Try again" throttle counts
+// these rows: every row toward STUDENT_GENERATION_WINDOW_LIMIT per student
+// per reading per STUDENT_GENERATION_WINDOW_MINUTES (so an outage can't be
+// hammered), and only rows not given back toward
+// STUDENT_GENERATION_CALL_LIMIT for all time (the provider's fault doesn't
+// use up the student's tries). Kept (the lifetime cap needs them) until
+// the student or reading is deleted, or the teacher's "Let them try again"
+// clears that student's rows for that reading
+// (src/lib/student-question-reset.ts). Only ids, a flag, and a time.
 export const studentQuestionCalls = pgTable(
   "student_question_calls",
   {
@@ -375,6 +377,9 @@ export const studentQuestionCalls = pgTable(
       .notNull()
       .references(() => students.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
+    // True when the call ended without a response from the model: it
+    // still counts toward the window, but not toward the lifetime limit.
+    givenBack: boolean("given_back").notNull().default(false),
   },
   (t) => [
     index("student_question_calls_student_reading_created_at_idx").on(
@@ -383,6 +388,38 @@ export const studentQuestionCalls = pgTable(
       t.createdAt,
     ),
     index("student_question_calls_reading_id_idx").on(t.readingId),
+  ],
+);
+
+// The one-time raise of a per-student reading's student set cap, from
+// STUDENT_SETS_PER_READING_LIMIT (150) to STUDENT_SETS_RAISED_LIMIT (300),
+// by its teacher (see src/lib/reading-cap.ts). One row per reading at
+// most: the unique reading_id makes concurrent raises save exactly one,
+// and is the log of who raised it and when. The student set claim reads
+// to_limit from here. Teacher data, not student data.
+export const readingCapRaises = pgTable(
+  "reading_cap_raises",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    readingId: uuid("reading_id")
+      .notNull()
+      .unique()
+      .references(() => readings.id, { onDelete: "cascade" }),
+    teacherId: uuid("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    fromLimit: integer("from_limit").notNull(),
+    toLimit: integer("to_limit").notNull(),
+    raisedAt: timestamp("raised_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("reading_cap_raises_teacher_id_idx").on(t.teacherId),
+    check(
+      "reading_cap_raises_limits_check",
+      sql`${t.toLimit} > ${t.fromLimit}`,
+    ),
   ],
 );
 
@@ -431,3 +468,4 @@ export type NewAnswer = typeof answers.$inferInsert;
 export type Challenge = typeof challenges.$inferSelect;
 export type NewChallenge = typeof challenges.$inferInsert;
 export type EffortCheck = typeof effortChecks.$inferSelect;
+export type ReadingCapRaise = typeof readingCapRaises.$inferSelect;

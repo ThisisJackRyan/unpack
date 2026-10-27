@@ -3,13 +3,19 @@ import Link from "next/link";
 import { questionRole } from "@/lib/ai/prompts";
 import { effectiveGradeLevel, gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel, questionModeLabel } from "@/lib/question-modes";
+import { capDetail, capHeadline, capView, type CapView } from "@/lib/reading-cap";
+import { getReadingCap } from "@/lib/readings";
 import { listSharedQuestions } from "@/lib/shared-questions-db";
 import type { StudentSet } from "@/lib/student-sets";
 import { listStudentSets } from "@/lib/student-sets-db";
 import { sourceHost } from "@/lib/validate-reading";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { backLink, card, focusRing, secondaryButton } from "@/components/ui";
+import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadReading } from "../../loaders";
+import { RaiseCapButton } from "./cap-raise";
+import { DeleteReadingButton } from "./delete-reading";
+import { deleteReadingAction, raiseCapAction } from "./reading-actions";
 import { questionAction } from "./question-actions";
 import { QuestionNumber, QuestionsPanel, QuestionText } from "./questions-panel";
 
@@ -36,8 +42,12 @@ export default async function ReadingPage({ params }: Props) {
   const shared = reading.questionMode === "shared";
   const questions = shared ? await listSharedQuestions(reading.id) : [];
   // Sets exist only once students open a published per-student reading.
-  const studentSets =
-    !shared && reading.status === "published" ? await listStudentSets(reading.id, found.id) : null;
+  const perStudentPublished = !shared && reading.status === "published";
+  const teacher = await getOrCreateTeacher();
+  const [studentSets, cap] = perStudentPublished
+    ? await Promise.all([listStudentSets(reading.id, found.id), getReadingCap(found.id, teacher.id, reading.id)])
+    : [null, undefined];
+  const capPanel = cap ? capView(cap) : ({ kind: "none" } as const);
   const gradeLabel = gradeLevelLabel(effectiveGradeLevel(reading.gradeLevel, found.gradeLevel));
 
   return (
@@ -134,6 +144,10 @@ export default async function ReadingPage({ params }: Props) {
         )}
       </section>
 
+      {capPanel.kind !== "none" && (
+        <CapPanel view={capPanel} raiseAction={raiseCapAction.bind(null, found.id, reading.id)} />
+      )}
+
       {studentSets && <StudentSets sets={studentSets} />}
 
       <section aria-labelledby="text-heading" className={`${card} px-6 py-8 sm:px-10 sm:py-10`}>
@@ -148,7 +162,48 @@ export default async function ReadingPage({ params }: Props) {
           ))}
         </div>
       </section>
+
+      <section aria-labelledby="delete-reading-heading" className={`${card} flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6`}>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 id="delete-reading-heading" className="text-base font-semibold text-zinc-950">
+            Delete this reading
+          </h2>
+          <p className="text-sm text-zinc-600">Removes it for everyone, with every student’s answers and tries.</p>
+        </div>
+        <DeleteReadingButton action={deleteReadingAction.bind(null, found.id, reading.id)} title={reading.title} />
+      </section>
     </div>
+  );
+}
+
+// The student set cap: a calm note near or at it, with the one-time
+// raise, and the new limit after (full again at the new limit: no
+// button, it can't go higher). Amber while the raise is still there to
+// use; indigo after. Not red: nothing is lost. The headline is a live
+// region, so the change after a raise is announced.
+function CapPanel({
+  view,
+  raiseAction,
+}: {
+  view: Exclude<CapView, { kind: "none" }>;
+  raiseAction: () => Promise<{ message?: string; error?: string }>;
+}) {
+  const raised = view.kind === "raised" || view.kind === "raised_full";
+  return (
+    <section
+      aria-labelledby="cap-heading"
+      className={`flex flex-col gap-4 rounded-xl border p-5 sm:p-6 ${
+        raised ? "border-indigo-200 bg-indigo-50/60" : "border-amber-200 bg-amber-50"
+      }`}
+    >
+      <div className="flex flex-col gap-1">
+        <h2 id="cap-heading" aria-live="polite" className="text-lg font-semibold text-zinc-950">
+          {capHeadline(view)}
+        </h2>
+        <p className="text-base text-zinc-700">{capDetail(view)}</p>
+      </div>
+      {(view.kind === "near" || view.kind === "full") && <RaiseCapButton action={raiseAction} raiseTo={view.raiseTo} />}
+    </section>
   );
 }
 

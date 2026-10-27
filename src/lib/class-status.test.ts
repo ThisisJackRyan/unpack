@@ -25,7 +25,7 @@ describe("classStatusStatements", () => {
     assert.match(statements[2].text, /join readings r on r\.class_id = c\.id and r\.status = 'published'/);
     assert.match(
       statements[2].text,
-      /r\.question_mode = 'per_student'\s+and not exists \(select 1 from questions q[\s\S]*g\.status = 'pending'[\s\S]*from student_question_calls k where k\.reading_id = r\.id and k\.student_id = s\.id\) >= \$3::int\s+\) as needs_reset/,
+      /r\.question_mode = 'per_student'\s+and not exists \(select 1 from questions q[\s\S]*g\.status = 'pending'[\s\S]*from student_question_calls k where k\.reading_id = r\.id and k\.student_id = s\.id and not k\.given_back\) >= \$3::int\s+\) as needs_reset/,
     );
     assert.match(statements[2].text, /left join lateral \(select lc\.status, lc\.tries_allowed is not null as extra_try[\s\S]*order by lc\.round desc limit 1\) lc on true/);
   });

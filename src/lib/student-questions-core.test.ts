@@ -36,15 +36,18 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
 // throttle (the reading lock makes the counts and insert one step), and
 // a claim or takeover records its model call; commit is all-or-nothing on
 // the token. Every call yields first, so concurrent callers interleave.
-// Time is in seconds.
+// Time is in seconds. `calls` holds every call row's time (the window
+// counts them all); `givenBack` counts the rows a refund marked, which
+// the lifetime limit skips.
 function fakeStore(options: { published?: boolean; inClass?: boolean; count?: number } = {}) {
   const claims = new Map<string, { token: string; status: "pending" | "done"; claimedAt: number }>();
   const questions = new Map<string, StudentQuestion[]>();
   const calls = new Map<string, number[]>();
+  const givenBack = new Map<string, number>();
   let now = 0;
   const throttle = (k: string) => {
     const times = calls.get(k) ?? [];
-    if (times.length >= STUDENT_GENERATION_CALL_LIMIT) return "calls_used_up" as const;
+    if (times.length - (givenBack.get(k) ?? 0) >= STUDENT_GENERATION_CALL_LIMIT) return "calls_used_up" as const;
     const recent = times.filter((t) => t > now - STUDENT_GENERATION_WINDOW_MINUTES * 60).length;
     if (recent >= STUDENT_GENERATION_WINDOW_LIMIT) return "throttled" as const;
     return null;
@@ -92,11 +95,10 @@ function fakeStore(options: { published?: boolean; inClass?: boolean; count?: nu
       const c = claims.get(key(r, s));
       if (c?.token !== token || c.status !== "pending") return;
       claims.delete(key(r, s));
-      if (refundCall) {
-        // The one row this claim recorded: stamped with its claimedAt.
-        const times = calls.get(key(r, s)) ?? [];
-        const i = times.lastIndexOf(c.claimedAt);
-        if (i >= 0) calls.set(key(r, s), [...times.slice(0, i), ...times.slice(i + 1)]);
+      // The one row this claim recorded (stamped with its claimedAt) is
+      // marked, not removed: it stays in the window.
+      if (refundCall && (calls.get(key(r, s)) ?? []).includes(c.claimedAt)) {
+        givenBack.set(key(r, s), (givenBack.get(key(r, s)) ?? 0) + 1);
       }
     },
     async commit(r, s, token, prompts) {
@@ -117,6 +119,8 @@ function fakeStore(options: { published?: boolean; inClass?: boolean; count?: nu
     claims,
     questions,
     calls,
+    // Rows that count toward the lifetime limit.
+    counted: (k = `${READING}:${STUDENT}`) => (calls.get(k)?.length ?? 0) - (givenBack.get(k) ?? 0),
     advance: (seconds: number) => {
       now += seconds;
     },
@@ -386,29 +390,66 @@ describe("which failures count toward the throttle", () => {
   ];
 
   for (const [name, error] of uncounted) {
-    it(`${name}: gives the try back, so the student can keep trying`, async () => {
-      const { store, calls, claims } = fakeStore();
+    it(`${name}: gives the try back for all time, but still fills the window`, async () => {
+      const { store, calls, claims, counted, advance } = fakeStore();
       const failing = fakeWriter(error, 1);
       const logged: Record<string, unknown>[] = [];
-      // Far more than the lifetime cap, all in one window.
-      for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT + 2; i++) {
-        const result = await getOrCreateStudentQuestionsWith(READING, STUDENT, {
+      const attempt = () =>
+        getOrCreateStudentQuestionsWith(READING, STUDENT, {
           store,
           write: failing.write,
           newToken,
           onError: (f) => logged.push(f),
         });
-        assert.equal(result.status, "error", `${name} #${i}`);
+      // More than the lifetime cap, one full window at a time.
+      for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT + 2; i++) {
+        if (i > 0 && i % STUDENT_GENERATION_WINDOW_LIMIT === 0) {
+          // The window is full of given-back calls: no model call.
+          assert.deepEqual(await attempt(), { status: "throttled" }, `${name} #${i}`);
+          advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
+        }
+        assert.equal((await attempt()).status, "error", `${name} #${i}`);
       }
       assert.equal(failing.calls(), STUDENT_GENERATION_CALL_LIMIT + 2);
-      assert.equal(calls.get(`${READING}:${STUDENT}`)?.length ?? 0, 0);
+      assert.equal(calls.get(`${READING}:${STUDENT}`)?.length, STUDENT_GENERATION_CALL_LIMIT + 2);
+      assert.equal(counted(), 0);
       assert.equal(claims.size, 0);
       assert.equal(logged[0].counted, false);
+      advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
       const ok = fakeWriter();
       assert.equal((await open(store, ok.write)).status, "ready");
-      assert.equal(calls.get(`${READING}:${STUDENT}`)?.length, 1);
+      assert.equal(counted(), 1);
     });
   }
+
+  it("given-back calls throttle a burst to the window limit, and don't count toward the 6", async () => {
+    const { store, counted, calls, advance } = fakeStore();
+    const failing = fakeWriter(new Anthropic.InternalServerError(503, {}, "x", h), 3);
+    // Each request retries while pending, like the page does.
+    const tryUntilAnswered = async () => {
+      for (;;) {
+        const r = await open(store, failing.write);
+        if (r.status !== "pending") return r;
+        await tick();
+      }
+    };
+    const results = await Promise.all(Array.from({ length: 20 }, tryUntilAnswered));
+    assert.equal(failing.calls(), STUDENT_GENERATION_WINDOW_LIMIT);
+    assert.equal(calls.get(`${READING}:${STUDENT}`)?.length, STUDENT_GENERATION_WINDOW_LIMIT);
+    assert.equal(results.filter((r) => r.status === "error").length, STUDENT_GENERATION_WINDOW_LIMIT);
+    assert.equal(results.filter((r) => r.status === "throttled").length, 20 - STUDENT_GENERATION_WINDOW_LIMIT);
+    assert.equal(counted(), 0);
+    // Answered failures after the window still have all 6.
+    advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
+    const answered = fakeWriter(unusable(), 1);
+    for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT; i++) {
+      if (i > 0 && i % STUDENT_GENERATION_WINDOW_LIMIT === 0) advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
+      assert.equal((await open(store, answered.write)).status, "error");
+    }
+    advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
+    assert.deepEqual(await open(store, answered.write), { status: "calls_used_up" });
+    assert.equal(answered.calls(), STUDENT_GENERATION_CALL_LIMIT);
+  });
 
   it("unusable output counts, whether or not the writer reported the reply", async () => {
     for (const responded of [true, false]) {
@@ -426,7 +467,7 @@ describe("which failures count toward the throttle", () => {
   });
 
   it("a burst against a provider outage still makes one call at a time", async () => {
-    const { store, calls } = fakeStore();
+    const { store, counted } = fakeStore();
     let inFlight = 0;
     let most = 0;
     const write: StudentQuestionWriter = async () => {
@@ -438,7 +479,7 @@ describe("which failures count toward the throttle", () => {
     };
     await Promise.all(Array.from({ length: 20 }, () => open(store, write)));
     assert.equal(most, 1);
-    assert.equal(calls.get(`${READING}:${STUDENT}`)?.length ?? 0, 0);
+    assert.equal(counted(), 0);
   });
 
   it("failureCounts: only a reply, or unusable output", () => {
@@ -553,8 +594,9 @@ describe("student question statements", () => {
     assert.match(insert.text, /r\.status = 'published' and r\.question_mode = 'per_student'/);
     assert.match(
       insert.text,
-      /\(select count\(\*\) from question_generations where reading_id = \$1::uuid\) < \$4::int/,
+      /\(select count\(\*\) from question_generations where reading_id = \$1::uuid\) < coalesce\(\(select to_limit from reading_cap_raises where reading_id = \$1::uuid\), \$4::int\)/,
     );
+    assert.match(why.text, /coalesce\(\(select to_limit from reading_cap_raises where reading_id = \$1::uuid\), \$4::int\)::int as cap/);
     assert.match(insert.text, /on conflict do nothing\s+returning claim_token$/);
     assert.deepEqual(insert.params, [READING, STUDENT, "t", 150, 10, 3, 6]);
     assert.match(why.text, /as has_claim/);
@@ -562,7 +604,7 @@ describe("student question statements", () => {
     assert.match(why.text, /as claims/);
     assert.match(why.text, /as recent_calls/);
     assert.match(why.text, /as all_calls/);
-    assert.deepEqual(why.params, [READING, STUDENT, 10]);
+    assert.deepEqual(why.params, [READING, STUDENT, 10, 150]);
   });
 
   it("claims only under the throttle, and records the call only with its own claim", () => {
@@ -571,7 +613,7 @@ describe("student question statements", () => {
       insert.text,
       /from student_question_calls\s+where reading_id = \$1::uuid and student_id = \$2::uuid\s+and created_at > now\(\) - make_interval\(mins => \$5::int\)\) < \$6::int/,
     );
-    assert.match(insert.text, /where reading_id = \$1::uuid and student_id = \$2::uuid\) < \$7::int/);
+    assert.match(insert.text, /where reading_id = \$1::uuid and student_id = \$2::uuid and not given_back\) < \$7::int/);
     assert.match(record.text, /^insert into student_question_calls \(reading_id, student_id, created_at\)\nselect \$1::uuid, \$2::uuid, claimed_at from question_generations/);
     assert.match(record.text, /claim_token = \$3::uuid and status = 'pending'/);
     assert.deepEqual(record.params, [READING, STUDENT, "t"]);
@@ -584,6 +626,15 @@ describe("student question statements", () => {
     assert.equal(claimOutcome([[{}], [], [], [{ has_claim: false, eligible: true, claims: 150 }]], 150), "limit_reached");
     assert.equal(claimOutcome([[{}], [], [], [{ has_claim: false, eligible: true, claims: 149 }]], 150), "exists");
     assert.equal(claimOutcome([[], [], [], [{ has_claim: false, eligible: false, claims: 0 }]], 150), "refused");
+  });
+
+  it("reads the reading's own cap after a raise", () => {
+    const row = (claims: number, cap?: number) => [[{}], [], [], [{ has_claim: false, eligible: true, claims, cap }]];
+    assert.equal(claimOutcome(row(150, 300), 150), "exists");
+    assert.equal(claimOutcome(row(299, 300), 150), "exists");
+    assert.equal(claimOutcome(row(300, 300), 150), "limit_reached");
+    assert.equal(claimOutcome(row(150, 150), 150), "limit_reached");
+    assert.equal(claimOutcome(row(150), 150), "limit_reached");
   });
 
   it("reads the throttle from the claim outcome, lifetime first", () => {
@@ -619,10 +670,11 @@ describe("student question statements", () => {
     assert.equal(takeOverOutcome([[], []]), "not_stale");
   });
 
-  it("releases only its own pending claim, and refunds only that claim's call row when asked", () => {
+  it("releases only its own pending claim, and marks only that claim's call row given back when asked", () => {
     const s = releaseStatement(READING, STUDENT, "t", true);
     assert.match(s.text, /claim_token = \$3::uuid and status = 'pending'\s+returning claimed_at/);
-    assert.match(s.text, /where \$4::boolean and id = \(/);
+    assert.match(s.text, /update student_question_calls set given_back = true\nwhere \$4::boolean and id = \(/);
+    assert.equal(/delete from student_question_calls/.test(s.text), false);
     assert.match(s.text, /c\.created_at = released\.claimed_at/);
     assert.match(s.text, /limit 1\s*\)$/);
     assert.deepEqual(s.params, [READING, STUDENT, "t", true]);

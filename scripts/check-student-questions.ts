@@ -13,7 +13,8 @@
 // - Shared questions: generate, delete with renumbering, the last-question
 //   rule, edit-page clearing, publish, the lock after publish, and title-only
 //   edits after publish.
-// - updateClassGrade: clears only drafts that follow the class grade.
+// - updateClassSettings (the grade change): clears only drafts that follow
+//   the class grade.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-student-questions [flags]
 //
@@ -47,7 +48,7 @@ import {
   saveQuestionSet,
   updateSharedQuestion,
 } from "@/lib/shared-questions-db";
-import { updateClassGrade } from "@/lib/classes";
+import { updateClassSettings } from "@/lib/classes";
 import { saveReadingEdit } from "@/lib/readings";
 import type { ReadingRef } from "@/lib/shared-questions";
 import {
@@ -463,9 +464,11 @@ async function checkClassGrade() {
   const n = async (id: string) =>
     (await one<{ n: number }>(sql`select count(*)::int as n from questions where reading_id = ${id}`)).n;
 
-  check(!(await updateClassGrade(gradeClass, "00000000-0000-4000-8000-0000000000ff", "6")), "another teacher can't change the grade");
+  const setGrade = async (owner: string, gradeLevel: "6") =>
+    (await updateClassSettings(gradeClass, owner, { name: "Grade check", gradeLevel })).status === "saved";
+  check(!(await setGrade("00000000-0000-4000-8000-0000000000ff", "6")), "another teacher can't change the grade");
   check((await n(follows)) === 3, "nothing cleared for another teacher");
-  check(await updateClassGrade(gradeClass, teacherId, "6"), "grade changed 4 -> 6");
+  check(await setGrade(teacherId, "6"), "grade changed 4 -> 6");
   const { g } = await one<{ g: string }>(sql`select grade_level as g from classes where id = ${gradeClass}`);
   const after = [await n(follows), await n(override), await n(published)];
   check(
@@ -476,7 +479,7 @@ async function checkClassGrade() {
     insert into questions (reading_id, student_id, position, prompt)
     select ${follows}::uuid, null, p, 'Q' || p from generate_series(1, 3) as p`;
   check(
-    (await updateClassGrade(gradeClass, teacherId, "6")) && (await n(follows)) === 3,
+    (await setGrade(teacherId, "6")) && (await n(follows)) === 3,
     "same grade again clears nothing",
   );
 }

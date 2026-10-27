@@ -5,6 +5,17 @@ import type { Class, Reading } from "@/db/schema";
 import { isUuid } from "./classes";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
+import {
+  classCapBadges,
+  classCapsStatement,
+  raiseReadingCapWith,
+  readingCapFromRows,
+  readingCapStatement,
+  type CapBadge,
+  type RaiseCapResult,
+  type ReadingCap,
+} from "./reading-cap";
+import { deleteReadingWith, type DeleteReadingResult } from "./reading-delete";
 import { editApplied, editReadingStatements } from "./shared-questions";
 import type { ReadingSettings } from "./validate-reading";
 
@@ -120,4 +131,49 @@ export async function saveReadingEdit(
 ): Promise<boolean> {
   if (!isUuid(classId) || !isUuid(readingId)) return false;
   return editApplied(await execute(editReadingStatements({ classId, readingId, teacherId }, edit)));
+}
+
+// Deletes the reading and everything under it, ownership checked in the
+// statement (see reading-delete.ts). A malformed id is "not_found".
+export async function deleteReading(
+  classId: string,
+  teacherId: string,
+  readingId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<DeleteReadingResult> {
+  if (!isUuid(classId) || !isUuid(readingId)) return { status: "not_found" };
+  return deleteReadingWith(classId, teacherId, readingId, execute);
+}
+
+// The one-time student set cap raise (see reading-cap.ts).
+export async function raiseReadingCap(
+  classId: string,
+  teacherId: string,
+  readingId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<RaiseCapResult> {
+  if (!isUuid(classId) || !isUuid(readingId)) return { status: "not_found" };
+  return raiseReadingCapWith(classId, teacherId, readingId, execute);
+}
+
+// The class page's cap badges: one grouped count over the class's
+// published per-student readings, scoped to the owner.
+export async function getClassCapBadges(
+  classId: string,
+  teacherId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<Map<string, CapBadge>> {
+  if (!isUuid(classId)) return new Map();
+  return classCapBadges(await execute([classCapsStatement(classId, teacherId)]));
+}
+
+// How full a reading is, for its teacher. Undefined when it isn't theirs.
+export async function getReadingCap(
+  classId: string,
+  teacherId: string,
+  readingId: string,
+  execute: StatementExecutor = neonExecutor,
+): Promise<ReadingCap | undefined> {
+  if (!isUuid(classId) || !isUuid(readingId)) return undefined;
+  return readingCapFromRows(await execute([readingCapStatement(classId, teacherId, readingId)]));
 }

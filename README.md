@@ -38,8 +38,19 @@ pnpm test      # unit tests (no network; the Anthropic SDK is mocked)
 
 Copy `.env.example` to `.env.local` and fill it in. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`. The question request (`output_config.effort`, strict tools, auto tool choice) targets current 5.x models; an older `ANTHROPIC_MODEL` may return a 400.
 
-The student join form's bot check (Cloudflare Turnstile) is on when both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. In production both are required: with either missing, every join is refused and the server logs which one (set `TURNSTILE_DISABLED=1` to opt out on purpose; it logs a warning on every join). For local dev leave both empty (off), or use Cloudflare's public test keys (see `.env.example`). Teacher sign-up's bot check is Clerk's own "Challenge suspicious sign-ups" (Clerk Dashboard, Protect, Protections), on by default for new Clerk apps; see the v1 spec for exactly what it covers.
+The student join form's bot check (Cloudflare Turnstile) is on when both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. In production both are required: with either missing, every join is refused and the server logs which one (set `TURNSTILE_DISABLED=1` to opt out on purpose; it logs a warning on every join). For local dev leave both empty (off), or use Cloudflare's public test keys (see `.env.example`). On Vercel Preview the hostname check uses the branch and deployment URLs (`VERCEL_BRANCH_URL`, `VERCEL_URL`); if previews are served on a custom domain, set `TURNSTILE_EXPECTED_HOSTNAMES` for the Preview environment. `TURNSTILE_DISABLED=1` is an emergency switch only; remove it once the problem is fixed. Teacher sign-up's bot check is Clerk's own "Challenge suspicious sign-ups" (Clerk Dashboard, Protect, Protections), on by default for new Clerk apps; see the v1 spec for exactly what it covers.
+
+### Clerk webhook
+
+`/api/webhooks/clerk` keeps the `teachers` row in step with Clerk: `user.created` saves the teacher's name and primary email, `user.updated` updates them on an existing teacher (never creating one, so a late event can't bring back a deleted teacher), and `user.deleted` deletes the teacher and everything under them (classes, readings, students, and their work) in one transaction. To set it up for each Clerk instance (development and production are separate):
+
+1. Clerk Dashboard, **Configure**, **Webhooks**, **Add endpoint**.
+2. Endpoint URL: `https://<your domain>/api/webhooks/clerk`.
+3. Subscribe to `user.created`, `user.updated`, and `user.deleted`.
+4. Create it, copy its **Signing Secret** (`whsec_...`), and set it as `CLERK_WEBHOOK_SIGNING_SECRET` in Vercel (and `.env.local` if you test it locally through a tunnel).
+
+The route is public (no Clerk session); every delivery's signature is checked. A missing or bad signature gets a 400; a missing secret gets a 500 and a server log. Logs name only the event type and outcome. Teachers are still created on their first visit if the webhook isn't set up.
 
 ### Database checks
 
-`pnpm db:check-*` scripts (class limit, student questions, student join, student answers, teacher queue, abuse protection) run race checks against a local or dev database with a mock model. They write and delete rows, so they refuse to run unless `ALLOW_DB_WRITES=1` is set for that one command (for example `ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-abuse-protection`). Don't export it in your shell, and never point them at production.
+`pnpm db:check-*` scripts (class limit, student questions, student join, student answers, teacher queue, abuse protection, teacher gaps) run race checks against a local or dev database with a mock model. They write and delete rows, so they refuse to run unless `ALLOW_DB_WRITES=1` is set for that one command (for example `ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-abuse-protection`). Don't export it in your shell, and never point them at production.

@@ -10,10 +10,13 @@
 //   call ("calls_used_up"). A working model is called once, and cached
 //   opens add no call rows. The failing model answers with unusable
 //   output, which counts.
-// - Provider failures don't count: a model throwing a 529 overloaded, a
-//   503, a 401 bad key, or a network error leaves the call count where it
-//   was (0), over more opens than the cap, and the student then still
-//   gets a set.
+// - Provider failures are given back: a model throwing a 529 overloaded,
+//   a 503, a 401 bad key, or a network error fills the window like any
+//   call (STUDENT_GENERATION_WINDOW_LIMIT calls, then "throttled" with no
+//   model call) but never counts toward STUDENT_GENERATION_CALL_LIMIT:
+//   window after window, more calls than the cap, none counted, never
+//   "calls_used_up", and the student then still gets a set. A burst
+//   against an outage makes one call at a time, exactly the window limit.
 // - "Let them try again": at the cap, class status says Needs a reset;
 //   another teacher's reset is not_found with every call row intact; the
 //   owner's reset clears them, the student gets the full budget again
@@ -231,11 +234,21 @@ async function burst(studentId: string, write: StudentQuestionWriter) {
   return { calls: modelCalls - before, statuses };
 }
 
+// Every call row (the window counts them all).
 async function callRows(studentId: string): Promise<number> {
   return (
     await one<{ n: number }>(sql`
       select count(*)::int as n from student_question_calls
       where reading_id = ${readingId} and student_id = ${studentId}`)
+  ).n;
+}
+
+// The rows that count toward the lifetime limit (not given back).
+async function countedRows(studentId: string): Promise<number> {
+  return (
+    await one<{ n: number }>(sql`
+      select count(*)::int as n from student_question_calls
+      where reading_id = ${readingId} and student_id = ${studentId} and not given_back`)
   ).n;
 }
 
@@ -331,9 +344,9 @@ async function checkReset(studentId: string) {
   check(ok.calls === 1 && ok.statuses.ready === BURST, `and the student can get a set: ${JSON.stringify(ok)}`);
 }
 
-// Provider failures leave the count alone.
+// Provider failures are given back: they fill the window, not the cap.
 async function checkProviderFailures() {
-  console.log("\n== PROVIDER FAILURES DON'T COUNT ==");
+  console.log("\n== PROVIDER FAILURES: COUNT TOWARD THE WINDOW, NOT THE LIFETIME CAP ==");
   const h = new Headers();
   const errors: [string, Error][] = [
     ["529 overloaded", new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error" } }, "overloaded", h)],
@@ -341,32 +354,58 @@ async function checkProviderFailures() {
     ["401 bad key", new Anthropic.AuthenticationError(401, {}, "invalid x-api-key", h)],
     ["network error", new Anthropic.APIConnectionError({ message: "fetch failed" })],
   ];
+  const total = STUDENT_GENERATION_CALL_LIMIT + 2;
   for (const [name, error] of errors) {
     const student = await newStudent(`Outage${name.replace(/[^a-z]/gi, "").slice(0, 10)}`);
     const before = modelCalls;
     const statuses: string[] = [];
-    // More opens than the lifetime cap, all inside one window.
-    for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT + 2; i++) {
+    const throttledCalls: number[] = [];
+    // More calls than the lifetime cap, one full window at a time.
+    for (let i = 0; i < total; i++) {
+      if (i > 0 && i % STUDENT_GENERATION_WINDOW_LIMIT === 0) {
+        const callsBefore = modelCalls;
+        const full = await tryUntilAnswered(student.id, downModel(error));
+        throttledCalls.push(modelCalls - callsBefore);
+        statuses.push(full.status);
+        await passTheWindow(student.id);
+      }
       statuses.push((await tryUntilAnswered(student.id, downModel(error))).status);
     }
+    const throttled = statuses.filter((s) => s === "throttled").length;
     check(
-      modelCalls - before === STUDENT_GENERATION_CALL_LIMIT + 2 && statuses.every((s) => s === "error"),
-      `${name}: every open reached the (failing) model, none throttled (${JSON.stringify(statuses)})`,
+      modelCalls - before === total && statuses.filter((s) => s === "error").length === total,
+      `${name}: ${total} failing calls, each reached the model once (${JSON.stringify(statuses)})`,
     );
-    check((await callRows(student.id)) === 0, `${name}: the call count is unchanged (0)`);
+    check(
+      throttled === throttledCalls.length && throttledCalls.every((n) => n === 0),
+      `${name}: each full window of given-back calls throttled the next open, with no model call (${throttled}x)`,
+    );
+    check(!statuses.includes("calls_used_up"), `${name}: never calls_used_up`);
+    check((await callRows(student.id)) === total, `${name}: ${total} call rows kept for the window`);
+    check((await countedRows(student.id)) === 0, `${name}: none counted toward the lifetime ${STUDENT_GENERATION_CALL_LIMIT}`);
+    check((await needsReset(student.id)) === false, `${name}: class status: not Needs a reset`);
     const claims = await one<{ n: number }>(sql`
       select count(*)::int as n from question_generations where reading_id = ${readingId} and student_id = ${student.id}`);
     check(claims.n === 0, `${name}: no claim left behind`);
+    await passTheWindow(student.id);
     const ok = await tryUntilAnswered(student.id, workingModel);
-    check(ok.status === "ready" && (await callRows(student.id)) === 1, `${name}: the student can still get a set (${ok.status})`);
+    check(ok.status === "ready" && (await countedRows(student.id)) === 1, `${name}: the student can still get a set (${ok.status})`);
   }
 
   // A burst against an outage: the in-flight call holds the slot, so it's
-  // still one call at a time, and nothing is left counted.
+  // one call at a time, and the given-back calls fill the window.
   const burster = await newStudent("Outageburst");
   const b = await burst(burster.id, downModel(new Anthropic.InternalServerError(503, {}, "unavailable", h)));
-  check(b.statuses.error === BURST && b.calls === BURST, `a burst of ${BURST} against an outage: each answered once (${JSON.stringify(b)})`);
-  check((await callRows(burster.id)) === 0, "...and no call is counted");
+  check(
+    b.calls === STUDENT_GENERATION_WINDOW_LIMIT &&
+      b.statuses.error === STUDENT_GENERATION_WINDOW_LIMIT &&
+      b.statuses.throttled === BURST - STUDENT_GENERATION_WINDOW_LIMIT,
+    `a burst of ${BURST} against an outage: exactly ${STUDENT_GENERATION_WINDOW_LIMIT} calls, the rest throttled (${JSON.stringify(b)})`,
+  );
+  check(
+    (await callRows(burster.id)) === STUDENT_GENERATION_WINDOW_LIMIT && (await countedRows(burster.id)) === 0,
+    "...all given back: in the window, none counted",
+  );
 }
 
 // ---------------------------------------------------------------------------
