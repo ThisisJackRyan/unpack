@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getQuestionModel, isQuestionWritingConfigured } from "@/lib/ai/client";
+import { logModelError } from "@/lib/ai/errors";
 import {
   QUESTION_ERROR_MESSAGES,
   questionErrorKind,
@@ -162,7 +163,7 @@ export async function questionAction(
             ]
           : await writeQuestionSet(model, input);
     } catch (error) {
-      console.error("questionAction: write failed", {
+      logModelError("questionAction: write failed", {
         ...questionErrorLogFields(error),
         intent,
         readingId,

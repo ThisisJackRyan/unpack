@@ -4,6 +4,7 @@ import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import { getEffortCheckModel } from "./ai/client";
 import { checkEffort, effortErrorLogFields } from "./ai/effort-check";
+import { logModelError } from "./ai/errors";
 import { isUuid } from "./classes";
 import {
   postgresAttemptStore,
@@ -41,6 +42,6 @@ export async function submitAnswers(
     check: options.check ?? modelChecker,
     newId: randomUUID,
     onError: (error) =>
-      console.error("submitAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
+      logModelError("submitAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
   });
 }

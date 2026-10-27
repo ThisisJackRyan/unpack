@@ -155,3 +155,23 @@ export function questionErrorLogFields(error: unknown): Record<string, unknown> 
   if (cause instanceof Error) fields.causeName = cause.name;
   return fields;
 }
+
+// The loud extra line when the gateway says the account is out of credits
+// (402): every question write and effort check fails until someone adds
+// credits, and the usual "write failed" line doesn't say why.
+export const AI_OUT_OF_CREDITS_LOG =
+  "AI Gateway is out of credits (402). Question writing and the effort check " +
+  "fail until credits are added (Vercel dashboard, AI Gateway). Failed calls " +
+  "are given back and don't use up anyone's limits.";
+
+// Logs a failed model call: `message` with the safe fields (from
+// questionErrorLogFields or effortErrorLogFields, plus ids), and the
+// out-of-credits line too on a 402. Never the text, prompts, or names.
+export function logModelError(
+  message: string,
+  fields: Record<string, unknown>,
+  logError: (message: string, fields: Record<string, unknown>) => void = console.error,
+): void {
+  logError(message, fields);
+  if (fields.status === 402) logError(AI_OUT_OF_CREDITS_LOG, { where: message, ...fields });
+}

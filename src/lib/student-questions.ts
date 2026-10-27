@@ -4,6 +4,7 @@ import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import { getQuestionModel, isQuestionWritingConfigured } from "./ai/client";
 import { writeQuestionSet } from "./ai/questions";
+import { logModelError } from "./ai/errors";
 import { isUuid } from "./classes";
 import type { GradeLevel } from "./grade-levels";
 import {
@@ -122,6 +123,6 @@ export async function getOrCreateStudentQuestions(
     // An injected writer (the DB checks) needs no key.
     configured: options.write ? true : isQuestionWritingConfigured(),
     onError: (fields) =>
-      console.error("getOrCreateStudentQuestions: write failed", { ...fields, readingId }),
+      logModelError("getOrCreateStudentQuestions: write failed", { ...fields, readingId }),
   });
 }

@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { getEffortCheckModel, getQuestionModel, isQuestionWritingConfigured } from "./ai/client";
 import { effortErrorLogFields } from "./ai/effort-check";
+import { logModelError } from "./ai/errors";
 import { isUuid } from "./classes";
 import type { GradeLevel } from "./grade-levels";
 import type { StatementExecutor } from "./link-rate-limit";
@@ -126,7 +127,7 @@ export async function getOrCreateSelfQuestions(
     write: options.write ?? modelWriter,
     newToken: randomUUID,
     configured: options.write ? true : isQuestionWritingConfigured(),
-    onError: (fields) => console.error("getOrCreateSelfQuestions: write failed", { ...fields, readingId }),
+    onError: (fields) => logModelError("getOrCreateSelfQuestions: write failed", { ...fields, readingId }),
   });
 }
 
@@ -144,7 +145,7 @@ export async function submitSelfAnswers(
     check: options.check ?? modelChecker,
     newId: randomUUID,
     onError: (error) =>
-      console.error("submitSelfAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
+      logModelError("submitSelfAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
   });
 }
 
