@@ -1,5 +1,5 @@
 // Checks the teacher gaps PR through the real neon-http driver and the
-// real app functions, with a MOCK model (no Anthropic calls):
+// real app functions, with a MOCK model (no model calls):
 //
 // - Every foreign key onto readings is ON DELETE CASCADE (from the
 //   catalog), so a reading delete reaches every table under it.
@@ -89,8 +89,8 @@ if (process.env.ALLOW_DB_WRITES !== "1") {
   process.exit(2);
 }
 // Belt and braces: the mock model is always injected, but make sure no
-// code path could reach Anthropic with a real key.
-delete process.env.ANTHROPIC_API_KEY;
+// code path could reach the model with real credentials.
+for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
 const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
 if (fetchEndpoint) {
   neonConfig.fetchEndpoint = () => fetchEndpoint;
@@ -125,7 +125,7 @@ async function one<T>(query: Promise<Record<string, unknown>[]>): Promise<T> {
   return (await query)[0] as T;
 }
 
-// The mock model: instant, always the same set. Never Anthropic.
+// The mock model: instant, always the same set. Never the real model.
 const write = async (): Promise<string[]> => PROMPTS;
 
 let teacherId = "";

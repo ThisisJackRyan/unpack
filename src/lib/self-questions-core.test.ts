@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import Anthropic from "@anthropic-ai/sdk";
 import { QUESTIONS_SYSTEM_PROMPT, QUESTIONS_TOOL_NAME, SOLO_QUESTIONS_SYSTEM_PROMPT } from "./ai/prompts";
+import type { ModelRequest } from "./ai/model";
 import { QuestionWriterError, type QuestionModel } from "./ai/questions";
+import { toolReply } from "./ai/test-fixtures";
 import type { Statement } from "./link-rate-limit";
 import { QUESTION_GENERATION_LIMIT, QUESTION_GENERATION_WINDOW_MINUTES } from "./question-rate-limit";
 import {
@@ -199,16 +200,13 @@ describe("self question statements", () => {
 
 describe("selfQuestionWriter", () => {
   it("writes with the solo prompts, at the reading's level and count", async () => {
-    const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
+    const calls: ModelRequest[] = [];
     let gets = 0;
     const model: QuestionModel = {
-      model: "claude-sonnet-5-5",
+      model: "anthropic/claude-sonnet-5.5",
       create: async (params) => {
         calls.push(params);
-        return {
-          content: [{ type: "tool_use", id: "t", name: QUESTIONS_TOOL_NAME, input: { questions: ["Why?", "What next?"] } }],
-          stop_reason: "tool_use",
-        } as unknown as Anthropic.Message;
+        return toolReply(QUESTIONS_TOOL_NAME, { questions: ["Why?", "What next?"] });
       },
     };
     const write = selfQuestionWriter(() => {

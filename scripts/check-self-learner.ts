@@ -1,5 +1,5 @@
 // Checks self-learner mode (PR 13) through the real neon-http driver and
-// the real cores, with a MOCK model (no Anthropic calls):
+// the real cores, with a MOCK model (no model calls):
 //
 // (a) Role: a new account (the webhook's user.created upsert) has no role;
 //     the first-run choice refuses self-learner without the age
@@ -77,8 +77,8 @@ if (process.env.ALLOW_DB_WRITES !== "1") {
   process.exit(2);
 }
 // Belt and braces: the mock model is always injected, but make sure no
-// code path could reach Anthropic with a real key.
-delete process.env.ANTHROPIC_API_KEY;
+// code path could reach the model with real credentials.
+for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
 const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
 if (fetchEndpoint) {
   neonConfig.fetchEndpoint = () => fetchEndpoint;
@@ -116,7 +116,7 @@ async function one<T>(query: Promise<Record<string, unknown>[]>): Promise<T> {
 
 const clerkId = (prefix: string) => `${prefix}_${RUN_ID}`;
 
-// The mock model and checkers: instant, never Anthropic.
+// The mock model and checkers: instant, never the real model.
 const write = async (): Promise<string[]> => PROMPTS;
 function checker(pass: boolean) {
   return async (input: EffortCheckInput): Promise<EffortVerdict[]> =>

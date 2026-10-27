@@ -222,8 +222,9 @@ export type StudentQuestionDeps = {
   store: StudentQuestionStore;
   write: StudentQuestionWriter;
   newToken: () => string;
-  // False when the model isn't set up (no API key): an open then fails
-  // before claiming, so no call is counted that never reached the model.
+  // False when the model isn't set up (no AI Gateway credentials): an open
+  // then fails before claiming, so no call is counted that never reached
+  // the model.
   configured?: boolean;
   // Logs safe fields only (never the text, prompts, or names).
   onError?: (fields: Record<string, unknown>) => void;

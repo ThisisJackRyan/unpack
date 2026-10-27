@@ -128,7 +128,8 @@ export async function questionAction(
     // The rest call the model.
     if (intent === "generate" && questions.length > 0) return fail(QUESTIONS_EXIST_MESSAGE);
     if (intent === "regenerate_one" && !target) return fail(READING_CHANGED_MESSAGE);
-    // Checked before the rate limit, so a missing key costs nothing.
+    // Checked before the rate limit, so missing AI Gateway credentials
+    // cost nothing.
     if (!isQuestionWritingConfigured()) return fail(QUESTION_ERROR_MESSAGES.not_configured);
 
     // Counted before the call, whatever its outcome. Fails closed.

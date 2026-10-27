@@ -23,7 +23,7 @@ export type { SubmitResult } from "./submit-answers-core";
 const modelChecker: EffortChecker = (input) => checkEffort(getEffortCheckModel(), input);
 
 export type SubmitAnswersOptions = {
-  // For scripts/check-student-answers.ts: a fake checker (no Anthropic
+  // For scripts/check-student-answers.ts: a fake checker (no model
   // calls) and a throttled executor. The app passes nothing.
   check?: EffortChecker;
   execute?: StatementExecutor;

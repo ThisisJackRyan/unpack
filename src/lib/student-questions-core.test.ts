@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import Anthropic from "@anthropic-ai/sdk";
 import {
   CLAIM_STALE_SECONDS,
   claimOutcome,
@@ -26,6 +25,7 @@ import {
 } from "./student-questions-core";
 import { QuestionWriterError } from "./ai/questions";
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
+import { gatewayErrors, retried } from "./ai/test-fixtures";
 
 const READING = "r1";
 const STUDENT = "s1";
@@ -216,7 +216,7 @@ describe("getOrCreateStudentQuestionsWith", () => {
   it("releases the claim on a model failure, so the next open tries again", async () => {
     const { store, claims } = fakeStore();
     const logged: Record<string, unknown>[] = [];
-    const failing = fakeWriter(new Anthropic.RateLimitError(429, {}, "x", new Headers()));
+    const failing = fakeWriter(gatewayErrors.rateLimited());
     const result = await getOrCreateStudentQuestionsWith(READING, STUDENT, {
       store,
       write: failing.write,
@@ -372,20 +372,22 @@ describe("the Try again throttle", () => {
 describe("which failures count toward the throttle", () => {
   const open = (store: StudentQuestionStore, write: StudentQuestionWriter) =>
     getOrCreateStudentQuestionsWith(READING, STUDENT, { store, write, newToken });
-  const h = new Headers();
-  // Each provider or setup failure where no reply came back.
+  // Each provider or setup failure where no reply came back, as the
+  // gateway and the AI SDK report it.
   const uncounted: [string, Error][] = [
-    ["missing API key", new QuestionWriterError("not_configured", "ANTHROPIC_API_KEY is not set")],
-    ["400 bad request", new Anthropic.BadRequestError(400, {}, "x", h)],
-    ["401 invalid key", new Anthropic.AuthenticationError(401, {}, "x", h)],
-    ["403 no permission", new Anthropic.PermissionDeniedError(403, {}, "x", h)],
-    ["404 unknown model", new Anthropic.NotFoundError(404, {}, "x", h)],
-    ["429 rate limited", new Anthropic.RateLimitError(429, {}, "x", h)],
-    ["529 overloaded", new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error" } }, "x", h)],
-    ["500 server error", new Anthropic.InternalServerError(500, {}, "x", h)],
-    ["503 unavailable", new Anthropic.InternalServerError(503, {}, "x", h)],
-    ["network error", new Anthropic.APIConnectionError({ message: "fetch failed" })],
-    ["SDK timeout", new Anthropic.APIConnectionTimeoutError()],
+    ["no AI Gateway credentials", new QuestionWriterError("not_configured", "no AI Gateway API key or OIDC token")],
+    ["400 bad request", gatewayErrors.badRequest()],
+    ["401 invalid key", gatewayErrors.badKey()],
+    ["401 as rethrown by generateText", gatewayErrors.wrappedAuthProduction()],
+    ["403 no permission", gatewayErrors.forbidden()],
+    ["404 unknown model", gatewayErrors.unknownModel()],
+    ["429 rate limited", gatewayErrors.rateLimited()],
+    ["529 overloaded", gatewayErrors.overloaded()],
+    ["500 server error", gatewayErrors.serverError()],
+    ["503 unavailable", gatewayErrors.unavailable()],
+    ["503 after the SDK's retry", retried(gatewayErrors.unavailable())],
+    ["network error", gatewayErrors.network()],
+    ["per-request timeout", retried(gatewayErrors.requestTimeout())],
     ["write deadline", Object.assign(new Error("deadline"), { name: "TimeoutError" })],
   ];
 
@@ -424,7 +426,7 @@ describe("which failures count toward the throttle", () => {
 
   it("given-back calls throttle a burst to the window limit, and don't count toward the 6", async () => {
     const { store, counted, calls, advance } = fakeStore();
-    const failing = fakeWriter(new Anthropic.InternalServerError(503, {}, "x", h), 3);
+    const failing = fakeWriter(gatewayErrors.unavailable(), 3);
     // Each request retries while pending, like the page does.
     const tryUntilAnswered = async () => {
       for (;;) {
@@ -461,7 +463,7 @@ describe("which failures count toward the throttle", () => {
 
   it("a provider error after the model already replied once counts", async () => {
     const { store, calls } = fakeStore();
-    const failing = fakeWriter(new Anthropic.InternalServerError(500, {}, "x", h), 1, true);
+    const failing = fakeWriter(gatewayErrors.serverError(), 1, true);
     assert.equal((await open(store, failing.write)).status, "error");
     assert.equal(calls.get(`${READING}:${STUDENT}`)?.length, 1);
   });
@@ -475,7 +477,7 @@ describe("which failures count toward the throttle", () => {
       most = Math.max(most, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 3));
       inFlight--;
-      throw new Anthropic.InternalServerError(503, {}, "x", h);
+      throw gatewayErrors.unavailable();
     };
     await Promise.all(Array.from({ length: 20 }, () => open(store, write)));
     assert.equal(most, 1);
