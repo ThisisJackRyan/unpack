@@ -9,7 +9,8 @@ const initialState: JoinState = {};
 
 const label = "text-lg font-semibold text-zinc-900";
 const hint = "text-base text-zinc-600";
-const error = "text-base font-medium text-red-700";
+// Amber, like the reading page: a fix to make, not a danger.
+const error = "text-base font-medium text-amber-900";
 
 // One big code field, then the two name fields, then one full-width
 // button. `secondary` styles the button down when the page already has a

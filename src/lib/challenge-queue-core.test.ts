@@ -142,7 +142,7 @@ describe("decisionMessage", () => {
       "Already decided. The list is up to date.",
       "We couldn’t find that challenge. The list is up to date.",
     ]);
-    for (const m of messages) assert.doesNotMatch(m, /—/);
+    for (const m of messages) assert.doesNotMatch(m, /\u2014/);
   });
 
   it("knows the decisions", () => {
