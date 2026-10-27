@@ -13,9 +13,9 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 // The student's class home: their published readings, each with the
-// student's status (Not started, In progress, Passed, Challenged). Already-joined
-// students keep access even after the teacher turns the join code off;
-// the code only gates joining.
+// student's status (Not started, In progress, Passed, Challenged, or
+// Challenge denied). Already-joined students keep access even after the
+// teacher turns the join code off; the code only gates joining.
 export default async function StudentHomePage() {
   const session = await requireStudentSession();
   const readings = await listReadingsWithStatus(session.class.id, session.student.id);
