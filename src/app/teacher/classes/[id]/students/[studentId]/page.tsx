@@ -3,10 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { NeedsResetBadge, StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
-import { backLink, card } from "@/components/ui";
+import { TeacherAnswerList } from "@/components/teacher-answers";
+import { backLink, card, focusRing } from "@/components/ui";
 import { cellKey, NOT_STARTED_CELL, triesLabel, type ClassStatus } from "@/lib/class-status";
 import { loadClassStatus } from "@/lib/class-status-db";
 import { STUDENT_GENERATION_CALL_LIMIT } from "@/lib/student-questions-core";
+import { answersFor } from "@/lib/teacher-answers";
+import { loadTeacherAnswers } from "@/lib/teacher-answers-db";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadClass } from "../../loaders";
 import { resetTriesAction } from "../actions";
@@ -17,13 +20,13 @@ import { OpenBook } from "@/components/illustrations";
 type Props = { params: Promise<{ id: string; studentId: string }> };
 
 // Cached per request so generateMetadata and the page share one query.
-const load = cache(async (id: string, studentId: string): Promise<{ status: ClassStatus; name: string; classId: string; className: string }> => {
+const load = cache(async (id: string, studentId: string): Promise<{ status: ClassStatus; name: string; classId: string; className: string; teacherId: string }> => {
   const found = await loadClass(id);
   const teacher = await getOrCreateTeacher();
   const status = await loadClassStatus(found.id, teacher.id);
   const student = status.students.find((s) => s.id === studentId);
   if (!student) notFound();
-  return { status, name: student.name, classId: found.id, className: found.name };
+  return { status, name: student.name, classId: found.id, className: found.name, teacherId: teacher.id };
 });
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -33,15 +36,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 // One student's progress on each published reading, the same statuses as
-// the class progress table. Where they Need a reset (every try at getting
+// the class progress table, and (once they tried) See answers: each
+// question's answer on every try, Passed or Not yet, and the latest tip. Where they Need a reset (every try at getting
 // their own questions used, none came back), it says so in plain words,
 // with "Let them try again". Only the owning teacher gets here (loadClass
 // 404s others, and a student not in this class 404s); the reset checks
 // ownership again in its own statement.
 export default async function StudentProgressPage({ params }: Props) {
   const { id, studentId } = await params;
-  const { status, name, classId, className } = await load(id, studentId);
+  const { status, name, classId, className, teacherId } = await load(id, studentId);
   const onReset = resetTriesAction.bind(null, classId);
+  // Owner-scoped in the SQL (class + this teacher); the student is in
+  // the class (load 404s otherwise).
+  const answers = await loadTeacherAnswers(classId, teacherId, { studentId });
 
   return (
     <div className="flex flex-col gap-8">
@@ -82,6 +89,23 @@ export default async function StudentProgressPage({ params }: Props) {
                     </span>
                   )}
                 </div>
+                {cell.tries > 0 && (
+                  <details className="group rounded-2xl border border-ink-200 bg-ink-50">
+                    <summary
+                      className={`flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-4 py-2 text-base font-semibold text-primary-700 hover:bg-ink-100 [&::-webkit-details-marker]:hidden ${focusRing}`}
+                    >
+                      <span>
+                        See answers<span className="sr-only"> for {r.title}</span>
+                      </span>
+                      <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+                        ›
+                      </span>
+                    </summary>
+                    <div className="px-4 pt-1 pb-4">
+                      <TeacherAnswerList questions={answersFor(answers, studentId, r.id)} headingLevel={3} />
+                    </div>
+                  </details>
+                )}
                 {cell.needsReset && (
                   <div className="flex flex-col items-start gap-3 rounded-xl bg-warning-50 px-4 py-3">
                     <p className="text-base text-ink-800">

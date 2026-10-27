@@ -11,7 +11,13 @@ import { listStudentSets } from "@/lib/student-sets-db";
 import { sourceHost } from "@/lib/validate-reading";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { MetaLine } from "@/components/meta-line";
-import { backLink, card, focusRing, secondaryButton } from "@/components/ui";
+import { StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
+import { TeacherAnswerList } from "@/components/teacher-answers";
+import { backLink, card, focusRing, secondaryButton, textLink } from "@/components/ui";
+import { cellKey, NOT_STARTED_CELL, passedSummary, triesLabel, type ClassStatus } from "@/lib/class-status";
+import { loadClassStatus } from "@/lib/class-status-db";
+import { answersFor, type TeacherAnswers } from "@/lib/teacher-answers";
+import { loadTeacherAnswers } from "@/lib/teacher-answers-db";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadReading } from "../../loaders";
 import { RaiseCapButton } from "./cap-raise";
@@ -54,6 +60,15 @@ export default async function ReadingPage({ params, searchParams }: Props) {
     ? await Promise.all([listStudentSets(reading.id, found.id), getReadingCap(found.id, teacher.id, reading.id)])
     : [null, undefined];
   const capPanel = cap ? capView(cap) : ({ kind: "none" } as const);
+  // Each student's answers once published. Owner-scoped in the SQL (this
+  // class and the signed-in teacher); the reading id only narrows it.
+  const [classStatus, answers] =
+    reading.status === "published"
+      ? await Promise.all([
+          loadClassStatus(found.id, teacher.id),
+          loadTeacherAnswers(found.id, teacher.id, { readingId: reading.id }),
+        ])
+      : [null, null];
   const gradeLabel = gradeLevelLabel(effectiveGradeLevel(reading.gradeLevel, found.gradeLevel));
 
   return (
@@ -163,6 +178,10 @@ export default async function ReadingPage({ params, searchParams }: Props) {
 
       {studentSets && <StudentSets sets={studentSets} />}
 
+      {classStatus && answers && (
+        <StudentAnswers classId={found.id} readingId={reading.id} status={classStatus} answers={answers} />
+      )}
+
       <section aria-labelledby="text-heading" className={`${card} px-6 py-8 sm:px-10 sm:py-10`}>
         <h2 id="text-heading" className="sr-only">
           Reading text
@@ -266,6 +285,78 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
               </details>
             </li>
           ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// Each student's answers on this reading, one collapsed row per student
+// (name, status, tries), opening to every question's answer on each try,
+// Passed or Not yet, and the latest tip. Native <details>, like the sets.
+function StudentAnswers({
+  classId,
+  readingId,
+  status,
+  answers,
+}: {
+  classId: string;
+  readingId: string;
+  status: ClassStatus;
+  answers: TeacherAnswers;
+}) {
+  return (
+    <section aria-labelledby="student-answers-heading" className={`${card} flex flex-col gap-4 p-5 sm:p-6`}>
+      <div className="flex flex-col gap-1">
+        <h2 id="student-answers-heading" className="text-xl font-semibold text-ink-950">
+          Student answers
+        </h2>
+        <p className="text-base text-ink-700">{passedSummary(status, readingId)}</p>
+      </div>
+      {status.students.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-700">
+          No students yet. Their answers show up here after they check them.
+        </p>
+      ) : (
+        <ul className="divide-y divide-ink-200 overflow-hidden rounded-2xl border border-ink-200">
+          {status.students.map((student) => {
+            const cell = status.cells[cellKey(student.id, readingId)] ?? NOT_STARTED_CELL;
+            const summary = (
+              <>
+                <span className="min-w-0 text-base font-semibold break-words text-ink-950">{student.name}</span>
+                <span className="flex shrink-0 flex-wrap items-center justify-end gap-3">
+                  {cell.status !== "not_started" && (
+                    <span className="text-base text-ink-700 tabular-nums">{triesLabel(cell)}</span>
+                  )}
+                  <StudentReadingStatusBadge audience="teacher" status={cell.status} size="sm" />
+                </span>
+              </>
+            );
+            return (
+              <li key={student.id}>
+                {cell.tries === 0 ? (
+                  <div className="flex min-h-14 flex-wrap items-center justify-between gap-4 px-4 py-3">{summary}</div>
+                ) : (
+                  <details className="group">
+                    <summary
+                      className={`flex min-h-14 cursor-pointer list-none flex-wrap items-center justify-between gap-4 px-4 py-3 hover:bg-ink-50 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden ${focusRing}`}
+                    >
+                      {summary}
+                      <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+                        ›
+                      </span>
+                    </summary>
+                    <div className="flex flex-col gap-3 bg-ink-50 px-4 py-4">
+                      <TeacherAnswerList questions={answersFor(answers, student.id, readingId)} headingLevel={3} />
+                      <Link href={`/teacher/classes/${classId}/students/${student.id}`} className={`${textLink} self-start text-base`}>
+                        All of {student.name}’s readings
+                      </Link>
+                    </div>
+                  </details>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

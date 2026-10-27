@@ -22,6 +22,10 @@
 // - Another teacher can't decide (not_found, still open) or see the queue.
 // - The class view's statuses (loadClassStatus) match the student's own
 //   (listReadingsWithStatus) and what each case expects.
+// - Teacher answers (loadTeacherAnswers): every try's answer per question,
+//   pass or not yet, the kept answer, and the latest tip, by student and
+//   by reading; another teacher, a wrong class, or another class's
+//   student id gets nothing.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-teacher-queue [flags]
 //
@@ -48,6 +52,8 @@ import { EXTRA_TRY_CHECKS } from "@/lib/reading-limits";
 import { answerStage, type StudentReadingStatus } from "@/lib/reading-progress";
 import { listReadingsWithStatus, loadReadingProgress } from "@/lib/reading-progress-db";
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
+import { answersFor } from "@/lib/teacher-answers";
+import { loadTeacherAnswers } from "@/lib/teacher-answers-db";
 import { EFFORT_CHECK_LIMIT, type EffortCheckHooks } from "@/lib/submit-answers-core";
 import { MAX_TRIES, type AnswerEntry } from "@/lib/validate-answers";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
@@ -453,10 +459,76 @@ async function checkOwnership() {
   expected.set(student, "challenged");
 }
 
+async function checkTeacherAnswers() {
+  console.log("\n== TEACHER ANSWERS: per try, owner scoped ==");
+  const student = await newStudent();
+  // Try 1: q1 and q2 pass, q3 not yet; try 2 sends only q3, not yet again.
+  await submit(student, "fail", 5);
+  await submit(student, "fail", 5);
+  const byStudent = answersFor(await loadTeacherAnswers(classId, teacherId, { studentId: student }, execute), student, readingId);
+  const [q1, , q3] = byStudent;
+  check(
+    byStudent.length === PROMPTS.length && byStudent.every((q, i) => q.prompt === PROMPTS[i]),
+    `by student: ${byStudent.length} questions in order`,
+  );
+  check(
+    JSON.stringify(q1?.tries.map((t) => [t.tryNumber, t.pass, t.keptFrom])) === JSON.stringify([[1, true, null], [2, true, 1]]),
+    `q1 passed on try 1, kept on try 2: ${JSON.stringify(q1?.tries.map((t) => [t.tryNumber, t.pass, t.keptFrom]))}`,
+  );
+  check(
+    JSON.stringify(q3?.tries.map((t) => [t.tryNumber, t.pass])) === JSON.stringify([[1, false], [2, false]]) &&
+      q3?.tries.every((t) => t.text === answers()[0].value) === true &&
+      q3?.latestTip?.tryNumber === 2 && q3.latestTip.text === "Look at the end of the story again.",
+    `q3 not yet on tries 1 and 2, latest tip from try ${q3?.latestTip?.tryNumber}`,
+  );
+  const byReading = await loadTeacherAnswers(classId, teacherId, { readingId }, execute);
+  check(
+    JSON.stringify(answersFor(byReading, student, readingId)) === JSON.stringify(byStudent),
+    "by reading: the same answers for this student",
+  );
+
+  // Another teacher's class, reading, and student with a saved try.
+  const { id: theirClass } = await one<{ id: string }>(sql`
+    insert into classes (teacher_id, name, grade_level, join_code)
+    values (${otherTeacherId}, 'Other class', '3', ${`QO${RUN_ID}`.toUpperCase().slice(0, 8)}) returning id`);
+  const { id: theirReading } = await one<{ id: string }>(sql`
+    insert into readings (class_id, title, body_text, question_count, question_mode, status)
+    values (${theirClass}, 'Other reading', ${BODY}, 1, 'shared', 'published') returning id`);
+  const { id: theirQuestion } = await one<{ id: string }>(sql`
+    insert into questions (reading_id, student_id, position, prompt) values (${theirReading}, null, 1, 'Why?') returning id`);
+  const { id: theirStudent } = await one<{ id: string }>(sql`
+    insert into students (class_id, first_name, last_initials, name_key, session_token_hash)
+    values (${theirClass}, 'Other', 'K', 'other k', ${`hash_queue_${RUN_ID}_other`}) returning id`);
+  const { id: theirAttempt } = await one<{ id: string }>(sql`
+    insert into attempts (student_id, reading_id, try_number, result) values (${theirStudent}, ${theirReading}, 1, 'fail') returning id`);
+  await sql`insert into answers (attempt_id, question_id, text, ai_pass, ai_feedback)
+    values (${theirAttempt}, ${theirQuestion}, 'Because.', false, 'Say more.')`;
+
+  const leaks = {
+    otherTeacherOurClass: Object.keys(await loadTeacherAnswers(classId, otherTeacherId, { studentId: student }, execute)).length,
+    otherTeacherOurReading: Object.keys(await loadTeacherAnswers(classId, otherTeacherId, { readingId }, execute)).length,
+    usTheirClass: Object.keys(await loadTeacherAnswers(theirClass, teacherId, {}, execute)).length,
+    usTheirStudent: Object.keys(await loadTeacherAnswers(classId, teacherId, { studentId: theirStudent }, execute)).length,
+    usTheirReading: Object.keys(await loadTeacherAnswers(classId, teacherId, { readingId: theirReading }, execute)).length,
+    wrongClass: Object.keys(await loadTeacherAnswers(crypto.randomUUID(), teacherId, { studentId: student }, execute)).length,
+    malformed: Object.keys(await loadTeacherAnswers("not-a-uuid", teacherId, {}, execute)).length,
+  };
+  check(Object.values(leaks).every((n) => n === 0), `nothing across teachers or classes: ${JSON.stringify(leaks)}`);
+  const theirs = answersFor(await loadTeacherAnswers(theirClass, otherTeacherId, {}, execute), theirStudent, theirReading);
+  check(theirs.length === 1 && theirs[0].tries[0]?.text === "Because.", "the other teacher sees their own student's answer");
+  await sql`delete from classes where id = ${theirClass}`;
+  // 2 of 3 tries used.
+  expected.set(student, "in_progress");
+}
+
 async function checkStatusDerivation() {
   console.log("\n== STATUS: class view vs student view vs expected ==");
   const notStarted = await newStudent();
   expected.set(notStarted, "not_started");
+  // Every try failed, no note yet: Waiting on both sides (F3).
+  const outOfTries = await newStudent();
+  for (let i = 0; i < MAX_TRIES; i++) await submit(outOfTries, "fail", 5);
+  expected.set(outOfTries, "waiting");
   const status = await loadClassStatus(classId, teacherId, execute);
   let mismatches = 0;
   for (const [student, want] of expected) {
@@ -497,6 +569,7 @@ async function main(): Promise<void> {
     await checkSecondTab();
     await checkAutoClose();
     await checkOwnership();
+    await checkTeacherAnswers();
     await checkStatusDerivation();
   } finally {
     await cleanup();
