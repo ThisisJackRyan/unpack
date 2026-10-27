@@ -22,9 +22,6 @@ export const QUESTION_COUNT_MIN = 1;
 export const QUESTION_COUNT_MAX = 10;
 export const QUESTION_COUNT_DEFAULT = 3;
 
-export const READING_SOURCES = ["link", "text"] as const;
-export type ReadingSource = (typeof READING_SOURCES)[number];
-
 // What the form shows again after an error, as typed (only trimmed).
 export type ReadingFormValues = {
   source: string;

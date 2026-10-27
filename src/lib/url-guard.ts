@@ -1,3 +1,4 @@
+import "server-only";
 import { lookup as dnsLookup } from "node:dns";
 import { BlockList, isIP, type LookupFunction } from "node:net";
 import { FetchArticleError } from "./fetch-errors";
@@ -26,23 +27,27 @@ const BLOCKED_V4: [string, number][] = [
   ["240.0.0.0", 4], // reserved, incl. broadcast 255.255.255.255
 ];
 
-const BLOCKED_V6: [string, number][] = [
-  // ::/128 (unspecified), ::1/128 (loopback), and the deprecated
-  // IPv4-compatible ::a.b.c.d form.
-  ["::", 96],
-  ["100::", 64], // discard-only
+// IPv6 is an allowlist: only global unicast 2000::/3 may be reached, so
+// loopback, unspecified, IPv4-compatible, IPv4-translated ::ffff:0:0:0/96,
+// discard-only, local-use NAT64, unique local, link-local, site-local,
+// multicast, 5f00::/16 and anything assigned later outside 2000::/3 are all
+// blocked without being listed. Embedded IPv4 (see embeddedIPv4) is
+// unwrapped before this and checked against the IPv4 list instead.
+const GLOBAL_UNICAST_V6: [string, number] = ["2000::", 3];
+
+// Special ranges inside 2000::/3 that are still not public web servers.
+const BLOCKED_GLOBAL_V6: [string, number][] = [
   ["2001::", 23], // IETF protocol assignments, incl. Teredo 2001::/32
   ["2001:db8::", 32], // documentation
-  ["64:ff9b:1::", 48], // local-use NAT64
-  ["fc00::", 7], // unique local, incl. AWS metadata fd00:ec2::254
-  ["fe80::", 10], // link-local
-  ["fec0::", 10], // site-local (deprecated)
-  ["ff00::", 8], // multicast
+  ["3fff::", 20], // documentation
 ];
 
 const blockList = new BlockList();
 for (const [net, prefix] of BLOCKED_V4) blockList.addSubnet(net, prefix, "ipv4");
-for (const [net, prefix] of BLOCKED_V6) blockList.addSubnet(net, prefix, "ipv6");
+for (const [net, prefix] of BLOCKED_GLOBAL_V6) blockList.addSubnet(net, prefix, "ipv6");
+
+const globalUnicast = new BlockList();
+globalUnicast.addSubnet(GLOBAL_UNICAST_V6[0], GLOBAL_UNICAST_V6[1], "ipv6");
 
 // Parses an IPv6 address (with an optional trailing dotted IPv4 part) into
 // 8 16-bit groups. Returns undefined if it isn't valid IPv6.
@@ -80,7 +85,9 @@ function v4FromGroups(high: number, low: number): string {
 
 // The IPv4 address carried inside an IPv6 one, for the forms a host could
 // route to an internal v4 address: IPv4-mapped ::ffff:0:0/96, NAT64
-// 64:ff9b::/96, and 6to4 2002::/16.
+// 64:ff9b::/96, and 6to4 2002::/16. IPv4-translated ::ffff:0:a.b.c.d
+// (::ffff:0:0:0/96) is not unwrapped: it sits outside 2000::/3, so the
+// allowlist blocks it whatever v4 address it carries.
 export function embeddedIPv4(address: string): string | undefined {
   const g = ipv6Groups(address);
   if (!g) return undefined;
@@ -106,8 +113,24 @@ export function isBlockedAddress(address: string): boolean {
   if (!groups) return true;
   // Zone ids and odd spellings out of the way: check the canonical form.
   const canonical = groups.map((x) => x.toString(16)).join(":");
+  if (!globalUnicast.check(canonical, "ipv6")) return true;
   return blockList.check(canonical, "ipv6");
 }
+
+// What a fetch may connect to. The app only ever uses
+// DEFAULT_ADDRESS_POLICY. safeFetch's end-to-end tests swap in a policy that
+// allows 127.0.0.1 on any port, through a test-only option that safeFetch
+// refuses unless NODE_ENV is "test" (see SafeFetchOptions).
+export type AddressPolicy = {
+  isBlockedAddress: (address: string) => boolean;
+  // False: only ports 80 and 443.
+  allowAnyPort: boolean;
+};
+
+export const DEFAULT_ADDRESS_POLICY: AddressPolicy = Object.freeze({
+  isBlockedAddress,
+  allowAnyPort: false,
+});
 
 // Names that point inside a network by convention, and single-label names
 // (like "intranet") that only resolve through a local search domain.
@@ -125,7 +148,10 @@ export function isBlockedHostname(hostname: string): boolean {
 
 // Checks a URL against every rule that doesn't need DNS. Returns the parsed
 // URL, or throws FetchArticleError ("invalid_url" or "blocked").
-export function checkUrl(input: string | URL): URL {
+export function checkUrl(
+  input: string | URL,
+  policy: AddressPolicy = DEFAULT_ADDRESS_POLICY,
+): URL {
   let url: URL;
   try {
     url = new URL(input);
@@ -140,14 +166,19 @@ export function checkUrl(input: string | URL): URL {
   }
   // WHATWG URL drops a port that matches the scheme default, so "" here
   // means 80 for http and 443 for https.
-  if (url.port !== "" && url.port !== "80" && url.port !== "443") {
+  if (
+    !policy.allowAnyPort &&
+    url.port !== "" &&
+    url.port !== "80" &&
+    url.port !== "443"
+  ) {
     throw new FetchArticleError("blocked", url.hostname);
   }
   // WHATWG URL has already turned 2130706433, 0x7f.1, and 017700000001 into
   // 127.0.0.1, and wraps IPv6 in brackets.
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (isIP(host)) {
-    if (isBlockedAddress(host)) throw new FetchArticleError("blocked", host);
+    if (policy.isBlockedAddress(host)) throw new FetchArticleError("blocked", host);
   } else if (isBlockedHostname(host)) {
     throw new FetchArticleError("blocked", host);
   }
@@ -156,14 +187,18 @@ export function checkUrl(input: string | URL): URL {
 
 // Resolves a redirect's Location against the current URL and checks it with
 // the same rules as the first URL.
-export function checkRedirect(current: URL, location: string): URL {
+export function checkRedirect(
+  current: URL,
+  location: string,
+  policy: AddressPolicy = DEFAULT_ADDRESS_POLICY,
+): URL {
   let next: URL;
   try {
     next = new URL(location, current);
   } catch {
     throw new FetchArticleError("http_error", current.hostname);
   }
-  return checkUrl(next);
+  return checkUrl(next, policy);
 }
 
 export type ResolvedAddress = { address: string; family: number };
@@ -183,6 +218,7 @@ export const systemResolver: Resolver = (hostname) =>
 // checked here, never to a second, unchecked resolution (DNS rebinding).
 export function createGuardedLookup(
   resolver: Resolver = systemResolver,
+  policy: AddressPolicy = DEFAULT_ADDRESS_POLICY,
 ): LookupFunction {
   return (hostname, options, callback) => {
     resolver(hostname)
@@ -191,7 +227,7 @@ export function createGuardedLookup(
           options.family === 4 || options.family === 6
             ? all.filter((a) => a.family === options.family)
             : all;
-        if (all.some((a) => isBlockedAddress(a.address))) {
+        if (all.some((a) => policy.isBlockedAddress(a.address))) {
           throw new FetchArticleError("blocked", hostname);
         }
         if (wanted.length === 0) {

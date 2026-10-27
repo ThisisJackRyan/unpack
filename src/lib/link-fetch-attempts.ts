@@ -1,3 +1,4 @@
+import "server-only";
 import { getSql } from "@/db";
 import { checkLinkFetchLimit, type StatementExecutor } from "./link-rate-limit";
 

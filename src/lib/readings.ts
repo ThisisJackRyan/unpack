@@ -1,3 +1,4 @@
+import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, getSql, schema } from "@/db";
 import type { Class, Reading } from "@/db/schema";

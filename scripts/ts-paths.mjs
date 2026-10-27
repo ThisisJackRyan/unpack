@@ -2,6 +2,12 @@
 // outside Next: maps "@/..." to src/ and resolves extensionless relative
 // imports to .ts files, matching tsconfig's "bundler" resolution.
 // Used by `pnpm test` and the db scripts: node --import ./scripts/ts-paths.mjs
+//
+// It also resolves "server-only" with the "react-server" condition, the way
+// Next does for server code, so it loads the package's empty module instead
+// of throwing. Only that one specifier gets the condition: running all of
+// Node with --conditions=react-server would also switch react and other
+// packages to their server builds.
 import { existsSync, statSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,6 +24,12 @@ function isFile(url) {
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "server-only") {
+      return nextResolve(specifier, {
+        ...context,
+        conditions: [...context.conditions, "react-server"],
+      });
+    }
     const parent = context.parentURL;
     const fromApp =
       parent?.startsWith(root.href) && !parent.startsWith(nodeModules);
