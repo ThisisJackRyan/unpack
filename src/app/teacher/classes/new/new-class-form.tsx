@@ -2,13 +2,11 @@
 
 import { useActionState } from "react";
 import { GRADE_LEVELS, gradeLevelLabel } from "@/lib/grade-levels";
-import { focusRing, primaryButton } from "@/components/ui";
+import { field, primaryButton } from "@/components/ui";
 import { createClass } from "./actions";
 import { CLASS_NAME_MAX_LENGTH, type CreateClassState } from "./form-state";
 
 const initialState: CreateClassState = {};
-
-const field = `block min-h-12 w-full rounded-xl border bg-white border-zinc-300 px-4 text-lg text-zinc-950 aria-invalid:border-red-600 ${focusRing}`;
 
 export function NewClassForm() {
   const [state, formAction, pending] = useActionState(

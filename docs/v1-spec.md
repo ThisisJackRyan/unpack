@@ -1,4 +1,4 @@
-# unpack — v1 Features & Data Model (v1.0, approved direction, Oct 26, 2026)
+# unpack: v1 Features & Data Model (v1.0, approved direction, Oct 26, 2026)
 
 ## v1 features
 

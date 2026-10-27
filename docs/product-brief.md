@@ -1,4 +1,4 @@
-# unpack — Product Brief (draft v0.4, Oct 26, 2026)
+# unpack: Product Brief (draft v0.4, Oct 26, 2026)
 
 ## One line
 Students read an article, then answer a short AI-generated questionnaire, and they can't move on until the AI says they genuinely tried. It's a reading check that's hard to fake.

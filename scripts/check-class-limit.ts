@@ -14,6 +14,13 @@
 // point the driver at a local Neon proxy. Against a Neon dev branch, leave it
 // unset. Writes teachers named test_concurrency_<run>_<n> and deletes them
 // (and their classes, by cascade) at the end. Never run against production.
+//
+// Host guard: it only runs when the DATABASE_URL host is local (localhost,
+// 127.0.0.1, ::1, or db.localtest.me), or when CHECK_CLASS_LIMIT_HOST is
+// set to that exact host, to opt in for one Neon dev branch:
+//
+//   CHECK_CLASS_LIMIT_HOST=ep-example-123456.us-east-2.aws.neon.tech \
+//     ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-class-limit
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import { FREE_PLAN_CLASS_LIMIT, insertClassIfAllowed } from "@/lib/classes";
@@ -25,6 +32,26 @@ import {
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set. Refusing to run.");
+  process.exit(2);
+}
+const LOCAL_DB_HOSTS = ["localhost", "127.0.0.1", "::1", "db.localtest.me"];
+let dbHost: string;
+try {
+  dbHost = new URL(process.env.DATABASE_URL).hostname.replace(/^\[|\]$/g, "");
+} catch {
+  console.error("DATABASE_URL is not a valid URL. Refusing to run.");
+  process.exit(2);
+}
+if (
+  !LOCAL_DB_HOSTS.includes(dbHost) &&
+  process.env.CHECK_CLASS_LIMIT_HOST !== dbHost
+) {
+  console.error(
+    `Refusing to run against database host "${dbHost}". This script writes ` +
+      `and deletes rows, so it only runs against ${LOCAL_DB_HOSTS.join(", ")} ` +
+      `by default. To use a Neon dev branch, set CHECK_CLASS_LIMIT_HOST=${dbHost}. ` +
+      "Never use production.",
+  );
   process.exit(2);
 }
 if (process.env.ALLOW_DB_WRITES !== "1") {
