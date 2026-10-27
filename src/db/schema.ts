@@ -1,0 +1,215 @@
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+// Enums
+
+export const planEnum = pgEnum("plan", ["free", "paid"]);
+export const questionModeEnum = pgEnum("question_mode", [
+  "shared",
+  "per_student",
+]);
+export const readingStatusEnum = pgEnum("reading_status", [
+  "draft",
+  "published",
+]);
+export const attemptResultEnum = pgEnum("attempt_result", ["pass", "fail"]);
+export const challengeStatusEnum = pgEnum("challenge_status", [
+  "open",
+  "approved",
+  "denied",
+]);
+
+const createdAt = () =>
+  timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
+
+// Tables
+
+export const teachers = pgTable("teachers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  clerkUserId: text("clerk_user_id").notNull().unique(),
+  name: text("name"),
+  email: text("email").notNull(),
+  plan: planEnum("plan").notNull().default("free"),
+  createdAt: createdAt(),
+});
+
+export const classes = pgTable(
+  "classes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teacherId: uuid("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    gradeLevel: integer("grade_level").notNull(),
+    joinCode: text("join_code").notNull().unique(),
+    codeActive: boolean("code_active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [index("classes_teacher_id_idx").on(t.teacherId)],
+);
+
+export const readings = pgTable(
+  "readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    classId: uuid("class_id")
+      .notNull()
+      .references(() => classes.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    sourceUrl: text("source_url"),
+    bodyText: text("body_text").notNull(),
+    // Overrides the class grade level when set.
+    gradeLevel: integer("grade_level"),
+    questionCount: integer("question_count").notNull().default(3),
+    questionMode: questionModeEnum("question_mode").notNull().default("shared"),
+    status: readingStatusEnum("status").notNull().default("draft"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("readings_class_id_idx").on(t.classId),
+    check(
+      "readings_question_count_check",
+      sql`${t.questionCount} between 1 and 10`,
+    ),
+  ],
+);
+
+export const students = pgTable(
+  "students",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    classId: uuid("class_id")
+      .notNull()
+      .references(() => classes.id, { onDelete: "cascade" }),
+    firstName: text("first_name").notNull(),
+    lastInitials: text("last_initials").notNull(),
+    sessionToken: text("session_token").notNull().unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("students_class_id_name_unique").on(
+      t.classId,
+      t.firstName,
+      t.lastInitials,
+    ),
+  ],
+);
+
+export const questions = pgTable(
+  "questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => readings.id, { onDelete: "cascade" }),
+    // Null for shared questions; set for per-student question sets.
+    studentId: uuid("student_id").references(() => students.id, {
+      onDelete: "cascade",
+    }),
+    position: integer("position").notNull(),
+    prompt: text("prompt").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("questions_reading_id_student_id_idx").on(t.readingId, t.studentId),
+    index("questions_student_id_idx").on(t.studentId),
+  ],
+);
+
+export const attempts = pgTable(
+  "attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentId: uuid("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => readings.id, { onDelete: "cascade" }),
+    tryNumber: integer("try_number").notNull(),
+    result: attemptResultEnum("result").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("attempts_student_reading_try_unique").on(
+      t.studentId,
+      t.readingId,
+      t.tryNumber,
+    ),
+    index("attempts_reading_id_idx").on(t.readingId),
+    check("attempts_try_number_check", sql`${t.tryNumber} between 1 and 3`),
+  ],
+);
+
+export const answers = pgTable(
+  "answers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    attemptId: uuid("attempt_id")
+      .notNull()
+      .references(() => attempts.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id")
+      .notNull()
+      .references(() => questions.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    aiPass: boolean("ai_pass").notNull(),
+    aiFeedback: text("ai_feedback"),
+  },
+  (t) => [
+    unique("answers_attempt_question_unique").on(t.attemptId, t.questionId),
+    index("answers_question_id_idx").on(t.questionId),
+  ],
+);
+
+export const challenges = pgTable(
+  "challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentId: uuid("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => readings.id, { onDelete: "cascade" }),
+    note: text("note").notNull(),
+    status: challengeStatusEnum("status").notNull().default("open"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    // Not in the v1 spec; added so the challenge queue can be ordered.
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("challenges_student_id_reading_id_idx").on(t.studentId, t.readingId),
+    index("challenges_reading_id_status_idx").on(t.readingId, t.status),
+  ],
+);
+
+// Inferred types
+
+export type Teacher = typeof teachers.$inferSelect;
+export type NewTeacher = typeof teachers.$inferInsert;
+export type Class = typeof classes.$inferSelect;
+export type NewClass = typeof classes.$inferInsert;
+export type Reading = typeof readings.$inferSelect;
+export type NewReading = typeof readings.$inferInsert;
+export type Question = typeof questions.$inferSelect;
+export type NewQuestion = typeof questions.$inferInsert;
+export type Student = typeof students.$inferSelect;
+export type NewStudent = typeof students.$inferInsert;
+export type Attempt = typeof attempts.$inferSelect;
+export type NewAttempt = typeof attempts.$inferInsert;
+export type Answer = typeof answers.$inferSelect;
+export type NewAnswer = typeof answers.$inferInsert;
+export type Challenge = typeof challenges.$inferSelect;
+export type NewChallenge = typeof challenges.$inferInsert;
