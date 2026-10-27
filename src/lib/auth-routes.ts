@@ -16,6 +16,12 @@ export const SIGN_UP_PATH = "/sign-up";
 // first-run onboarding and the deleted-account refusal both run through).
 export const AFTER_AUTH_PATH = "/home";
 
+// Where signing out lands: our landing page, not Clerk's hosted Account
+// Portal (accounts.dev). Passed to ClerkProvider as afterSignOutUrl, so
+// every UserButton's "Sign out" uses it. @clerk/nextjs reads no env var
+// for it, so there is nothing to set on the deploy.
+export const AFTER_SIGN_OUT_PATH = "/";
+
 // Account routes require a Clerk session (createRouteMatcher patterns).
 export const ACCOUNT_ROUTE_PATTERNS = [
   "/teacher(.*)",

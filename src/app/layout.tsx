@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono, Nunito } from "next/font/google";
 import { ClerkAvatarAlt } from "@/components/clerk-avatar-alt";
-import { AFTER_AUTH_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
+import { AFTER_AUTH_PATH, AFTER_SIGN_OUT_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 import { clerkAppearance } from "@/lib/clerk-appearance";
 import "./globals.css";
 
@@ -47,13 +47,15 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         {/* Clerk's links between sign-in and sign-up stay on our own pages,
-            and its components wear the app's colors, radius and type. */}
+            signing out lands on our landing page, and its components wear
+            the app's colors, radius and type. */}
         <ClerkProvider
           appearance={clerkAppearance}
           signInUrl={SIGN_IN_PATH}
           signUpUrl={SIGN_UP_PATH}
           signInFallbackRedirectUrl={AFTER_AUTH_PATH}
           signUpFallbackRedirectUrl={AFTER_AUTH_PATH}
+          afterSignOutUrl={AFTER_SIGN_OUT_PATH}
         >
           {children}
           {/* Clerk's avatar alt is "'s logo" for an account with no name. */}

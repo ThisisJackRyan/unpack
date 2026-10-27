@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ACCOUNT_ROUTE_PATTERNS, AFTER_AUTH_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "./auth-routes";
+import { ACCOUNT_ROUTE_PATTERNS, AFTER_AUTH_PATH, AFTER_SIGN_OUT_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "./auth-routes";
 
 // Every pattern is a plain prefix followed by "(.*)".
 function isProtected(path: string): boolean {
@@ -38,4 +38,16 @@ test("the landing page's Get started goes to sign-up and Sign in to sign-in", ()
   const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(page, /href=\{SIGN_UP_PATH\}[^>]*>\s*Get started/);
   assert.match(page, /href=\{SIGN_IN_PATH\}[^>]*>\s*Sign in/);
+});
+
+test("signing out lands on the landing page, set once on ClerkProvider", () => {
+  assert.equal(AFTER_SIGN_OUT_PATH, "/");
+  assert.equal(isProtected(AFTER_SIGN_OUT_PATH), false);
+  const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  assert.match(layout, /<ClerkProvider[^>]*afterSignOutUrl=\{AFTER_SIGN_OUT_PATH\}/);
+  // No UserButton overrides it.
+  for (const path of ["../components/account-shell.tsx", "../app/teacher/layout.tsx"]) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.match(source, /<UserButton \/>/, path);
+  }
 });
