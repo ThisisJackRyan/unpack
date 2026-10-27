@@ -6,7 +6,7 @@ import { focusRing } from "./ui";
 // is hidden from screen readers, so the name read out is just "unpack".
 export function Wordmark() {
   return (
-    <span className="inline-flex items-center gap-2 text-2xl font-extrabold tracking-tight">
+    <span className="inline-flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight">
       <LogoMark className="h-9 w-9" />
       <span>
         <span className="text-primary-700">un</span>

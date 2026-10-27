@@ -33,13 +33,13 @@ export const clerkAppearance: Appearance = {
   variables: {
     ...CLERK_COLORS,
     fontFamily: "var(--font-sans), ui-sans-serif, system-ui, sans-serif",
-    fontFamilyButtons: "var(--font-sans), ui-sans-serif, system-ui, sans-serif",
+    fontFamilyButtons: "var(--font-display)",
     fontSize: "1rem",
     borderRadius: "1rem",
   },
   elements: {
     cardBox: "rounded-3xl border-2 border-ink-200 shadow-card",
-    headerTitle: "text-2xl font-bold tracking-tight text-ink-950",
+    headerTitle: "font-display text-2xl font-bold tracking-tight text-ink-950",
     headerSubtitle: "text-base text-ink-700",
     formFieldLabel: "text-base font-semibold text-ink-950",
     formFieldHintText: "text-base text-ink-700",

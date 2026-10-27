@@ -11,7 +11,7 @@ export const focusRing =
 const press =
   "transition-colors not-disabled:active:shadow-none motion-safe:not-disabled:active:translate-y-1 motion-safe:transition-[color,background-color,box-shadow,translate]";
 
-export const primaryButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-primary-600 px-6 text-base font-bold text-white shadow-lip-primary hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${focusRing}`;
+export const primaryButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-primary-600 px-6 font-display text-base font-bold text-white shadow-lip-primary hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${focusRing}`;
 
 // The big student action: full height (56px) and larger text. Width and
 // alignment are up to the page.
@@ -25,7 +25,7 @@ export const accentButtonLarge = primaryButtonLarge
   .replace("shadow-lip-primary", "shadow-lip-sunny")
   .replace("hover:bg-primary-700", "hover:bg-sunny-400");
 
-export const secondaryButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-ink-400 bg-white px-6 text-base font-bold text-ink-900 shadow-lip-ink hover:bg-ink-50 ${press} ${focusRing}`;
+export const secondaryButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-ink-400 bg-white px-6 font-display text-base font-bold text-ink-900 shadow-lip-ink hover:bg-ink-50 ${press} ${focusRing}`;
 
 export const secondaryButtonLarge = secondaryButton.replace("min-h-12", "min-h-14").replace("text-base", "text-lg").replace("px-6", "px-8");
 
@@ -49,10 +49,10 @@ export const textLink = `rounded font-semibold text-primary-700 underline underl
 const dangerFocusRing =
   "focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-danger-600";
 
-export const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-danger-600 px-6 text-base font-bold text-white shadow-lip-danger hover:bg-danger-700 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${dangerFocusRing}`;
+export const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-danger-600 px-6 font-display text-base font-bold text-white shadow-lip-danger hover:bg-danger-700 disabled:cursor-not-allowed disabled:opacity-60 ${press} ${dangerFocusRing}`;
 
 // The full-size opener of a delete's confirm (the reading delete): red
 // text and border on white, so the solid red stays for the confirm.
-export const dangerOutlineButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-danger-600 bg-white px-6 text-base font-bold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
+export const dangerOutlineButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-danger-600 bg-white px-6 font-display text-base font-bold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
 
 export const dangerGhostButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-base font-semibold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;

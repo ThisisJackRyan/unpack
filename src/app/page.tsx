@@ -21,7 +21,10 @@ export default function Home() {
         <div className="flex flex-col gap-10">
           <div className="flex flex-col gap-4">
             <h1 className="text-4xl font-bold tracking-tight text-ink-950 sm:text-5xl">
-              Read it. Answer in your own words. Show you really tried.
+              <span className="text-primary-700">Read it.</span> Answer in your own words.{" "}
+              <span className="underline decoration-sunny-400 decoration-wavy decoration-4 underline-offset-8 [text-decoration-skip-ink:none]">
+                Show you really tried.
+              </span>
             </h1>
             <p className="max-w-xl text-lg text-ink-700">
               Paste any article or text and get a few questions about it. Your answers get a quick check for effort,
