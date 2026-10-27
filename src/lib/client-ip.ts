@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { isProduction, type Env } from "./env";
 
 // The join rate limit's keys. Pure (takes a header getter, and the IP
 // hash secret can be passed in), so tests don't need next/headers or a
@@ -108,15 +109,6 @@ export const DEV_JOIN_IP_HASH_SECRET = "dev-only-join-ip-hash-secret-not-for-pro
 export const JOIN_IP_HASH_SECRET_PLACEHOLDER = "replace_me_with_openssl_rand_base64_32";
 
 export const JOIN_IP_HASH_SECRET_MIN_LENGTH = 32;
-
-type Env = Partial<Record<string, string | undefined>>;
-
-// Production is NODE_ENV=production or, on Vercel, VERCEL_ENV=production
-// (so a production deployment is held to the rules even if NODE_ENV were
-// ever set otherwise).
-function isProduction(env: Env): boolean {
-  return env.NODE_ENV === "production" || env.VERCEL_ENV === "production";
-}
 
 // The key for hashJoinIp, from JOIN_IP_HASH_SECRET. In production a
 // missing or short secret, the .env.example placeholder, or the public dev

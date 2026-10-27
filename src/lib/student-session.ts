@@ -1,5 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { isProduction } from "./env";
 import {
   STUDENT_SESSION_COOKIE,
   studentSessionCookieOptions,
@@ -19,7 +20,7 @@ export async function setStudentSessionCookie(token: string): Promise<void> {
   store.set(
     STUDENT_SESSION_COOKIE,
     token,
-    studentSessionCookieOptions(process.env.NODE_ENV === "production"),
+    studentSessionCookieOptions(isProduction()),
   );
 }
 

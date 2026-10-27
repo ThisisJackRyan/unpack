@@ -1,3 +1,4 @@
+import { isProduction, type Env } from "./env";
 import { JOIN_FAILED_MESSAGE } from "./validate-join";
 
 // The bot check on joining a class: a Cloudflare Turnstile token from the
@@ -5,9 +6,8 @@ import { JOIN_FAILED_MESSAGE } from "./validate-join";
 // (the env, fetch, and loggers are injectable), so tests cover every
 // outcome without a network.
 //
-// On or off (botCheckConfig). Production is NODE_ENV=production or
-// VERCEL_ENV=production, the same test as JOIN_IP_HASH_SECRET
-// (client-ip.ts):
+// On or off (botCheckConfig). Production is isProduction (env.ts), the
+// same test as JOIN_IP_HASH_SECRET (client-ip.ts):
 // - TURNSTILE_DISABLED=1 (exactly "1"): off, keys or not. Outside
 //   production that's all. In production it is the one way to run
 //   without the check, an explicit opt-out, and every join logs a
@@ -73,14 +73,6 @@ export const BOT_CHECK_MISSING_MESSAGE = "Finish the check above the button, the
 // Turnstile said no, or we couldn't reach it.
 export const BOT_CHECK_FAILED_MESSAGE = "We couldn’t check that you’re a person. Try again in a moment.";
 
-type Env = Partial<Record<string, string | undefined>>;
-
-// Same rule as client-ip.ts: NODE_ENV=production or, on Vercel,
-// VERCEL_ENV=production.
-export function isProductionEnv(env: Env): boolean {
-  return env.NODE_ENV === "production" || env.VERCEL_ENV === "production";
-}
-
 export type BotCheckConfig =
   // "no_keys": outside production with neither key. "disabled":
   // TURNSTILE_DISABLED=1; `warn` is set in production.
@@ -129,13 +121,13 @@ export function expectedHostnames(env: Env, secretKey: string): string[] | null 
   if (TURNSTILE_TEST_SECRET_KEYS.includes(secretKey)) return null;
   const listed = (env.TURNSTILE_EXPECTED_HOSTNAMES ?? "").split(",").map(hostOf).filter(Boolean);
   if (listed.length > 0) return listed;
-  if (!isProductionEnv(env)) return null;
+  if (!isProduction(env)) return null;
   const vercel = [env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_BRANCH_URL, env.VERCEL_URL].map((v) => hostOf(v ?? "")).filter(Boolean);
   return vercel.length > 0 ? [...new Set(vercel)] : null;
 }
 
 export function botCheckConfig(env: Env = process.env): BotCheckConfig {
-  const production = isProductionEnv(env);
+  const production = isProduction(env);
   if (env.TURNSTILE_DISABLED === "1") {
     return production
       ? { status: "off", reason: "disabled", warn: BOT_CHECK_DISABLED_WARNING }
