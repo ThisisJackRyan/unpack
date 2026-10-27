@@ -1,3 +1,6 @@
+/* Clerk's component styles go in their own layer, below Tailwind's
+   utilities, so the classes in src/lib/clerk-appearance.ts win. */
+@layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 
 /* Light-only for now: no dark override, so pages render consistently. */
