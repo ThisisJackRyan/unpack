@@ -14,7 +14,7 @@ describe("pass celebration", () => {
     assert.equal(KEPT_GOING_LINE, "You kept going and got there. That’s how strong readers grow.");
     for (const line of [FIRST_TRY_LINE, KEPT_GOING_LINE]) {
       assert.ok(!line.includes("'"), line);
-      assert.ok(!line.includes("—"), line);
+      assert.ok(!line.includes("\u2014"), line);
     }
   });
 
