@@ -236,6 +236,18 @@ describe("getOrCreateStudentQuestionsWith", () => {
     assert.deepEqual(questions.get(`${READING}:${STUDENT}`)?.map((q) => q.prompt), ["A?", "B?", "C?"]);
   });
 
+  it("returns pending when a claim seen at insert time was released before the recheck", async () => {
+    const { store, claims } = fakeStore();
+    // The claim insert hit another request's pending claim, which that
+    // request released before the claim batch read why: no claim is left.
+    store.claim = async () => "exists";
+    const writer = fakeWriter();
+    const result = await getOrCreateStudentQuestionsWith(READING, STUDENT, { store, write: writer.write, newToken });
+    assert.equal(result.status, "pending");
+    assert.equal(writer.calls(), 0);
+    assert.equal(claims.size, 0);
+  });
+
   it("never regenerates once done, even if the cache read raced", async () => {
     const { store, claims } = fakeStore();
     claims.set(`${READING}:${STUDENT}`, { token: "old", status: "done", claimedAt: 0 });
@@ -468,7 +480,7 @@ describe("student question statements", () => {
     assert.equal(claimOutcome(claimed, 150), "claimed");
     assert.equal(claimOutcome([[{}], [], [], [{ has_claim: true, eligible: false, claims: 150 }]], 150), "exists");
     assert.equal(claimOutcome([[{}], [], [], [{ has_claim: false, eligible: true, claims: 150 }]], 150), "limit_reached");
-    assert.equal(claimOutcome([[{}], [], [], [{ has_claim: false, eligible: true, claims: 149 }]], 150), "refused");
+    assert.equal(claimOutcome([[{}], [], [], [{ has_claim: false, eligible: true, claims: 149 }]], 150), "exists");
     assert.equal(claimOutcome([[], [], [], [{ has_claim: false, eligible: false, claims: 0 }]], 150), "refused");
   });
 
@@ -477,7 +489,7 @@ describe("student question statements", () => {
     assert.equal(claimOutcome(row(3, 3), 150), "throttled");
     assert.equal(claimOutcome(row(0, 6), 150), "calls_used_up");
     assert.equal(claimOutcome(row(3, 6), 150), "calls_used_up");
-    assert.equal(claimOutcome(row(2, 5), 150), "refused");
+    assert.equal(claimOutcome(row(2, 5), 150), "exists");
   });
 
   it("refuses a student who doesn't qualify even at the cap", () => {

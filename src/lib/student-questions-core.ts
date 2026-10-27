@@ -376,7 +376,12 @@ export function claimOutcome(results: Record<string, unknown>[][], limit: number
   if (row?.eligible !== true) return "refused";
   // The reading's cap first: after a break it would still be full.
   if (Number(row?.claims ?? 0) >= limit) return "limit_reached";
-  return throttleFromRow(row) ?? "refused";
+  // Eligible, under the cap and the throttle, yet nothing inserted: the
+  // insert hit another request's pending claim, which that request then
+  // released (its model call failed; release doesn't take the reading
+  // lock) before statement 4's fresh snapshot. Say "exists" so the caller
+  // tries a takeover, finds nothing stale, and returns pending to retry.
+  return throttleFromRow(row) ?? "exists";
 }
 
 // The takeover, as ONE READ COMMITTED transaction:
