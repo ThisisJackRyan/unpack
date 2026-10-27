@@ -102,12 +102,12 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
             Join code
           </h2>
           {found.codeActive ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-2.5 py-0.5 text-sm font-medium text-primary-700">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-3 py-1 text-base font-semibold text-primary-700">
               <span aria-hidden="true" className="h-2 w-2 rounded-full bg-primary-600" />
               Code is on
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-ink-100 px-2.5 py-0.5 text-sm font-medium text-ink-700">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-ink-100 px-3 py-1 text-base font-semibold text-ink-700">
               <span aria-hidden="true" className="h-2 w-2 rounded-full bg-ink-400" />
               Code is off
             </span>
@@ -208,7 +208,7 @@ function ToolLink({
           {count !== undefined && count > 0 && (
             <span
               aria-hidden="true"
-              className="inline-flex min-w-7 items-center justify-center rounded-full bg-primary-600 px-2 py-0.5 text-sm font-semibold text-white tabular-nums"
+              className="inline-flex min-w-8 items-center justify-center rounded-full bg-primary-600 px-2.5 py-0.5 text-base font-semibold text-white tabular-nums"
             >
               {count}
             </span>

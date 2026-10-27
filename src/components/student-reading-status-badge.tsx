@@ -26,15 +26,15 @@ export function StudentReadingStatusBadge({
   // Whose screen: the labels differ for Waiting and Challenged (see
   // reading-progress.ts).
   audience: "student" | "teacher";
-  // "sm" for the teacher's table.
+  // "sm" for the teacher's table (16px); the student's own list is 18px.
   size?: "base" | "sm";
 }) {
   const tone = TONES[status];
   const labels = audience === "teacher" ? TEACHER_READING_STATUS_LABELS : STUDENT_READING_STATUS_LABELS;
   return (
-    <span className={`${pill} ${tone.pill} ${size === "sm" ? "text-sm" : "text-base"}`}>
+    <span className={`${pill} ${tone.pill} ${size === "sm" ? "text-base" : "text-lg"}`}>
       {status === "passed" ? (
-        <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
           <path
             fillRule="evenodd"
             d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0L3.3 9.7a1 1 0 1 1 1.4-1.4l3.8 3.8 6.8-6.8a1 1 0 0 1 1.4 0Z"
@@ -42,7 +42,7 @@ export function StudentReadingStatusBadge({
           />
         </svg>
       ) : (
-        <span aria-hidden="true" className={`h-2 w-2 rounded-full ${tone.dot}`} />
+        <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${tone.dot}`} />
       )}
       {labels[status]}
     </span>
@@ -58,8 +58,8 @@ export const NEEDS_RESET_LABEL = "Needs a reset";
 
 export function NeedsResetBadge({ size = "base" }: { size?: "base" | "sm" }) {
   return (
-    <span className={`${pill} bg-white text-warning-900 ring-1 ring-warning-300 ring-inset ${size === "sm" ? "text-sm" : "text-base"}`}>
-      <span aria-hidden="true" className="h-2 w-2 rounded-full border-2 border-warning-500" />
+    <span className={`${pill} bg-white text-warning-900 ring-1 ring-warning-300 ring-inset ${size === "sm" ? "text-base" : "text-lg"}`}>
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full border-2 border-warning-500" />
       {NEEDS_RESET_LABEL}
     </span>
   );

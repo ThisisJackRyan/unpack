@@ -41,13 +41,13 @@ export function LightbulbIcon({ className = "h-5 w-5" }: { className?: string })
 
 export function ResultBadge({ pass }: { pass: boolean }) {
   return pass ? (
-    <span className={`${pill} bg-success-50 px-3 py-1 text-lg text-success-800`}>
-      <CheckIcon />
+    <span className={`${pill} bg-success-50 px-4 py-1.5 text-lg text-success-800`}>
+      <CheckIcon className="h-5 w-5" />
       Looks good
     </span>
   ) : (
-    <span className={`${pill} bg-warning-50 px-3 py-1 text-lg text-warning-900`}>
-      <RetryIcon />
+    <span className={`${pill} bg-warning-50 px-4 py-1.5 text-lg text-warning-900`}>
+      <RetryIcon className="h-5 w-5" />
       Needs more
     </span>
   );
@@ -55,8 +55,8 @@ export function ResultBadge({ pass }: { pass: boolean }) {
 
 export function Nudge({ id, text }: { id?: string; text: string }) {
   return (
-    <p id={id} className="flex gap-2.5 rounded-2xl bg-warning-50 px-4 py-3 text-lg leading-relaxed text-warning-950">
-      <LightbulbIcon className="mt-1 h-5 w-5 shrink-0 text-warning-700" />
+    <p id={id} className="flex gap-3 rounded-2xl bg-warning-50 px-5 py-4 text-xl leading-relaxed text-warning-950">
+      <LightbulbIcon className="mt-1 h-6 w-6 shrink-0 text-warning-700" />
       <span>
         <span className="font-semibold">Tip: </span>
         {text}
@@ -89,7 +89,7 @@ export function LockedAnswer({ question, text }: { question: StudentQuestion; te
         </p>
       </div>
       <div className="flex flex-col items-start gap-3 sm:pl-14">
-        <span className={`${pill} bg-success-50 px-3 py-1 text-lg text-success-800`}>
+        <span className={`${pill} bg-success-50 px-4 py-1.5 text-lg text-success-800`}>
           <CheckIcon />
           Done
         </span>

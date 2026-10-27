@@ -95,7 +95,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
   return (
     <form onSubmit={onSubmit} noValidate aria-busy={pending} className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        <span className={`${pill} bg-primary-100 px-4 py-1.5 text-lg font-bold text-primary-800`}>
+        <span className={`${pill} bg-primary-100 px-5 py-2 text-xl font-bold text-primary-800`}>
           {extraTry ? "1 try left" : `Try ${tryNumber} of ${maxTries}`}
         </span>
         <span className="text-lg text-ink-700">Copy and paste are off. Use your own words.</span>

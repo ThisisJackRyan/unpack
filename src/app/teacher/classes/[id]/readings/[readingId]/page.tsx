@@ -143,7 +143,7 @@ export default async function ReadingPage({ params, searchParams }: Props) {
                 />
               </div>
               {shared && (
-                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink-100 px-2.5 py-0.5 text-sm font-medium text-ink-700">
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink-100 px-3 py-1 text-base font-semibold text-ink-700">
                   <LockIcon />
                   Locked
                 </span>

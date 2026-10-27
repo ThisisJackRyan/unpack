@@ -566,7 +566,7 @@ export function QuestionNumber({ n }: { n: number }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-sm font-semibold text-primary-700 tabular-nums"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-50 text-base font-semibold text-primary-700 tabular-nums"
     >
       {n}
     </span>

@@ -38,8 +38,9 @@ export const card = "rounded-3xl border-2 border-ink-200 bg-white shadow-card";
 
 export const field = `block min-h-12 w-full rounded-2xl border-2 bg-white border-ink-400 px-4 text-ink-950 aria-invalid:border-danger-600 ${focusRing}`;
 
+// Badges and counters: roomy padding, so the words read easily (F7).
 export const pill =
-  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 font-semibold";
+  "inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1 font-semibold";
 
 // An inline text link in a sentence.
 export const textLink = `rounded font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`;
