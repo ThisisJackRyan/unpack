@@ -1,4 +1,4 @@
-# unpack: Product Brief (draft v0.6, Oct 27, 2026)
+# unpack: Product Brief (draft v0.7, Oct 27, 2026)
 
 ## One line
 Students read an article, then answer a short AI-generated questionnaire, and they can't move on until the AI says they genuinely tried. It's a reading check that's hard to fake.
@@ -6,7 +6,7 @@ Students read an article, then answer a short AI-generated questionnaire, and th
 ## Who it's for
 - **Paying customer:** teachers, starting with individual teachers rather than districts.
 - **Users:** students from about 2nd/3rd grade and up. No student accounts: they enter a class code and their name.
-- **Self-learners (PR 13):** people 13 or older reading for themselves. They sign in with Clerk, choose "I’m reading for myself", and use the same read, answer, and effort check loop on anything they paste, with 5 new readings per rolling 7 days free. No class, no teacher, no challenge. A paid self-learner plan is TBD.
+- **Self-learners (PR 13):** people 13 or older reading for themselves. They sign in with Clerk, choose "I’m reading for myself", and use the same read, answer, and effort check loop on anything they paste, with 5 new readings per rolling 7 days free (a reading whose questions never get written doesn't use one). No class, no teacher, no challenge. A paid self-learner plan is TBD.
 - **Later:** a browser extension (deferred).
 
 ## Core loop
@@ -32,7 +32,7 @@ Nothing we found ships this full loop. Actively Learn gates but doesn't use AI j
 - Teacher: paste a link or text, review/edit questions (optional), share a code.
 - Student: join with code + name, read view with copy-paste blocked, questionnaire, AI pass/fail with nudges, 3 tries, then a note to the teacher (Accept counts as Passed; Deny, optionally with one more try).
 - Teacher visibility: lightweight (who's done, who's stuck) plus a queue of student challenges, not a grade dashboard.
-- Cost protection: teacher-owned codes that can be turned on and off or replaced, a cap of 150 student question sets per reading (a teacher can raise it once per reading, to 300, and the raise is logged), a "Try again" limit on each student's own question set (3 AI calls per 10 minutes, counting every call, including failed ones given back; 6 in all, counting only calls the model answered; a teacher can reset it with "Let them try again"), questions cached per reading, join rate limits per code and IP, one effort check per attempt with 6 per student per reading by default (+2 with each extra try a teacher gives), and a bot check on join (Cloudflare Turnstile; teacher sign-up uses Clerk's own "Challenge suspicious sign-ups"). No per-teacher AI budget.
+- Cost protection: teacher-owned codes that can be turned on and off or replaced, a cap of 150 student question sets per reading (a teacher can raise it once per reading, to 300, and the raise is logged), a "Try again" limit on each student's own question set (3 AI calls per 10 minutes, counting every call, including failed ones given back; 6 in all, counting only calls the model answered; a teacher can reset it with "Let them try again"), questions cached per reading, join rate limits per code and IP, one effort check per attempt with 6 per student per reading by default (+2 with each extra try a teacher gives; a check that fails with no reply from the AI, as in an outage, is given back and doesn't count), and a bot check on join (Cloudflare Turnstile; teacher sign-up uses Clerk's own "Challenge suspicious sign-ups"). No per-teacher AI budget.
 
 ## Non-goals for v1
 Self-learner browser extension, district sales/rostering, quality grading, a fixed content library.
@@ -46,7 +46,10 @@ SaaS teacher subscription.
 - **Self-learners:** free plan, 5 new readings per rolling 7 days. Paid self-learner plan TBD (the allowance is one function keyed by plan, ready for it).
 
 ## Stack (locked)
-Next.js 16 on **Vercel**, **Neon** Postgres (cloud, with a dev branch), and **Clerk** auth (teachers and self-learners; students join with a code and name), and **Claude** for AI.
+- Next.js 16 on **Vercel**
+- **Neon** Postgres (cloud, with a dev branch)
+- **Clerk** auth (teachers and self-learners; students join with a code and name)
+- Claude via Vercel AI Gateway, pinned to Anthropic
 
 ## Risks
 - False rejections frustrating struggling readers (handled by 3 tries plus a teacher challenge).

@@ -40,7 +40,7 @@ describe("retryAtSentence", () => {
   it("joins a limiter's message and the sentence, with no em dashes", () => {
     const text = withRetryAt("Paused for a bit.", new Date("2026-10-27T14:40:00Z"), ny);
     assert.equal(text, "Paused for a bit. You can try again at 10:40 AM.");
-    assert.equal(/—/.test(text), false);
+    assert.equal(text.includes(String.fromCharCode(0x2014)), false);
   });
 
   it("is the same helper the weekly allowance uses (moved, not copied)", () => {

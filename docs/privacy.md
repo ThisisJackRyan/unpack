@@ -1,6 +1,6 @@
 # unpack: Student and self-learner data and privacy (v1, Oct 27, 2026)
 
-unpack is used by children, so we collect as little as we can and say exactly what we keep. This page lists every place student data is stored, column by column, why it's there, who can see it, and how long it stays. It covers the code as of PR 13 (which added self-learner accounts; see [Self-learner data](#self-learner-data-added-in-pr-13)); update it with any change to `src/db/schema.ts`.
+unpack is used by children, so we collect as little as we can and say exactly what we keep. This page lists every place student data is stored, column by column, why it's there, who can see it, and how long it stays. It covers the code as of PR 15 (PR 13 added self-learner accounts, see [Self-learner data](#self-learner-data-added-in-pr-13); PR 15 added the deleted accounts list and the given_back and slot columns); update it with any change to `src/db/schema.ts`.
 
 ## What a student gives us
 
@@ -53,7 +53,7 @@ id, attempt_id, question_id, **text** (what the student wrote, up to 1,000 chara
 
 ### `effort_checks` (one row per AI effort check)
 
-id, student_id, reading_id, created_at, finished_at, outcome (pass/fail/error). Counts checks toward the limit. No text. Cascade from `students` and `readings`.
+id, student_id, reading_id, created_at, finished_at, outcome (pass/fail/error/given_back). Counts checks toward the limit. A check that failed with no reply from the model (an outage, a timeout, out of credits) is marked given_back (PR 15): it doesn't count toward the limit, only toward a 10-minute window that pauses checking during an outage. No text. Cascade from `students` and `readings`.
 
 ### `challenges` (notes to the teacher)
 
@@ -65,7 +65,7 @@ id, key_kind (ip/code), key_hash, created_at. For an IP, key_hash is an HMAC-SHA
 
 ### Not student data
 
-`teachers` (now every Clerk account: teachers and self-learners, see below), `classes`, `readings`, `link_fetch_attempts`, `question_generation_attempts`, and `reading_cap_raises` (added in PR 12: which teacher raised a reading's student limit, when, and from and to what) hold teacher data and teacher-side counters only.
+`teachers` (now every Clerk account: teachers and self-learners, see below), `deleted_clerk_users` (above), `classes`, `readings`, `link_fetch_attempts`, `question_generation_attempts`, and `reading_cap_raises` (added in PR 12: which teacher raised a reading's student limit, when, and from and to what) hold teacher data and teacher-side counters only.
 
 ### `deleted_clerk_users` (deleted accounts, added in PR 15)
 
@@ -86,7 +86,7 @@ The name and email in this row come from Clerk, as for teachers.
 
 ### `self_readings` (one row per reading a self-learner starts)
 
-id, account_id, title, source_url (if they pasted a link), body_text (the text they pasted or we fetched), grade_level (the level they picked), question_count, status (in progress, passed, moved on), finished_at, questions_claim_token and questions_claimed_at (a random UUID and a time, while their questions are being written), created_at. created_at also counts toward the 5 per 7 days allowance, so rows aren't deleted by the self-learner. Cascade from `teachers`.
+id, account_id, title, source_url (if they pasted a link), body_text (the text they pasted or we fetched), grade_level (the level they picked), question_count, status (in progress, passed, moved on), finished_at, questions_claim_token and questions_claimed_at (a random UUID and a time, while their questions are being written), slot_released_at (PR 15: set when their questions failed to be written, so the reading doesn't use one of their 5), created_at. created_at also counts toward the 5 per 7 days allowance, so rows aren't deleted by the self-learner. Cascade from `teachers`.
 
 ### `self_questions`
 
@@ -102,7 +102,7 @@ id, attempt_id, question_id, **text** (what they wrote, up to 1,000 characters),
 
 ### `self_effort_checks` (one row per AI effort check)
 
-id, account_id, reading_id, created_at, finished_at, outcome (pass/fail/error). Counts checks toward the limit. No text. Cascade from `teachers` and `self_readings`.
+id, account_id, reading_id, created_at, finished_at, outcome (pass/fail/error/given_back, as for `effort_checks`). Counts checks toward the limit. No text. Cascade from `teachers` and `self_readings`.
 
 A self-learner's question writes and link fetches are also counted in `question_generation_attempts` and `link_fetch_attempts` (ids and times only, pruned after a day), the same per-account limits teachers have.
 
@@ -123,7 +123,7 @@ Until the Clerk account is deleted. Self-learners can't delete single readings i
 - **Vercel AI Gateway** (since PR 14) carries every AI request: the reading text (to write questions), and the reading text, the questions, and the student's (or self-learner's) answers (for the effort check). It passes each request to Anthropic and the reply back. **No names, no ids, no session or class data** are sent. We set the gateway to route only to Anthropic (not to other hosts of Claude, such as Amazon Bedrock or Google Vertex AI). This is deliberate: these requests carry children's writing, so we keep the list of processors as short as we can and accept that a call fails (and the try is given back) when Anthropic is down, rather than falling back to another host. Vercel's AI Gateway docs ("Zero Data Retention", read Oct 27, 2026) say the gateway itself "does not retain prompts, outputs, or sensitive data" and that "user data is immediately and permanently deleted after requests are completed". Requests are authenticated with our Vercel project's OIDC token or an AI Gateway API key; neither is ever logged.
 - **Anthropic (Claude)** receives the same request from the gateway and writes the reply. A self-learner's requests use solo instructions (no teacher or student wording) but send the same kinds of data. Through the gateway, Anthropic is reached with Vercel's own Anthropic credentials, so Anthropic's handling and retention follow Vercel's agreement with Anthropic and Anthropic's terms; Vercel notes a provider's handling under its agreements may differ from the provider's default policy. We don't state a retention period here. **Open point before launch:** confirm Anthropic's retention through the gateway. **Plan:** turn on the gateway's zero data retention (team-wide, on our Vercel Pro plan) before launch. We won't bring our own Anthropic key (no BYOK): requests go through Vercel's Anthropic credentials, so the zero data retention setting is what governs them.
 - **Cloudflare Turnstile** (only when the bot check is turned on): the widget runs in the student's browser on the join page, so Cloudflare receives what any browser request carries (the IP address, browser and device signals) to decide whether it's a person, per Cloudflare's Turnstile terms and privacy policy. Our server sends Cloudflare only the widget's token and our secret, **not** the IP address and not the name.
-- **Vercel** (hosting) sees requests, including IP addresses, in its request logs, per Vercel's terms. Our own error logs carry only error names, codes, and ids (no names, answers, or notes).
+- **Vercel** (hosting) sees requests, including IP addresses, in its request logs, per Vercel's terms. Our own error logs carry only error names, codes, and ids (no names, answers, or notes). The out-of-credits log (AI Gateway 402) carries the same safe fields.
 - **Neon** (database) stores everything above.
 - **Clerk** holds teacher and self-learner accounts; no student data. For a self-learner, the age confirmation is ours (`age_confirmed_at`), not sent to Clerk. The teacher's name and email in `teachers` are synced from Clerk: on their first visit, and by the Clerk webhook (`/api/webhooks/clerk`) whenever the Clerk account is created or changed (a change only updates an existing row, so a late change event can't bring back a deleted teacher). When a teacher's Clerk account is deleted, the webhook deletes, in one transaction, their classes (which cascades to the classes' readings and every student and all student work in them, notes to the teacher included), then their self-learner readings and everything under them, and then their `teachers` row (which cascades to their own logs: link fetches, question generations, and limit raises). In the same transaction it lists the Clerk id's hash in `deleted_clerk_users` (see above), so a late "created" event or a leftover session can't bring the account back. A repeat delete changes nothing. Webhook logs carry only the event type and outcome, never a name, email, or id.
 
@@ -135,6 +135,10 @@ Until the Clerk account is deleted. Self-learners can't delete single readings i
 - `join_attempts` rows: pruned by later joins after 10 minutes (see above).
 - `deleted_clerk_users` rows (a hash only): pruned by later account deletes after 30 days (see above).
 - **Backups:** Neon keeps a restore history (point-in-time restore) for the project's restore window, which depends on the Neon plan and settings. Deleted rows can be recovered from it, and stay in it, until that window passes. Keep the window as short as operations allow.
+
+## Retry times
+
+Limit notes say when the next try frees up in the visitor's time zone. We read the zone from Vercel's `x-vercel-ip-timezone` request header (derived by Vercel from the IP address) only to format that time on the server; it is never stored or logged. Without it the time is shown in UTC.
 
 ## Related
 
