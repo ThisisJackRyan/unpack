@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { LogoMark, OpenBook, ReadingBuddy, Sparkle } from "@/components/illustrations";
+import { OpenBook, ReadingBuddy, Sparkle } from "@/components/illustrations";
+import { Logo } from "@/components/logo";
 import { primaryButtonLarge, secondaryButtonLarge, textLink } from "@/components/ui";
 import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 
@@ -10,13 +11,14 @@ import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 export default function Home() {
   return (
     <div className="flex flex-1 flex-col bg-ink-50 text-ink-900">
+      <header className="border-b-2 border-ink-200 bg-white">
+        <div className="mx-auto flex h-16 w-full max-w-5xl items-center px-6">
+          <Logo href="/" />
+        </div>
+      </header>
       <main className="mx-auto grid w-full max-w-5xl flex-1 grid-cols-1 items-center gap-12 px-6 py-16 lg:grid-cols-[1fr_auto]">
         <div className="flex flex-col gap-10">
           <div className="flex flex-col gap-4">
-            <p className="flex items-center gap-2 text-xl font-bold tracking-tight text-primary-700">
-              <LogoMark className="h-8 w-8" />
-              unpack
-            </p>
             <h1 className="text-4xl font-bold tracking-tight text-ink-950 sm:text-5xl">
               Read it. Answer in your own words. Show you really tried.
             </h1>

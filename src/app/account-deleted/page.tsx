@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SignOutButton } from "@clerk/nextjs";
-import { LogoMark } from "@/components/illustrations";
+import { Wordmark } from "@/components/logo";
 import { card, focusRing, primaryButtonLarge } from "@/components/ui";
 
 // Where a deleted Clerk account lands if a session outlived it (see
@@ -11,9 +11,8 @@ export default function AccountDeleted() {
     <div className="flex flex-1 flex-col bg-ink-50 text-lg text-ink-900">
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-6 py-16">
         <div className={`${card} flex flex-col gap-4 px-6 py-10 sm:px-10`}>
-          <p className="flex items-center gap-2 text-xl font-bold tracking-tight text-ink-950">
-            <LogoMark className="h-8 w-8" />
-            unpack
+          <p>
+            <Wordmark />
           </p>
           <h1 className="text-2xl font-bold text-ink-950">This account was deleted</h1>
           <p className="text-lg text-ink-700">
