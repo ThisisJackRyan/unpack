@@ -1,5 +1,6 @@
 CREATE TYPE "public"."attempt_result" AS ENUM('pass', 'fail');--> statement-breakpoint
 CREATE TYPE "public"."challenge_status" AS ENUM('open', 'approved', 'denied');--> statement-breakpoint
+CREATE TYPE "public"."grade_level" AS ENUM('K', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'adult');--> statement-breakpoint
 CREATE TYPE "public"."plan" AS ENUM('free', 'paid');--> statement-breakpoint
 CREATE TYPE "public"."question_mode" AS ENUM('shared', 'per_student');--> statement-breakpoint
 CREATE TYPE "public"."reading_status" AS ENUM('draft', 'published');--> statement-breakpoint
@@ -38,7 +39,7 @@ CREATE TABLE "classes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"teacher_id" uuid NOT NULL,
 	"name" text NOT NULL,
-	"grade_level" integer NOT NULL,
+	"grade_level" "grade_level" NOT NULL,
 	"join_code" text NOT NULL,
 	"code_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -60,7 +61,7 @@ CREATE TABLE "readings" (
 	"title" text NOT NULL,
 	"source_url" text,
 	"body_text" text NOT NULL,
-	"grade_level" integer,
+	"grade_level" "grade_level",
 	"question_count" integer DEFAULT 3 NOT NULL,
 	"question_mode" "question_mode" DEFAULT 'shared' NOT NULL,
 	"status" "reading_status" DEFAULT 'draft' NOT NULL,
@@ -73,10 +74,11 @@ CREATE TABLE "students" (
 	"class_id" uuid NOT NULL,
 	"first_name" text NOT NULL,
 	"last_initials" text NOT NULL,
-	"session_token" text NOT NULL,
+	"name_key" text NOT NULL,
+	"session_token_hash" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "students_session_token_unique" UNIQUE("session_token"),
-	CONSTRAINT "students_class_id_name_unique" UNIQUE("class_id","first_name","last_initials")
+	CONSTRAINT "students_session_token_hash_unique" UNIQUE("session_token_hash"),
+	CONSTRAINT "students_class_id_name_key_unique" UNIQUE("class_id","name_key")
 );
 --> statement-breakpoint
 CREATE TABLE "teachers" (

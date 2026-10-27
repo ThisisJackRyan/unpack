@@ -11,6 +11,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { GRADE_LEVELS } from "../lib/grade-levels";
 
 // Enums
 
@@ -23,6 +24,7 @@ export const readingStatusEnum = pgEnum("reading_status", [
   "draft",
   "published",
 ]);
+export const gradeLevelEnum = pgEnum("grade_level", GRADE_LEVELS);
 export const attemptResultEnum = pgEnum("attempt_result", ["pass", "fail"]);
 export const challengeStatusEnum = pgEnum("challenge_status", [
   "open",
@@ -52,7 +54,7 @@ export const classes = pgTable(
       .notNull()
       .references(() => teachers.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    gradeLevel: integer("grade_level").notNull(),
+    gradeLevel: gradeLevelEnum("grade_level").notNull(),
     joinCode: text("join_code").notNull().unique(),
     codeActive: boolean("code_active").notNull().default(true),
     createdAt: createdAt(),
@@ -71,7 +73,7 @@ export const readings = pgTable(
     sourceUrl: text("source_url"),
     bodyText: text("body_text").notNull(),
     // Overrides the class grade level when set.
-    gradeLevel: integer("grade_level"),
+    gradeLevel: gradeLevelEnum("grade_level"),
     questionCount: integer("question_count").notNull().default(3),
     questionMode: questionModeEnum("question_mode").notNull().default("shared"),
     status: readingStatusEnum("status").notNull().default("draft"),
@@ -95,15 +97,15 @@ export const students = pgTable(
       .references(() => classes.id, { onDelete: "cascade" }),
     firstName: text("first_name").notNull(),
     lastInitials: text("last_initials").notNull(),
-    sessionToken: text("session_token").notNull().unique(),
+    // Normalized first_name + last_initials (see studentNameKey) so the
+    // per-class uniqueness check ignores case and extra whitespace.
+    nameKey: text("name_key").notNull(),
+    // SHA-256 hex of the raw session token; the raw token is only in the cookie.
+    sessionTokenHash: text("session_token_hash").notNull().unique(),
     createdAt: createdAt(),
   },
   (t) => [
-    unique("students_class_id_name_unique").on(
-      t.classId,
-      t.firstName,
-      t.lastInitials,
-    ),
+    unique("students_class_id_name_key_unique").on(t.classId, t.nameKey),
   ],
 );
 

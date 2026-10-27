@@ -1,5 +1,5 @@
 {
-  "id": "d438db63-e7a7-4e08-840e-003d694f685c",
+  "id": "94d8e4d4-2774-496a-b467-6b2dd6c8a4d6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -370,7 +370,8 @@
         },
         "grade_level": {
           "name": "grade_level",
-          "type": "integer",
+          "type": "grade_level",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -593,7 +594,8 @@
         },
         "grade_level": {
           "name": "grade_level",
-          "type": "integer",
+          "type": "grade_level",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
         },
@@ -700,8 +702,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "session_token": {
-          "name": "session_token",
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_token_hash": {
+          "name": "session_token_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -732,20 +740,19 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "students_session_token_unique": {
-          "name": "students_session_token_unique",
+        "students_session_token_hash_unique": {
+          "name": "students_session_token_hash_unique",
           "nullsNotDistinct": false,
           "columns": [
-            "session_token"
+            "session_token_hash"
           ]
         },
-        "students_class_id_name_unique": {
-          "name": "students_class_id_name_unique",
+        "students_class_id_name_key_unique": {
+          "name": "students_class_id_name_key_unique",
           "nullsNotDistinct": false,
           "columns": [
             "class_id",
-            "first_name",
-            "last_initials"
+            "name_key"
           ]
         }
       },
@@ -831,6 +838,26 @@
         "open",
         "approved",
         "denied"
+      ]
+    },
+    "public.grade_level": {
+      "name": "grade_level",
+      "schema": "public",
+      "values": [
+        "K",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "adult"
       ]
     },
     "public.plan": {
