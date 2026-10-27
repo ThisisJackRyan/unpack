@@ -56,3 +56,14 @@ export const dangerButton = `inline-flex min-h-12 items-center justify-center ga
 export const dangerOutlineButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-danger-600 bg-white px-6 font-display text-base font-bold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
 
 export const dangerGhostButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-base font-semibold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
+
+// The row of actions on a card (a question's Edit, Regenerate and
+// Delete): outlined, 48px tall, one shape for all. Delete is the only red
+// one, and it still opens a red confirm.
+export const actionButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border-2 border-ink-400 bg-white px-4 text-base font-semibold text-ink-900 transition-colors hover:bg-ink-50 disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
+
+export const dangerActionButton = actionButton
+  .replace("border-ink-400", "border-danger-600")
+  .replace("text-ink-900", "text-danger-700")
+  .replace("hover:bg-ink-50", "hover:bg-danger-50 hover:text-danger-800")
+  .replace(focusRing, dangerFocusRing);

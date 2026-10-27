@@ -16,7 +16,15 @@ import { LAST_QUESTION_MESSAGE } from "@/lib/shared-questions";
 import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { MetaLine } from "@/components/meta-line";
-import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
+import {
+  actionButton,
+  dangerActionButton,
+  dangerButton,
+  focusRing,
+  primaryButton,
+  secondaryButton,
+} from "@/components/ui";
+import { RetryIcon } from "@/components/answer-parts";
 import { WritingQuestions } from "@/components/writing-questions";
 import { WRITING_A_SAMPLE, WRITING_ONE_QUESTION, WRITING_QUESTIONS_TEACHER } from "@/components/writing-questions-text";
 import {
@@ -42,10 +50,6 @@ type Props = {
 
 type Running = { intent: QuestionIntent; questionId?: string };
 
-const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
-const quietButton = `${smallButton} text-ink-700 hover:bg-ink-100 hover:text-ink-950`;
-// primaryButton in red, for confirming a delete.
-const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-danger-700 px-5 text-base font-semibold text-white transition-colors hover:bg-danger-800 ${focusRing}`;
 
 const ROLE_LABELS: Record<QuestionRole, string> = {
   detail: "From the text",
@@ -478,14 +482,10 @@ function QuestionCard({
                 <span className="sr-only"> characters</span>
               </p>
               <div className="flex gap-2">
-                <button type="button" onClick={onCancel} className={quietButton}>
+                <button type="button" onClick={onCancel} className={actionButton}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={disabled}
-                  className={`${smallButton} bg-primary-600 text-white hover:bg-primary-700`}
-                >
+                <button type="submit" disabled={disabled} className={primaryButton}>
                   {saving ? "Saving…" : "Save"}
                 </button>
               </div>
@@ -502,14 +502,15 @@ function QuestionCard({
         )}
 
         {!editing && (
-          <div className="-ml-3 flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-2">
             <button
               id={`edit-${question.id}`}
               type="button"
               disabled={disabled}
               onClick={onEdit}
-              className={quietButton}
+              className={actionButton}
             >
+              <EditIcon />
               Edit<span className="sr-only"> question {question.position}</span>
             </button>
             <IntentForm
@@ -518,7 +519,8 @@ function QuestionCard({
               dispatch={dispatch}
               track={track}
             >
-              <button type="submit" disabled={disabled} className={quietButton}>
+              <button type="submit" disabled={disabled} className={actionButton}>
+                <RetryIcon className="h-5 w-5" />
                 {regenerating ? "Writing…" : "Regenerate"}
                 <span className="sr-only"> question {question.position}</span>
               </button>
@@ -526,6 +528,7 @@ function QuestionCard({
             <ConfirmButton
               label={
                 <>
+                  <TrashIcon />
                   Delete<span className="sr-only"> question {question.position}</span>
                 </>
               }
@@ -541,7 +544,7 @@ function QuestionCard({
               questionId={question.id}
               dispatch={dispatch}
               track={track}
-              className={`${smallButton} text-danger-700 hover:bg-danger-50`}
+              className={dangerActionButton}
             />
           </div>
         )}
@@ -577,5 +580,21 @@ function EmptyState({ title, body, children }: { title: string; body: string; ch
       <p className="max-w-md text-base text-ink-700">{body}</p>
       <div className="mt-2">{children}</div>
     </div>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12.5 4.5l3 3L7 16H4v-3l8.5-8.5Z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.5 5.5h13M8 5.5V4h4v1.5M5 5.5l1 11h8l1-11M8.5 9v4.5M11.5 9v4.5" />
+    </svg>
   );
 }
