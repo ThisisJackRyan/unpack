@@ -281,9 +281,14 @@ export const challenges = pgTable(
 // - the in-flight claim: unfinished (finished_at null) while one request
 //   calls the model, so a second submit for the same student and reading
 //   is told to wait, and
-// - the cost guard: every row counts toward EFFORT_CHECK_LIMIT per student
-//   per reading, including checks the model failed (which don't use up a
-//   try). Rows are kept, so the limit is for all time.
+// - the cost guard: every row the model answered counts toward
+//   EFFORT_CHECK_LIMIT per student per reading, including a reply we
+//   couldn't use (which doesn't use up a try). A check that failed before
+//   any reply (not set up, out of credits, an outage, a timeout) is marked
+//   given_back: it doesn't count toward that limit, only toward a short
+//   window that slows retries during an outage (see
+//   src/lib/submit-answers-core.ts). Rows are kept, so the limit is for
+//   all time.
 // Only ids and times: no answer text.
 export const effortChecks = pgTable(
   "effort_checks",
@@ -298,7 +303,8 @@ export const effortChecks = pgTable(
     createdAt: createdAt(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     // Null while running; pass or fail when an attempt was saved; error
-    // when the model call failed and no attempt was saved.
+    // when the model answered but no attempt was saved; given_back when
+    // the model call failed with no reply.
     outcome: text("outcome"),
   },
   (t) => [
@@ -306,7 +312,7 @@ export const effortChecks = pgTable(
     index("effort_checks_reading_id_idx").on(t.readingId),
     check(
       "effort_checks_outcome_check",
-      sql`${t.outcome} is null or ${t.outcome} in ('pass', 'fail', 'error')`,
+      sql`${t.outcome} is null or ${t.outcome} in ('pass', 'fail', 'error', 'given_back')`,
     ),
   ],
 );
@@ -483,6 +489,22 @@ export const joinAttempts = pgTable(
   ],
 );
 
+// Clerk accounts that were deleted (the user.deleted webhook), so a late
+// user.created or user.updated delivery, or a first visit on a session
+// that outlived the account, can't bring the account row back. Only a
+// SHA-256 hash of the Clerk user id (see src/lib/deleted-accounts.ts),
+// never the id, a name, or an email. Rows older than
+// DELETED_ACCOUNT_RETENTION_DAYS are pruned by the next account delete
+// (see docs/privacy.md).
+export const deletedClerkUsers = pgTable(
+  "deleted_clerk_users",
+  {
+    clerkUserHash: text("clerk_user_hash").primaryKey(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("deleted_clerk_users_deleted_at_idx").on(t.deletedAt)],
+);
+
 // Self-learner mode (see src/lib/self-readings-core.ts). Its own tables,
 // never class or student rows, each scoped to the account and cascading
 // from the teachers row, so the Clerk webhook's account delete removes all
@@ -490,7 +512,10 @@ export const joinAttempts = pgTable(
 
 // One row per reading a self-learner starts. Rows are never deleted by the
 // self-learner (only with the account), so the 5-per-7-days allowance
-// counts these rows by created_at (see src/lib/self-allowance.ts).
+// counts these rows by created_at (see src/lib/self-allowance.ts), except
+// those whose slot was given back: slot_released_at is set when question
+// writing failed and the reading still has no questions, and cleared when
+// a later Try again takes the slot back.
 // questions_claim_token / questions_claimed_at: the claim that makes the
 // question set generate at most once at a time (see
 // src/lib/self-questions-core.ts).
@@ -510,6 +535,7 @@ export const selfReadings = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     questionsClaimToken: uuid("questions_claim_token"),
     questionsClaimedAt: timestamp("questions_claimed_at", { withTimezone: true }),
+    slotReleasedAt: timestamp("slot_released_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -600,7 +626,7 @@ export const selfEffortChecks = pgTable(
     index("self_effort_checks_account_id_idx").on(t.accountId),
     check(
       "self_effort_checks_outcome_check",
-      sql`${t.outcome} is null or ${t.outcome} in ('pass', 'fail', 'error')`,
+      sql`${t.outcome} is null or ${t.outcome} in ('pass', 'fail', 'error', 'given_back')`,
     ),
   ],
 );
