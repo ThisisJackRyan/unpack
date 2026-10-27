@@ -49,6 +49,7 @@ import {
   loadSelfProgress,
   submitSelfAnswers,
 } from "@/lib/self-readings";
+import { createAccountStatement, hashClerkUserId } from "@/lib/deleted-accounts";
 import { prepareDbCheck } from "./lib/db-check";
 
 const { fetchEndpoint } = prepareDbCheck();
@@ -365,6 +366,19 @@ async function checkDelete() {
   check(logs.n === 0, `the account row and its logs are gone too (${logs.n})`);
   const again = await handleClerkEvent({ type: "user.deleted", data: { id: clerkId("test_self_gone"), deleted: true } }, neonExecutor);
   check(again === "already_gone", `a repeat delete succeeds quietly: ${again}`);
+  const late = await handleClerkEvent(
+    {
+      type: "user.created",
+      data: { id: clerkId("test_self_gone"), first_name: "Late", email_addresses: [{ id: "idn_1", email_address: "late@example.invalid" }] },
+    },
+    neonExecutor,
+  );
+  const [visit = []] = await neonExecutor([createAccountStatement(clerkId("test_self_gone"), "Late", "late@example.invalid")]);
+  const back = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${clerkId("test_self_gone")}`);
+  check(
+    late === "deleted_account" && visit.length === 0 && back.n === 0,
+    `a deleted self-learner stays deleted: late user.created ${late}, first visit ${visit.length} rows, ${back.n} rows back`,
+  );
 }
 
 // Through the webhook's delete (classes, then self-learner readings, then
@@ -374,6 +388,9 @@ async function cleanup(): Promise<void> {
   for (const prefix of PREFIXES) {
     deleted += deletedAccountRows(await neonExecutor(deleteTeacherStatements(clerkId(prefix))));
   }
+  // The delete lists each test id; take them off again.
+  const hashes = PREFIXES.map((p) => hashClerkUserId(clerkId(p)));
+  await sql`delete from deleted_clerk_users where clerk_user_hash = any(${hashes})`;
   console.log(`\ncleanup: deleted ${deleted} test accounts (and everything under them)`);
 }
 

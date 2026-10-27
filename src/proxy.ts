@@ -9,7 +9,8 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // stay public: students have no accounts.
 // /api/webhooks/clerk stays public too: Clerk calls it with no session, and
 // the route verifies Clerk's signature itself (src/lib/clerk-webhook.ts).
-// Keep it out of isAccountRoute.
+// Keep it out of isAccountRoute. So is /account-deleted, where a deleted
+// account's leftover session lands (it never loads the account).
 const isAccountRoute = createRouteMatcher([
   "/teacher(.*)",
   "/api/teacher(.*)",

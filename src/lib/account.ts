@@ -5,13 +5,15 @@ import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { db, schema } from "@/db";
 import type { Teacher } from "@/db/schema";
+import { ACCOUNT_DELETED_PATH, createAccountStatement } from "./deleted-accounts";
 import { roleRedirect, setRoleOutcome, setRoleStatements, type AccountRole, type Area, type SetRoleOutcome } from "./account-role";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 
 // Server-only: the signed-in Clerk account's row (the teachers table holds
 // every account, teacher or self-learner) and the role guards every page
-// and action calls. See account-role.ts for the rules.
+// and action calls. See account-role.ts for the rules. A deleted account
+// is never recreated: it is sent to ACCOUNT_DELETED_PATH.
 
 export type Account = Teacher;
 
@@ -48,15 +50,18 @@ export const getOrCreateAccount = cache(async (): Promise<Account> => {
     null;
 
   // Upsert, not insert: two first-visit requests can race to create the
-  // row. The role is never set here: the account chooses on /welcome.
+  // row. The role is never set here: the account chooses on /welcome. A
+  // deleted account (a session that outlived it) is refused in the same
+  // statement (see deleted-accounts.ts): no row is created, and the
+  // person sees a friendly page instead.
+  const [rows = []] = await neonExecutor([createAccountStatement(user.id, name, email)]);
+  if (rows.length === 0) redirect(ACCOUNT_DELETED_PATH);
   const [account] = await db
-    .insert(schema.teachers)
-    .values({ clerkUserId: user.id, name, email })
-    .onConflictDoUpdate({
-      target: schema.teachers.clerkUserId,
-      set: { name, email },
-    })
-    .returning();
+    .select()
+    .from(schema.teachers)
+    .where(eq(schema.teachers.id, String(rows[0].id)))
+    .limit(1);
+  if (!account) redirect(ACCOUNT_DELETED_PATH);
   return account;
 });
 

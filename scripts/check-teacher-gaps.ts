@@ -57,6 +57,7 @@ import { capView } from "@/lib/reading-cap";
 import { deleteReading, getClassCapBadges, getReadingCap, raiseReadingCap } from "@/lib/readings";
 import { getOrCreateStudentQuestions, postgresStudentQuestionStore } from "@/lib/student-questions";
 import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "@/lib/student-questions-core";
+import { createAccountStatement, hashClerkUserId } from "@/lib/deleted-accounts";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
 const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
@@ -579,6 +580,41 @@ async function checkTeacherDelete() {
   check(rows.n === 0, `...and no teacher row came back (${rows.n})`);
   check(JSON.stringify(await teacherCounts(kept)) === JSON.stringify(keptBefore), "...and the other teacher is still intact");
 
+  // The deleted list: only the hash is stored, and a late user.created or
+  // a first visit can't recreate the row.
+  const listed = await one<{ n: number }>(
+    sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(goneClerkId)}`,
+  );
+  check(listed.n === 1, `user.deleted listed the id's hash (${listed.n} row)`);
+  const raw = await one<{ n: number }>(sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${goneClerkId}`);
+  check(raw.n === 0, "...and never the raw id");
+  const lateCreate = await handleClerkEvent(
+    {
+      type: "user.created",
+      data: { id: goneClerkId, first_name: "Late", email_addresses: [{ id: "idn_1", email_address: "late@example.invalid" }] },
+    },
+    neonExecutor,
+  );
+  check(lateCreate === "deleted_account", `a late user.created after user.deleted: ${lateCreate}`);
+  const [firstVisit = []] = await neonExecutor([createAccountStatement(goneClerkId, "Late", "late@example.invalid")]);
+  check(firstVisit.length === 0, `a first visit on a leftover session creates nothing (${firstVisit.length} rows)`);
+  const stillGone = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${goneClerkId}`);
+  check(stillGone.n === 0, `...and no teacher row came back (${stillGone.n})`);
+
+  // A user.created racing the user.deleted of a fresh id: whichever
+  // commits first, no row is left.
+  const racedId = `test_gaps_raced_${RUN_ID}`;
+  const raceData = { id: racedId, first_name: "Raced", email_addresses: [{ id: "idn_1", email_address: "raced@example.invalid" }] };
+  const raced = await Promise.all([
+    handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
+    handleClerkEvent({ type: "user.deleted", data: { id: racedId, deleted: true } }, neonExecutor),
+    handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
+  ]);
+  const racedRows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${racedId}`);
+  check(racedRows.n === 0, `user.created racing user.deleted leaves no row (${raced.join(", ")})`);
+  const [fresh = []] = await neonExecutor([createAccountStatement(`test_gaps_fresh_${RUN_ID}`, "Fresh", "fresh@example.invalid")]);
+  check(fresh.length === 1, "a first visit for an account that was never deleted still creates its row");
+
   const renamed = await handleClerkEvent(
     { type: "user.updated", data: { id: keptClerkId, first_name: "Kept", last_name: "Fake", email_addresses: [{ id: "idn_1", email_address: "kept@example.invalid" }] } },
     neonExecutor,
@@ -596,10 +632,14 @@ async function checkTeacherDelete() {
 // left by a failed run can't block it.
 async function cleanup(): Promise<void> {
   let deleted = 0;
-  for (const prefix of ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept"]) {
+  const prefixes = ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept", "test_gaps_raced", "test_gaps_fresh"];
+  for (const prefix of prefixes) {
     const results = await neonExecutor(deleteTeacherStatements(`${prefix}_${RUN_ID}`));
     deleted += deletedAccountRows(results);
   }
+  // The delete lists each test id; take them off again.
+  const hashes = prefixes.map((p) => hashClerkUserId(`${p}_${RUN_ID}`));
+  await sql`delete from deleted_clerk_users where clerk_user_hash = any(${hashes})`;
   console.log(`\ncleanup: deleted ${deleted} test teachers (and everything under them)`);
 }
 

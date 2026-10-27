@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
+import { hashClerkUserId } from "./deleted-accounts";
 import type { Statement } from "./link-rate-limit";
 import {
   deletedAccountRows,
@@ -95,8 +96,19 @@ describe("handleClerkEvent", () => {
     assert.equal(db.seen.length, 1);
     assert.match(db.seen[0].text, /^insert into teachers \(clerk_user_id, name, email\)/);
     assert.match(db.seen[0].text, /on conflict \(clerk_user_id\) do update set name = excluded\.name, email = excluded\.email/);
-    assert.deepEqual(db.seen[0].params, ["user_test_1", "Maya Ro", "teacher@example.com"]);
+    assert.deepEqual(db.seen[0].params, ["user_test_1", "Maya Ro", "teacher@example.com", hashClerkUserId("user_test_1")]);
     assert.equal(db.seen[0].text.includes("teacher@example.com"), false);
+  });
+
+  it("user.created for a deleted account writes nothing and is deleted_account", async () => {
+    const db = fakeDb(() => []);
+    assert.equal(await handleClerkEvent({ type: "user.created", data: USER }, db.execute), "deleted_account");
+    assert.equal(db.seen.length, 1);
+    // The deleted list is checked inside the insert itself.
+    assert.match(
+      db.seen[0].text,
+      /select \$1::text, \$2::text, \$3::text\nwhere not exists \(select 1 from deleted_clerk_users where clerk_user_hash = \$4::text\)\non conflict/,
+    );
   });
 
   it("user.updated only updates (never inserts), so a late one can't bring back a deleted teacher", async () => {
@@ -106,9 +118,9 @@ describe("handleClerkEvent", () => {
     assert.equal(db.seen.length, 1);
     assert.equal(
       db.seen[0].text,
-      "update teachers set name = $2::text, email = $3::text\nwhere clerk_user_id = $1::text\nreturning id",
+      "update teachers set name = $2::text, email = $3::text\nwhere clerk_user_id = $1::text and not exists (select 1 from deleted_clerk_users where clerk_user_hash = $4::text)\nreturning id",
     );
-    assert.deepEqual(db.seen[0].params, ["user_test_1", "Maya Rossi", "old@example.com"]);
+    assert.deepEqual(db.seen[0].params, ["user_test_1", "Maya Rossi", "old@example.com", hashClerkUserId("user_test_1")]);
     assert.equal(/insert/i.test(db.seen[0].text), false);
     const gone = fakeDb(() => []);
     assert.equal(await handleClerkEvent({ type: "user.updated", data: updated }, gone.execute), "no_teacher");
@@ -122,8 +134,8 @@ describe("handleClerkEvent", () => {
       db.seen.map((s) => s.text),
       deleteTeacherStatements("user_test_1").map((s) => s.text),
     );
-    const [lock, classes, selfReadings, teacher] = db.seen;
-    assert.equal(db.seen.length, 4);
+    const [lock, classes, selfReadings, listed, prune, teacher] = db.seen;
+    assert.equal(db.seen.length, 6);
     assert.equal(lock.text, "select id from teachers where clerk_user_id = $1::text for update");
     assert.match(classes.text, /^delete from classes\nwhere teacher_id in \(select id from teachers where clerk_user_id = \$1::text\)$/);
     assert.equal(
@@ -131,10 +143,14 @@ describe("handleClerkEvent", () => {
       "delete from self_readings\nwhere account_id in (select id from teachers where clerk_user_id = $1::text)",
     );
     assert.equal(teacher.text, "delete from teachers where clerk_user_id = $1::text returning id");
-    for (const s of db.seen) {
-      assert.deepEqual(s.params, ["user_test_1"]);
-      assert.equal(s.text.includes("user_test_1"), false);
-    }
+    // Listed in the same batch as the cascade, by hash only.
+    assert.match(listed.text, /^insert into deleted_clerk_users \(clerk_user_hash\) values \(\$1::text\)\non conflict \(clerk_user_hash\) do nothing$/);
+    assert.deepEqual(listed.params, [hashClerkUserId("user_test_1")]);
+    assert.match(prune.text, /^delete from deleted_clerk_users/);
+    assert.deepEqual(prune.params, [30, 200]);
+    for (const s of [lock, classes, selfReadings, teacher]) assert.deepEqual(s.params, ["user_test_1"]);
+    for (const s of db.seen) assert.equal(s.text.includes("user_test_1"), false);
+    assert.equal(JSON.stringify([listed.params, prune.params]).includes("user_test_1"), false);
     const gone = fakeDb(() => []);
     assert.equal(await handleClerkEvent({ type: "user.deleted", data: { id: "user_test_1", deleted: true } }, gone.execute), "already_gone");
     // Only the account delete decides the outcome: the class and
@@ -153,6 +169,8 @@ describe("handleClerkEvent", () => {
     assert.ok(classes > lock && selfReadings > lock);
     assert.ok(teacher > classes && teacher > selfReadings);
     assert.equal(teacher, texts.length - 1);
+    const listed = texts.findIndex((t) => t.startsWith("insert into deleted_clerk_users"));
+    assert.ok(listed > lock && listed < teacher);
     // Every self_* table hangs off self_readings or the account row with
     // ON DELETE CASCADE, so these two statements reach all of them.
     assert.equal(texts.filter((t) => /delete from self_(questions|attempts|answers|effort_checks)/.test(t)).length, 0);
@@ -267,7 +285,15 @@ describe("handleClerkWebhookRequest (with the real verifier)", () => {
     const { d, logs, db } = deps();
     const res = await handleClerkWebhookRequest(signed(body("user.deleted", { id: "user_test_1", deleted: true })), d);
     assert.equal(res.status, 200);
-    assert.equal(db.seen.length, 4);
+    assert.equal(db.seen.length, 6);
     assert.deepEqual(logs, [{ level: "info", message: "clerk webhook", fields: { type: "user.deleted", outcome: "deleted" } }]);
+  });
+
+  it("a user.created for a deleted account is a 200, so Clerk stops retrying", async () => {
+    const none = fakeDb(() => []);
+    const { d, logs } = deps({ execute: none.execute });
+    const res = await handleClerkWebhookRequest(signed(body("user.created")), d);
+    assert.equal(res.status, 200);
+    assert.deepEqual(logs, [{ level: "info", message: "clerk webhook", fields: { type: "user.created", outcome: "deleted_account" } }]);
   });
 });
