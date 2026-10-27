@@ -75,12 +75,24 @@ clerk_user_hash, deleted_at: one row per deleted Clerk account (teacher or self-
 
 Self-learners are people **13 or older** who sign in with Clerk and read for themselves. They are not students: no class, no teacher, and no student rows. A reader under 13 can't use this mode (they join a class with a code instead).
 
+### The age screen (PR 15)
+
+Before an account first reads for itself, `/welcome` (or Settings) asks **"When were you born?"** with two dropdowns, birth month and birth year (no answer picked in advance; the years run from this year back 100 years). The page says only "We ask everyone who reads on their own. We don’t save your answer." The server works out from the month and year whether the person is 13 or older for the whole of the current month, and then drops them:
+
+- **Stored:** only that 13+ was confirmed, and when (`age_confirmed_at`, below). Nothing is stored for an under-13 answer except the cookie below.
+- **Never stored, logged, or sent anywhere:** the month and the year. They are not in the database, the server logs, analytics, a URL, a cookie, the browser's storage, an error message, or any prompt to the AI model, and they are not sent back to the page.
+- Teachers aren't asked (unchanged from PR 13).
+
+### The age gate cookie (PR 15)
+
+When the answer is under 13, the server sets one cookie on that browser: **`unpack_age_gate`**, value **`under`**, kept **30 days**, httpOnly (page scripts can't read it), Secure in production, SameSite=Lax. It holds **no date, no age and no account id**, only the word "under". While it is there, reading for yourself is refused on that browser without asking again (on `/welcome` and in Settings, checked by the server action, not only the page), and the page points to joining a class with a teacher's code (`/join`) instead. It doesn't affect an account that confirmed 13+ before. It expires on its own after 30 days, or when the browser's cookies are cleared.
+
 ### `teachers` (the account row), new columns
 
 | Column | What | Why |
 |---|---|---|
 | role | teacher, self_learner, or null until chosen on `/welcome` | Picks the account's home and which pages and actions it may use. Accounts from before PR 13 were set to teacher. |
-| age_confirmed_at | When the account ticked "I’m 13 or older", the first time it chose self-learner | COPPA: self-learner mode is 13+ only. **We never ask for or store a birthdate**, only that it was confirmed and when. A self-learner row without it is refused by the database. Null for teachers who never chose self-learner. Kept if the account switches back to teacher. |
+| age_confirmed_at | When the account’s age screen answer showed 13 or older, the first time it chose self-learner (before PR 15: when it ticked "I’m 13 or older") | COPPA: self-learner mode is 13+ only. **We never store the birth month or year** (or a birthdate), only that 13+ was confirmed and when. A self-learner row without it is refused by the database. Null for teachers who never chose self-learner. Kept if the account switches back to teacher. |
 
 The name and email in this row come from Clerk, as for teachers.
 
