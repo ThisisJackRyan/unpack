@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { classSettingsSavedMessage, gradeChangeWarning, warnsOnGradeChange } from "./class-settings";
+import { CLASS_GRADE_HELP, classSettingsSavedMessage, gradeChangeWarning, warnsOnGradeChange } from "./class-settings";
 import { validateCreateClass } from "./validate-class";
 
 describe("class settings", () => {
@@ -25,10 +25,11 @@ describe("class settings", () => {
   it("says exactly what is cleared and what is kept", () => {
     assert.equal(
       gradeChangeWarning(1, "6"),
-      "Changing the grade clears the questions of 1 draft reading that use the class grade, so they can be written again for Grade 6. Published readings, and drafts with their own grade, keep their questions.",
+      "Changing the grade clears the questions of 1 draft reading that uses the class grade, so it can be written again for Grade 6. Published readings keep their grade and questions, and drafts with their own grade keep their questions.",
     );
-    assert.match(gradeChangeWarning(3, "K"), /3 draft readings .* for Kindergarten\./);
+    assert.match(gradeChangeWarning(3, "K"), /3 draft readings that use the class grade, so they can be written again for Kindergarten\./);
     assert.equal(classSettingsSavedMessage(0), "Saved.");
+    assert.match(CLASS_GRADE_HELP, /Published readings keep the grade they were published with\.$/);
     assert.equal(classSettingsSavedMessage(2), "Saved. Cleared the questions of 2 draft readings.");
   });
 });

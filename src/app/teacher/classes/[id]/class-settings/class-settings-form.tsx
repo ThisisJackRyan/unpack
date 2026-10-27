@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { gradeChangeWarning, warnsOnGradeChange } from "@/lib/class-settings";
+import { CLASS_GRADE_HELP, gradeChangeWarning, warnsOnGradeChange } from "@/lib/class-settings";
 import { GRADE_LEVELS, gradeLevelLabel, isGradeLevel, type GradeLevel } from "@/lib/grade-levels";
 import { CLASS_NAME_MAX_LENGTH } from "@/lib/validate-class";
 import { field, primaryButton } from "@/components/ui";
@@ -58,7 +58,7 @@ export function ClassSettingsForm({
           Grade level
         </label>
         <p id="class-grade-help" className="text-sm text-zinc-600">
-          Questions and nudges are written for this grade, unless a reading has its own.
+          {CLASS_GRADE_HELP}
         </p>
         <select
           id="class-grade"

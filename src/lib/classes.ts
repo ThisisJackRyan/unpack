@@ -134,25 +134,12 @@ export async function getClassForTeacher(
   return row;
 }
 
-// Changes the class's grade and clears the shared questions of its drafts
-// that follow the class grade (see classGradeChangeStatements). Returns
-// false when the class isn't the teacher's. The class settings form uses
-// updateClassSettings, the same transaction with the name.
-export async function updateClassGrade(
-  classId: string,
-  teacherId: string,
-  gradeLevel: GradeLevel,
-  execute: StatementExecutor = neonExecutor,
-): Promise<boolean> {
-  if (!isUuid(classId)) return false;
-  return insertedCount(await execute(classGradeChangeStatements(classId, teacherId, gradeLevel))) === 1;
-}
-
 export type UpdateClassSettingsResult = { status: "saved"; clearedDrafts: number } | { status: "not_found" };
 
 // The class settings form: name and grade in one transaction, ownership
-// checked in it. Saving the same grade clears nothing (the clear only
-// runs when the grade actually changes).
+// checked in it (see classGradeChangeStatements). A grade change clears
+// the shared questions of drafts on the class grade and pins the old grade
+// on published readings; saving the same grade clears and pins nothing.
 export async function updateClassSettings(
   classId: string,
   teacherId: string,

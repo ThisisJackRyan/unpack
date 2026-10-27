@@ -296,44 +296,55 @@ returning r.id`,
   ];
 }
 
-// Changes a class's grade level, as one transaction. Draft readings with
-// no grade override take the class's grade, so their shared questions no
-// longer fit and are cleared, the same rule as editing a draft's grade.
-// Readings with an override, and published readings, are untouched.
-// Nothing is cleared when the grade doesn't actually change.
+// Saves the class settings (name and grade level), as one transaction.
+// Draft readings with no grade override take the class's grade, so their
+// shared questions no longer fit and are cleared, the same rule as editing
+// a draft's grade. Published readings with no grade override get the old
+// class grade written onto them, so their effective grade (what per-student
+// sets and effort-check nudges are written for) stays what it was when they
+// were published. Readings with their own grade are untouched. Nothing is
+// cleared or pinned when the grade doesn't actually change.
 //
-// $1 class, $2 teacher, $3 new grade.
+// $1 class, $2 teacher, $3 new grade, $4 name.
 //
 // 1. Lock the class row (owned), so two grade changes queue up. FOR NO
 //    KEY UPDATE, like the student claim: it still serializes grade
 //    changes, but doesn't block the FOR KEY SHARE lock that student joins
-//    and new readings take on the class.
+//    and new readings take on the class. From here on the class's grade
+//    can only change in this transaction, so steps 2-4 read the old grade
+//    straight from the classes row.
 // 2. Lock the affected draft readings, with the same row lock every shared
-//    question write takes first (lockDraftStatement). A set being saved
-//    right now either commits before this (and step 3 deletes it) or waits
-//    here, then sees the new class grade and fails its fingerprint check
-//    (writeSetStatements), so a set for the old grade can't land after.
-//    Locks are taken class then readings; question writes never lock the
-//    class, so the two can't deadlock.
+//    question write and the publish take first (lockDraftStatement). A set
+//    being saved right now either commits before this (and step 3 deletes
+//    it) or waits here, then sees the new class grade and fails its
+//    fingerprint check (writeSetStatements), so a set for the old grade
+//    can't land after. A publish that holds the lock commits first and the
+//    reading is then pinned in step 4 as published; one that waits
+//    publishes after this commits, as a draft that already follows the new
+//    grade. Locks are taken class then readings; question writes never
+//    lock the class, so the two can't deadlock.
 // 3. Clear those drafts' shared questions, while the class still has its
 //    old grade (so "changed" is known). Returns each cleared question's
 //    reading, so the caller can say how many drafts were cleared.
-// 4. Update the grade (and the name, when one is given: the class
-//    settings form saves both at once). Applied when this returns a row.
+// 4. Pin the old grade on published readings with no grade of their own:
+//    grade_level = the class row's grade, read in the same statement,
+//    before step 5 changes it.
+// 5. Update the grade and the name. Applied when this returns a row.
 //
 // Used by the class settings form (updateClassSettings in classes.ts).
 export function classGradeChangeStatements(
   classId: string,
   teacherId: string,
   gradeLevel: GradeLevel,
-  name?: string,
+  name: string,
 ): Statement[] {
   const params = [classId, teacherId, gradeLevel];
+  const changed = `c.id = $1::uuid and c.teacher_id = $2::uuid
+      and c.grade_level is distinct from $3::grade_level`;
   const affected = `r.class_id = $1::uuid and r.status = 'draft' and r.grade_level is null
   and exists (
     select 1 from classes c
-    where c.id = $1::uuid and c.teacher_id = $2::uuid
-      and c.grade_level is distinct from $3::grade_level
+    where ${changed}
   )`;
   return [
     {
@@ -355,19 +366,20 @@ where q.reading_id = r.id and q.student_id is null
 returning q.reading_id`,
       params,
     },
-    name === undefined
-      ? {
-          text: `update classes set grade_level = $3::grade_level
+    {
+      text: `update readings r set grade_level = c.grade_level
+from classes c
+where c.id = r.class_id and ${changed}
+  and r.class_id = $1::uuid and r.status = 'published' and r.grade_level is null
+returning r.id`,
+      params,
+    },
+    {
+      text: `update classes set grade_level = $3::grade_level, name = $4::text
 where id = $1::uuid and teacher_id = $2::uuid
 returning id`,
-          params,
-        }
-      : {
-          text: `update classes set grade_level = $3::grade_level, name = $4::text
-where id = $1::uuid and teacher_id = $2::uuid
-returning id`,
-          params: [...params, name],
-        },
+      params: [...params, name],
+    },
   ];
 }
 

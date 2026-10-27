@@ -12,8 +12,13 @@
 //   success (already_gone).
 // - Class settings: the warning's draft count; another teacher can't edit
 //   (not_found, nothing changes); a same-grade save (a new name) clears
-//   nothing; a grade change clears the shared questions of drafts on the
-//   class grade and keeps published readings' and overridden drafts'.
+//   nothing and pins nothing; a grade change clears the shared questions
+//   of drafts on the class grade and keeps published readings' and
+//   overridden drafts', pins the old grade on published readings with no
+//   grade (shared and per-student), leaves published readings with their
+//   own grade and drafts with none alone (the draft follows the new grade),
+//   and touches no other teacher's class; a later change leaves the pinned
+//   grade as it is.
 // - Student set cap: --claims parallel first opens (distinct students)
 //   past the cap make exactly 150 sets; another teacher can't raise it;
 //   --raises concurrent raises leave exactly one reading_cap_raises row
@@ -321,6 +326,14 @@ async function sharedCount(readingId: string): Promise<number> {
   ).n;
 }
 
+// A reading's own grade (null when it follows the class) and the grade
+// it's used at.
+async function readingGrade(readingId: string) {
+  return one<{ own: string | null; effective: string }>(sql`
+    select r.grade_level as own, coalesce(r.grade_level, c.grade_level) as effective
+    from readings r join classes c on c.id = r.class_id where r.id = ${readingId}`);
+}
+
 async function classRow(classId: string) {
   return one<{ name: string; grade_level: string }>(sql`select name, grade_level from classes where id = ${classId}`);
 }
@@ -332,8 +345,17 @@ async function checkClassSettings() {
   const own = await newReading(classId, "Draft with its own grade", "shared", "draft", "8");
   const published = await newReading(classId, "Published", "shared", "published");
   const empty = await newReading(classId, "Draft with no questions", "shared", "draft");
-  for (const r of [follows, own, published]) await sharedQuestions(r);
+  const publishedOwn = await newReading(classId, "Published with its own grade", "shared", "published", "7");
+  const perStudent = await newReading(classId, "Published per-student", "per_student", "published");
+  for (const r of [follows, own, published, publishedOwn]) await sharedQuestions(r);
   void empty;
+  const otherClass = await newClass("Other teacher's room", "4", otherTeacherId);
+  const otherPublished = await newReading(otherClass, "Other teacher's published", "per_student", "published");
+  const grades = async () =>
+    JSON.stringify(
+      await Promise.all([follows, own, published, publishedOwn, perStudent, otherPublished].map((r) => readingGrade(r))),
+    );
+  const gradesBefore = await grades();
 
   check((await countDraftsClearedByGradeChange(classId, teacherId)) === 1, "the warning counts 1 draft that would be cleared");
   check((await countDraftsClearedByGradeChange(classId, otherTeacherId)) === 0, "another teacher's count is 0");
@@ -343,12 +365,14 @@ async function checkClassSettings() {
   const unchanged = await classRow(classId);
   check(unchanged.name === "Room 12" && unchanged.grade_level === "4", "...and the class is unchanged");
   check((await sharedCount(follows)) === 3, "...and no questions were cleared");
+  check((await grades()) === gradesBefore, "...and no reading's grade changed");
 
   const rename = await updateClassSettings(classId, teacherId, { name: "Room 12B", gradeLevel: "4" });
   check(rename.status === "saved" && rename.clearedDrafts === 0, `same-grade save: ${JSON.stringify(rename)}`);
   const renamed = await classRow(classId);
   check(renamed.name === "Room 12B" && renamed.grade_level === "4", "...the name changed, the grade didn't");
   check((await sharedCount(follows)) === 3 && (await sharedCount(own)) === 3 && (await sharedCount(published)) === 3, "...and nothing was cleared");
+  check((await grades()) === gradesBefore, `...and nothing was pinned: ${await grades()}`);
 
   const change = await updateClassSettings(classId, teacherId, { name: "Room 12B", gradeLevel: "6" });
   check(change.status === "saved" && change.clearedDrafts === 1, `grade change 4 -> 6: ${JSON.stringify(change)}`);
@@ -357,6 +381,34 @@ async function checkClassSettings() {
   check((await sharedCount(own)) === 3, "...the draft with its own grade kept them");
   check((await sharedCount(published)) === 3, "...the published reading kept them");
   check((await countDraftsClearedByGradeChange(classId, teacherId)) === 0, "...and the warning now counts 0");
+
+  const pinned = await readingGrade(published);
+  check(
+    pinned.own === "4" && pinned.effective === "4",
+    `...the published reading with no grade got the old grade pinned: ${JSON.stringify(pinned)}`,
+  );
+  const pinnedPer = await readingGrade(perStudent);
+  check(
+    pinnedPer.own === "4" && pinnedPer.effective === "4",
+    `...so did the published per-student one (its new sets stay grade 4): ${JSON.stringify(pinnedPer)}`,
+  );
+  const kept = await readingGrade(publishedOwn);
+  check(kept.own === "7" && kept.effective === "7", `...the published reading with its own grade is untouched: ${JSON.stringify(kept)}`);
+  const draft = await readingGrade(follows);
+  check(draft.own === null && draft.effective === "6", `...the draft with no grade still follows the class: ${JSON.stringify(draft)}`);
+  const ownDraft = await readingGrade(own);
+  check(ownDraft.own === "8", `...the draft with its own grade keeps it: ${JSON.stringify(ownDraft)}`);
+  const other = await readingGrade(otherPublished);
+  check(
+    other.own === null && other.effective === "4" && (await classRow(otherClass)).grade_level === "4",
+    `...and another teacher's class and reading are untouched: ${JSON.stringify(other)}`,
+  );
+
+  const again = await updateClassSettings(classId, teacherId, { name: "Room 12B", gradeLevel: "8" });
+  check(again.status === "saved", `another change 6 -> 8: ${JSON.stringify(again)}`);
+  const still = await readingGrade(published);
+  check(still.own === "4" && still.effective === "4", `...the pinned reading stays at grade 4: ${JSON.stringify(still)}`);
+  check((await readingGrade(follows)).effective === "8", "...and the draft follows to 8");
 }
 
 // ---------------------------------------------------------------------------
