@@ -6,6 +6,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -127,6 +128,13 @@ export const questions = pgTable(
   (t) => [
     index("questions_reading_id_student_id_idx").on(t.readingId, t.studentId),
     index("questions_student_id_idx").on(t.studentId),
+    // One question per position in each set. NULLS NOT DISTINCT so the
+    // shared set (student_id null) is covered too: two writers can't both
+    // insert position 1. The backstop behind the conditional writes in
+    // src/lib/shared-questions.ts and src/lib/student-questions-core.ts.
+    unique("questions_reading_student_position_unique")
+      .on(t.readingId, t.studentId, t.position)
+      .nullsNotDistinct(),
   ],
 );
 
@@ -213,6 +221,60 @@ export const linkFetchAttempts = pgTable(
     index("link_fetch_attempts_teacher_id_created_at_idx").on(
       t.teacherId,
       t.createdAt,
+    ),
+  ],
+);
+
+// One row per teacher-started question generation (generate, regenerate
+// all, regenerate one, sample preview), for the per-teacher rate limit (see
+// src/lib/question-rate-limit.ts). Same shape and pruning as
+// link_fetch_attempts. Student-triggered generations are not recorded here.
+export const questionGenerationAttempts = pgTable(
+  "question_generation_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teacherId: uuid("teacher_id")
+      .notNull()
+      .references(() => teachers.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("question_generation_attempts_teacher_id_created_at_idx").on(
+      t.teacherId,
+      t.createdAt,
+    ),
+  ],
+);
+
+// The claim that makes a student's question set generate at most once,
+// however many requests open the reading at the same time (see
+// src/lib/student-questions-core.ts). "pending" while one request calls the
+// model; "done" once that set is saved, kept so a later claim can never
+// start a second generation.
+export const questionGenerations = pgTable(
+  "question_generations",
+  {
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => readings.id, { onDelete: "cascade" }),
+    studentId: uuid("student_id")
+      .notNull()
+      .references(() => students.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    // Changes on every claim or takeover, so only the current holder can
+    // finish or release it.
+    claimToken: uuid("claim_token").notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.readingId, t.studentId] }),
+    index("question_generations_student_id_idx").on(t.studentId),
+    check(
+      "question_generations_status_check",
+      sql`${t.status} in ('pending', 'done')`,
     ),
   ],
 );

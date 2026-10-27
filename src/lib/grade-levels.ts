@@ -32,3 +32,12 @@ export function gradeLevelLabel(level: GradeLevel): string {
   if (level === "adult") return "Adult";
   return `Grade ${level}`;
 }
+
+// The grade a reading's questions are written for: the reading's own grade
+// when the teacher set one, otherwise the class's.
+export function effectiveGradeLevel(
+  readingGrade: GradeLevel | null,
+  classGrade: GradeLevel,
+): GradeLevel {
+  return readingGrade ?? classGrade;
+}

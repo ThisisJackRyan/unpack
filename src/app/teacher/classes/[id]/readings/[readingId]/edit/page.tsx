@@ -35,9 +35,14 @@ export default async function EditReadingPage({ params }: Props) {
         </div>
       ) : (
         <>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
-            Edit reading
-          </h1>
+          <div className="flex flex-col gap-1">
+            <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+              Edit reading
+            </h1>
+            <p className="text-base text-zinc-600">
+              Changing the text, grade level, number of questions, or mode clears the questions.
+            </p>
+          </div>
           <div className={`${card} p-6 sm:p-8`}>
             <ReadingForm
               mode="edit"

@@ -15,6 +15,13 @@
       "when": 1793076331925,
       "tag": "0001_link_fetch_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793080368168,
+      "tag": "0002_question_generation",
+      "breakpoints": true
     }
   ]
 }

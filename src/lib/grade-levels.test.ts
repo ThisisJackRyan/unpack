@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { GRADE_LEVELS, gradeLevelLabel, isGradeLevel } from "./grade-levels";
+import {
+  effectiveGradeLevel,
+  GRADE_LEVELS,
+  gradeLevelLabel,
+  isGradeLevel,
+} from "./grade-levels";
 
 describe("gradeLevelLabel", () => {
   it("labels kindergarten, grades, and adult", () => {
@@ -25,5 +30,13 @@ describe("isGradeLevel", () => {
     assert.equal(isGradeLevel("k"), false);
     assert.equal(isGradeLevel(4), false);
     assert.equal(isGradeLevel(undefined), false);
+  });
+});
+
+describe("effectiveGradeLevel", () => {
+  it("uses the reading's grade when set, else the class's", () => {
+    assert.equal(effectiveGradeLevel("7", "4"), "7");
+    assert.equal(effectiveGradeLevel(null, "4"), "4");
+    assert.equal(effectiveGradeLevel("adult", "K"), "adult");
   });
 });

@@ -1,8 +1,10 @@
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, getSql, schema } from "@/db";
 import type { Class, Reading } from "@/db/schema";
 import { isUuid } from "./classes";
+import { neonExecutor } from "./neon-executor";
+import { editDraftStatements } from "./shared-questions";
 import type { ReadingSettings } from "./validate-reading";
 
 // Server-only reading queries. Every one is scoped to the owning teacher in
@@ -103,9 +105,10 @@ export async function insertReading(
   return row && { id: row.id };
 }
 
-// Saves edits to a draft. The source link isn't editable, so it stays as
-// saved. Returns undefined (and changes nothing) when the reading isn't the
-// teacher's, isn't in that class, or is no longer a draft.
+// Saves edits to a draft, clearing its shared questions if they no longer
+// fit (see editDraftStatements). Returns undefined (and changes nothing)
+// when the reading isn't the teacher's, isn't in that class, or is no
+// longer a draft.
 export async function updateDraftReading(
   classId: string,
   readingId: string,
@@ -113,34 +116,9 @@ export async function updateDraftReading(
   draft: Omit<ReadingDraft, "sourceUrl">,
 ): Promise<{ id: string } | undefined> {
   if (!isUuid(classId) || !isUuid(readingId)) return undefined;
-  const [row] = await db
-    .update(schema.readings)
-    .set({
-      title: draft.title,
-      bodyText: draft.bodyText,
-      gradeLevel: draft.gradeLevel,
-      questionCount: draft.questionCount,
-      questionMode: draft.questionMode,
-    })
-    .where(
-      and(
-        eq(schema.readings.id, readingId),
-        eq(schema.readings.classId, classId),
-        eq(schema.readings.status, "draft"),
-        inArray(
-          schema.readings.classId,
-          db
-            .select({ id: schema.classes.id })
-            .from(schema.classes)
-            .where(
-              and(
-                eq(schema.classes.id, classId),
-                eq(schema.classes.teacherId, teacherId),
-              ),
-            ),
-        ),
-      ),
-    )
-    .returning({ id: schema.readings.id });
-  return row;
+  const results = await neonExecutor(
+    editDraftStatements({ classId, readingId, teacherId }, draft),
+  );
+  const row = results[results.length - 1]?.[0] as { id: string } | undefined;
+  return row && { id: row.id };
 }
