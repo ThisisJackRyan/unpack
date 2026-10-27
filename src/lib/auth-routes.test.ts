@@ -51,3 +51,12 @@ test("signing out lands on the landing page, set once on ClerkProvider", () => {
     assert.match(source, /<UserButton \/>/, path);
   }
 });
+
+test("the root layout turns Clerk telemetry off and tolerates extension attributes on html and body", () => {
+  const layout = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  assert.match(layout, /<ClerkProvider[^>]*telemetry=\{false\}/);
+  assert.match(layout, /<html\s[^>]*suppressHydrationWarning/);
+  assert.match(layout, /<body [^>]*suppressHydrationWarning/);
+  // Only those two: nothing else hides a hydration mismatch.
+  assert.equal(layout.match(/suppressHydrationWarning/g)?.length, 3); // two props + the comment
+});

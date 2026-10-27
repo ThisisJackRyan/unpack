@@ -41,14 +41,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // suppressHydrationWarning (this element's own attributes only, not its
+    // children): browser extensions add attributes to <html> and <body>
+    // before React hydrates, which logged a hydration error.
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${nunito.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {/* Clerk's links between sign-in and sign-up stay on our own pages,
             signing out lands on our landing page, and its components wear
-            the app's colors, radius and type. */}
+            the app's colors, radius and type. Telemetry is off: nothing
+            about our pages goes to Clerk's telemetry service, and its
+            requests (blocked by many browser privacy tools) no longer log
+            console errors. */}
         <ClerkProvider
           appearance={clerkAppearance}
           signInUrl={SIGN_IN_PATH}
@@ -56,6 +63,7 @@ export default function RootLayout({
           signInFallbackRedirectUrl={AFTER_AUTH_PATH}
           signUpFallbackRedirectUrl={AFTER_AUTH_PATH}
           afterSignOutUrl={AFTER_SIGN_OUT_PATH}
+          telemetry={false}
         >
           {children}
           {/* Clerk's avatar alt is "'s logo" for an account with no name. */}
