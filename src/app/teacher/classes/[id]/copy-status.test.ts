@@ -8,6 +8,6 @@ test("copy feedback: visible Copied!, an announcement, and a by-hand fallback", 
   assert.match(COPY_STATUS_TEXT.failed, /Couldn’t copy/);
   for (const text of Object.values(COPY_STATUS_TEXT)) {
     assert.ok(!text.includes("'"), `straight apostrophe in ${text}`);
-    assert.ok(!text.includes("—"), `em dash in ${text}`);
+    assert.ok(!text.includes("\u2014"), `em dash in ${text}`);
   }
 });
