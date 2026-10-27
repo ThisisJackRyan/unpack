@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
+import { PassCelebration } from "@/components/celebration";
 import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
@@ -172,6 +173,7 @@ function SoloQuestions({
           <Banner tone="done" title="You passed! Nice work.">
             This reading is done. Here are your answers.
           </Banner>
+          <PassCelebration tryNumber={stage.attempt?.tryNumber} />
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults={false} />}
           <NextSteps />
         </>
