@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
+import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 
-// The public landing page. "Get started" goes to /home, which Clerk
-// protects (signed out: sign in or sign up first), then sends each account
-// to its home: /welcome to choose, /teacher, or /learn. Students don't
-// sign in: they join with a class code.
+// The public landing page. "Get started" goes to our own /sign-up page and
+// "Sign in" to /sign-in (Clerk components, not Clerk's hosted pages). Both
+// land on /home, which sends each account to its home: /welcome to choose,
+// /teacher, or /learn. Students don't sign in: they join with a class code.
 export default function Home() {
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 text-zinc-900">
@@ -20,10 +21,10 @@ export default function Home() {
           </p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row">
-          <Link href="/home" className={`${primaryButton} min-h-14 px-8 text-lg`}>
+          <Link href={SIGN_UP_PATH} className={`${primaryButton} min-h-14 px-8 text-lg`}>
             Get started
           </Link>
-          <Link href="/sign-in" className={`${secondaryButton} min-h-14 px-8 text-lg`}>
+          <Link href={SIGN_IN_PATH} className={`${secondaryButton} min-h-14 px-8 text-lg`}>
             Sign in
           </Link>
         </div>

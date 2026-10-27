@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AFTER_AUTH_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,7 +35,15 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <ClerkProvider>{children}</ClerkProvider>
+        {/* Clerk's links between sign-in and sign-up stay on our own pages. */}
+        <ClerkProvider
+          signInUrl={SIGN_IN_PATH}
+          signUpUrl={SIGN_UP_PATH}
+          signInFallbackRedirectUrl={AFTER_AUTH_PATH}
+          signUpFallbackRedirectUrl={AFTER_AUTH_PATH}
+        >
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   );
