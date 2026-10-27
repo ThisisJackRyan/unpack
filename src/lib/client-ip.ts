@@ -110,25 +110,38 @@ export const JOIN_IP_HASH_SECRET_PLACEHOLDER = "replace_me_with_openssl_rand_bas
 
 export const JOIN_IP_HASH_SECRET_MIN_LENGTH = 32;
 
-// The key for hashJoinIp, from JOIN_IP_HASH_SECRET. In production a
-// missing or short secret, the .env.example placeholder, or the public dev
-// secret throws, so a join fails closed (the action shows its generic
-// error) rather than storing weakly keyed hashes. The error names the
-// variable, never its value.
-export function joinIpHashSecret(env: Env = process.env): string {
+// What's wrong with JOIN_IP_HASH_SECRET, or null when it's usable. In
+// production a missing or short secret, the .env.example placeholder, or
+// the public dev secret is a problem; outside production nothing is (the
+// dev secret fills in). Names the variable, never its value. The join
+// action checks this before any database work (join-config.ts) and tells
+// the student joining is turned off.
+export function joinIpHashSecretProblem(env: Env = process.env): { missing: string[]; message: string } | null {
+  if (!isProduction(env)) return null;
   const secret = env.JOIN_IP_HASH_SECRET;
-  if (!isProduction(env)) return secret || DEV_JOIN_IP_HASH_SECRET;
   if (!secret || secret.length < JOIN_IP_HASH_SECRET_MIN_LENGTH) {
-    throw new Error(
-      `JOIN_IP_HASH_SECRET is missing or shorter than ${JOIN_IP_HASH_SECRET_MIN_LENGTH} characters.`,
-    );
+    return {
+      missing: ["JOIN_IP_HASH_SECRET"],
+      message: `JOIN_IP_HASH_SECRET is missing or shorter than ${JOIN_IP_HASH_SECRET_MIN_LENGTH} characters.`,
+    };
   }
   if (secret === JOIN_IP_HASH_SECRET_PLACEHOLDER || secret === DEV_JOIN_IP_HASH_SECRET) {
-    throw new Error(
-      "JOIN_IP_HASH_SECRET is still the example or dev-only value. Set a real secret (openssl rand -base64 32).",
-    );
+    return {
+      missing: ["JOIN_IP_HASH_SECRET"],
+      message: "JOIN_IP_HASH_SECRET is still the example or dev-only value. Set a real secret (openssl rand -base64 32).",
+    };
   }
-  return secret;
+  return null;
+}
+
+// The key for hashJoinIp, from JOIN_IP_HASH_SECRET. When
+// joinIpHashSecretProblem finds one it throws with the same message, a
+// backstop behind the join action's up-front check, so a join still fails
+// closed rather than storing weakly keyed hashes.
+export function joinIpHashSecret(env: Env = process.env): string {
+  const problem = joinIpHashSecretProblem(env);
+  if (problem) throw new Error(problem.message);
+  return env.JOIN_IP_HASH_SECRET || DEV_JOIN_IP_HASH_SECRET;
 }
 
 // Only this keyed hash (HMAC-SHA256 with a server secret) is stored, never

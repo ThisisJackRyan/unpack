@@ -25,7 +25,7 @@ import { checkJoinLimit, joinRetryFromRows, joinRetryStatement, type JoinRetry }
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { studentNameKey } from "./student-name";
 import { generateSessionToken, hashSessionToken } from "./student-session-token";
-import type { JoinValues } from "./validate-join";
+import { CLASS_NOT_FOUND_MESSAGE, type JoinErrors, type JoinValues } from "./validate-join";
 import { hashJoinCode } from "./client-ip";
 
 export const NAME_TAKEN_MESSAGE = "Someone already has that name. Add another letter.";
@@ -111,4 +111,19 @@ export async function joinClassWith(data: JoinValues, deps: JoinDeps): Promise<J
   const [row] = rows;
   if (!row) return { status: "class_not_found" };
   return { status: "joined", studentId: String(row.id), classId: String(row.class_id), token };
+}
+
+// What the form shows for an outcome that's a mistake to fix. An unknown
+// or turned-off code goes on the code field, like a malformed one (see
+// validateJoin), so every "no such class" reads the same. "limited" isn't
+// here: the join action shows it as an amber note with a retry time.
+export function joinOutcomeErrors(
+  outcome: Exclude<JoinOutcome, { status: "joined" | "limited" }>,
+): JoinErrors {
+  switch (outcome.status) {
+    case "class_not_found":
+      return { code: CLASS_NOT_FOUND_MESSAGE };
+    case "name_taken":
+      return { lastInitials: NAME_TAKEN_MESSAGE };
+  }
 }

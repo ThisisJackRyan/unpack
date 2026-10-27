@@ -1,5 +1,5 @@
 import { isProduction, type Env } from "./env";
-import { JOIN_FAILED_MESSAGE } from "./validate-join";
+import { JOIN_DISABLED_MESSAGE, logJoinBlockedConfig, type JoinBlockedConfig } from "./validate-join";
 
 // The bot check on joining a class: a Cloudflare Turnstile token from the
 // join form, verified server side with Turnstile's siteverify API. Pure
@@ -17,10 +17,13 @@ import { JOIN_FAILED_MESSAGE } from "./validate-join";
 // - Both NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY set: on.
 //   The join form shows the widget and every join needs a good token.
 // - In production, either key missing (or both): "misconfigured". Every
-//   join is refused with the join's generic message (JOIN_FAILED_MESSAGE,
-//   as when JOIN_IP_HASH_SECRET is missing) and one console.error names
-//   the missing variable(s), never a value. Like JOIN_IP_HASH_SECRET, a
-//   production deploy fails closed instead of quietly running without it.
+//   join is refused with JOIN_DISABLED_MESSAGE ("Joining is turned off
+//   right now", as when JOIN_IP_HASH_SECRET is missing) and one
+//   console.error tagged "join_blocked_config" names the missing
+//   variable(s), never a value. The join action checks this up front
+//   (join-config.ts); verifyJoinBotCheck refuses the same way as a
+//   backstop. Like JOIN_IP_HASH_SECRET, a production deploy fails closed
+//   instead of quietly running without it.
 // - Outside production, neither key: off (local dev, tests, the DB
 //   checks), with no widget and no network call; joins rely on the rate
 //   limits alone. Cloudflare's public test keys (see .env.example) turn it
@@ -35,7 +38,8 @@ import { JOIN_FAILED_MESSAGE } from "./validate-join";
 // with kid-friendly copy. Nothing is stored.
 //
 // Order in the join action (src/app/join/actions.ts): form validation (no
-// network), then this check, then the rate limits, then the insert. A
+// network), then the server setup check (join-config.ts), then this check,
+// then the rate limits, then the insert. A
 // refused bot check never reaches the rate limits, so a bot that can't
 // pass Turnstile can't use up a real code's 100 tries per 10 minutes or a
 // school's shared IP budget. Each Turnstile token is single use, so every
@@ -169,17 +173,20 @@ export type JoinBotCheckDeps = {
   // "misconfigured", which goes to logError instead.
   onFailure?: (fields: Record<string, unknown>) => void;
   // The loud server log for a misconfigured deploy (default
-  // console.error) and the production opt-out's warning (default
-  // console.warn). Variable names only, never values.
-  logError?: (message: string) => void;
+  // console.error, called as logJoinBlockedConfig does: the
+  // "join_blocked_config" tag, then the missing names and the message)
+  // and the production opt-out's warning (default console.warn).
+  // Variable names only, never values.
+  logError?: (tag: string, fields: JoinBlockedConfig) => void;
   logWarn?: (message: string) => void;
 };
 
-// What the student sees. Misconfigured gets the join's generic message, as
-// a missing JOIN_IP_HASH_SECRET does: it's not the student's doing.
+// What the student sees. Misconfigured gets JOIN_DISABLED_MESSAGE, as a
+// missing JOIN_IP_HASH_SECRET does: it's not the student's doing, and
+// trying again won't help.
 export function botCheckMessage(reason: JoinBotCheckFailure): string {
   if (reason === "missing_token") return BOT_CHECK_MISSING_MESSAGE;
-  if (reason === "misconfigured") return JOIN_FAILED_MESSAGE;
+  if (reason === "misconfigured") return JOIN_DISABLED_MESSAGE;
   return BOT_CHECK_FAILED_MESSAGE;
 }
 
@@ -197,7 +204,7 @@ export async function verifyJoinBotCheck(
     return { ok: true, skipped: true };
   }
   if (config.status === "misconfigured") {
-    (deps.logError ?? console.error)(botCheckMisconfiguredError(config.missing));
+    logJoinBlockedConfig({ missing: config.missing, message: botCheckMisconfiguredError(config.missing) }, deps.logError);
     return { ok: false, reason: "misconfigured" };
   }
 
