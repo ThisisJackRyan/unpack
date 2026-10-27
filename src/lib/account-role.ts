@@ -6,12 +6,18 @@
 // - A new account has no role and goes to /welcome to choose: "I’m a
 //   teacher" or "I’m reading for myself". Accounts from before self-learner
 //   mode were backfilled to teacher (migration 0008).
-// - Self-learner needs the age confirmation ("I’m 13 or older", COPPA). We
-//   store only when it was confirmed (teachers.age_confirmed_at), never a
-//   birthdate. The role and the timestamp are written by ONE statement
-//   that refuses self_learner without a confirmation (now or earlier), and
-//   the teachers_self_learner_age_check constraint is the backstop.
-//   Teachers don't need it.
+// - Self-learner needs the neutral age screen (COPPA; birth month and
+//   year, checked on the server by checkAgeScreen in age-screen.ts). We
+//   store only when 13+ was confirmed (teachers.age_confirmed_at), never
+//   the month or year. The role and the timestamp are written by ONE
+//   statement that refuses self_learner without a confirmation (now or
+//   earlier), and the teachers_self_learner_age_check constraint is the
+//   backstop. Teachers don't get the screen (unchanged from PR 13).
+// - An under-13 answer sets the age gate cookie (age-screen.ts). While it
+//   is on the device, self-learner is refused without asking again, on
+//   /welcome and in /settings alike, so picking teacher first and then
+//   switching doesn't get around it. An account that confirmed earlier
+//   isn't asked, so the cookie doesn't change anything for it.
 // - Switching in /settings keeps every row: it only changes which home the
 //   account sees. Classes stay with the account while it is a self-learner
 //   (and come back when it switches back); self-learner readings stay while
@@ -22,6 +28,7 @@
 // - Every page, action, and route guards its area with roleRedirect, on
 //   the server.
 
+import { AGE_SCREEN_ERROR, checkAgeScreen } from "./age-screen";
 import type { Statement } from "./link-rate-limit";
 
 export const ACCOUNT_ROLES = ["teacher", "self_learner"] as const;
@@ -32,11 +39,12 @@ export function isAccountRole(value: unknown): value is AccountRole {
   return typeof value === "string" && (ACCOUNT_ROLES as readonly string[]).includes(value);
 }
 
-// The checkbox's value when ticked.
-export const AGE_CONFIRMED_VALUE = "yes";
+// The age screen's two selects.
+export const BIRTH_MONTH_FIELD = "birthMonth";
+export const BIRTH_YEAR_FIELD = "birthYear";
 
 export const ROLE_REQUIRED_MESSAGE = "Choose one to keep going.";
-export const AGE_REQUIRED_MESSAGE = "Please confirm you’re 13 or older to read for yourself.";
+export const AGE_REQUIRED_MESSAGE = AGE_SCREEN_ERROR;
 export const ROLE_SAVE_FAILED_MESSAGE = "We couldn’t save that. Please try again.";
 
 // Where each role lives. No role yet: the first-run choice.
@@ -77,21 +85,33 @@ export type RoleChoiceErrors = { role?: string; age?: string };
 
 export type RoleChoice =
   | { ok: true; role: AccountRole; confirmAge: boolean }
-  | { ok: false; errors: RoleChoiceErrors };
+  | { ok: false; errors: RoleChoiceErrors }
+  // Self-learner, but the age screen said under 13 (now: set the cookie)
+  // or did before on this device (the cookie): show the class note.
+  | { ok: false; ageGate: "set" | "kept" };
 
-// Reads the choice form (raw FormData values). `ageAlreadyConfirmed`: the
-// account confirmed before (a switch back to self-learner doesn't ask
-// again). The age box only matters for self-learner.
-export function parseRoleChoice(
-  input: { role: unknown; ageConfirmed: unknown },
-  ageAlreadyConfirmed = false,
-): RoleChoice {
+// What the account and the device already say about the age screen.
+export type AgeContext = {
+  // The account confirmed before (a switch back to self-learner doesn't
+  // ask again).
+  ageConfirmed: boolean;
+  // The age gate cookie is on this device.
+  ageGated: boolean;
+  now: Date;
+};
+
+// Reads the choice form (raw FormData values). The age answer only
+// matters for self-learner, and is never read when the account confirmed
+// before or the cookie is set.
+export function parseRoleChoice(input: { role: unknown; birthMonth: unknown; birthYear: unknown }, ctx: AgeContext): RoleChoice {
   if (!isAccountRole(input.role)) return { ok: false, errors: { role: ROLE_REQUIRED_MESSAGE } };
   const role = input.role;
-  if (role === "teacher") return { ok: true, role, confirmAge: false };
-  const ticked = input.ageConfirmed === AGE_CONFIRMED_VALUE;
-  if (!ticked && !ageAlreadyConfirmed) return { ok: false, errors: { age: AGE_REQUIRED_MESSAGE } };
-  return { ok: true, role, confirmAge: ticked };
+  if (role === "teacher" || ctx.ageConfirmed) return { ok: true, role, confirmAge: false };
+  if (ctx.ageGated) return { ok: false, ageGate: "kept" };
+  const result = checkAgeScreen({ month: input.birthMonth, year: input.birthYear }, ctx.now);
+  if (result === "invalid") return { ok: false, errors: { age: AGE_REQUIRED_MESSAGE } };
+  if (result === "under") return { ok: false, ageGate: "set" };
+  return { ok: true, role, confirmAge: true };
 }
 
 // The confirm button's value on a teacher's switch to self-learner.
@@ -109,13 +129,13 @@ export type SettingsRoleChoice =
   | { ok: false; confirmSwitch: true };
 
 // The /settings form: parseRoleChoice, then the switch confirm. The age
-// box is checked first, so a confirmed switch that still needs it doesn't
-// ask to confirm again.
+// screen is checked first, so a confirmed switch that still needs it
+// doesn't ask to confirm again, and an under-13 answer is never saved.
 export function parseSettingsRoleChoice(
-  input: { role: unknown; ageConfirmed: unknown; confirmSwitch: unknown },
-  account: { role: AccountRole | null; ageConfirmed: boolean },
+  input: { role: unknown; birthMonth: unknown; birthYear: unknown; confirmSwitch: unknown },
+  account: { role: AccountRole | null } & AgeContext,
 ): SettingsRoleChoice {
-  const choice = parseRoleChoice(input, account.ageConfirmed);
+  const choice = parseRoleChoice(input, account);
   if (!choice.ok) return choice;
   if (needsSwitchConfirm(account.role, choice.role) && input.confirmSwitch !== SWITCH_CONFIRM_VALUE) {
     return { ok: false, confirmSwitch: true };

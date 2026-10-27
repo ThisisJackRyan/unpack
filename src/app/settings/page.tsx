@@ -3,6 +3,8 @@ import Link from "next/link";
 import { RolePicker } from "@/components/role-picker";
 import { backLink, card } from "@/components/ui";
 import { requireArea } from "@/lib/account";
+import { readAgeGate } from "@/lib/age-gate";
+import { birthYearOptions } from "@/lib/age-screen";
 import { settingsBackLink } from "@/lib/account-role";
 import { switchRoleAction } from "./actions";
 
@@ -28,6 +30,8 @@ export default async function SettingsPage() {
           submitLabel="Save"
           initialRole={account.role}
           ageConfirmed={account.ageConfirmedAt !== null}
+          ageGated={await readAgeGate()}
+          birthYears={birthYearOptions(new Date())}
           confirmSwitch={account.role === "teacher"}
         />
         <p className="border-t border-ink-200 pt-5 text-base text-ink-700">

@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
-import { AGE_CONFIRMED_VALUE, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
+import { BIRTH_MONTH_FIELD, BIRTH_YEAR_FIELD, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
+import { MONTH_NAMES } from "@/lib/age-screen";
 import { ErrorMessage } from "./error-message";
 import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, type RoleFormState } from "./role-form-state";
-import { primaryButtonLarge, secondaryButtonLarge } from "./ui";
+import { field, primaryButtonLarge, secondaryButtonLarge } from "./ui";
 
 const CHOICES: { role: AccountRole; title: string; line: string }[] = [
   { role: "teacher", title: "I’m a teacher", line: "Make a class, share a code, and see who’s done." },
@@ -12,9 +14,15 @@ const CHOICES: { role: AccountRole; title: string; line: string }[] = [
 ];
 
 // Two big selectable cards (real radio buttons, so arrow keys move between
-// them and a screen reader hears a radio group), then the age box when
-// "reading for myself" is picked, then one button. The age box shows with
-// CSS (:has) too, so it works before hydration.
+// them and a screen reader hears a radio group), then the age screen when
+// "reading for myself" is picked, then one button. The age screen shows
+// with CSS (:has) too, so it works before hydration.
+//
+// The age screen (see src/lib/age-screen.ts) is two selects, birth month
+// and birth year, with no default and nothing on the page about what the
+// answer is for. The server checks it. When it says no (now, or the
+// cookie from before), the class note with a link to /join takes its
+// place, with no way to send self-learner again.
 //
 // confirmSwitch (/settings, for a teacher): choosing "reading for myself"
 // and pressing the button first shows an amber note that the classes stay
@@ -27,6 +35,8 @@ export function RolePicker({
   submitLabel,
   initialRole = null,
   ageConfirmed,
+  ageGated,
+  birthYears,
   confirmSwitch = false,
 }: {
   action: (state: RoleFormState, formData: FormData) => Promise<RoleFormState>;
@@ -35,12 +45,16 @@ export function RolePicker({
   initialRole?: AccountRole | null;
   // Confirmed before: no box (a switch back doesn't ask again).
   ageConfirmed: boolean;
+  // The age gate cookie is on this device: the class note, no screen.
+  ageGated: boolean;
+  // The year select's options (birthYearOptions, worked out on the server).
+  birthYears: number[];
   confirmSwitch?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   const [role, setRole] = useState<string | null>(state.role ?? initialRole);
   const [asking, setAsking] = useState(state.switchConfirm === "ask");
-  // Ticking the age box clears its error, so the hint comes back.
+  // Picking a month or year clears the age error, so the hint comes back.
   const [ageErrorCleared, setAgeErrorCleared] = useState(false);
   // After an error the form is reset to its defaults: follow the kept choice.
   const [shown, setShown] = useState(state);
@@ -51,11 +65,13 @@ export function RolePicker({
     setAgeErrorCleared(false);
   }
   const errors = state.errors ?? {};
-  const askAge = !ageConfirmed;
+  const gated = !ageConfirmed && (ageGated || state.ageGate === true);
+  const askAge = !ageConfirmed && !gated;
+  const gateShown = gated && role === "self_learner";
   const ageError = ageErrorCleared ? undefined : errors.age;
   const age = ageNote(ageError);
   const confirmed = state.switchConfirm === "confirmed";
-  const needsConfirm = confirmSwitch && role === "self_learner" && !confirmed;
+  const needsConfirm = confirmSwitch && role === "self_learner" && !confirmed && !gated;
   const warning = needsConfirm && asking;
 
   // Focus moves to the note when it opens (the button that opened it is
@@ -125,39 +141,93 @@ export function RolePicker({
       </fieldset>
 
       {askAge && (
-        <div
-          className={`flex-col gap-2 rounded-3xl border-2 border-ink-200 bg-white p-5 ${
+        <fieldset
+          className={`flex-col gap-3 rounded-3xl border-2 border-ink-200 bg-white p-5 ${
             role === "self_learner" ? "flex" : "hidden group-has-[#role-self_learner:checked]/role:flex"
           }`}
         >
-          <label htmlFor="ageConfirmed" className="flex min-h-12 cursor-pointer items-center gap-3">
-            <input
-              id="ageConfirmed"
-              name="ageConfirmed"
-              type="checkbox"
-              value={AGE_CONFIRMED_VALUE}
-              onChange={(e) => {
-                if (e.currentTarget.checked) setAgeErrorCleared(true);
-              }}
-              aria-invalid={ageError ? true : undefined}
-              aria-describedby={age.describedBy}
-              className="h-6 w-6 shrink-0 cursor-pointer rounded accent-primary-600 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
-            />
-            <span className="text-lg font-semibold text-ink-950">I’m 13 or older</span>
-          </label>
+          <legend className="mb-1 text-lg font-semibold text-ink-950">When were you born?</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={BIRTH_MONTH_FIELD} className="text-base font-semibold text-ink-950">
+                Birth month
+              </label>
+              <select
+                id={BIRTH_MONTH_FIELD}
+                name={BIRTH_MONTH_FIELD}
+                defaultValue=""
+                onChange={() => setAgeErrorCleared(true)}
+                aria-invalid={ageError ? true : undefined}
+                aria-describedby={age.describedBy}
+                className={`${field} cursor-pointer text-lg`}
+              >
+                <option value="" disabled>
+                  Month
+                </option>
+                {MONTH_NAMES.map((name, i) => (
+                  <option key={name} value={i + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={BIRTH_YEAR_FIELD} className="text-base font-semibold text-ink-950">
+                Birth year
+              </label>
+              <select
+                id={BIRTH_YEAR_FIELD}
+                name={BIRTH_YEAR_FIELD}
+                defaultValue=""
+                onChange={() => setAgeErrorCleared(true)}
+                aria-invalid={ageError ? true : undefined}
+                aria-describedby={age.describedBy}
+                className={`${field} cursor-pointer text-lg`}
+              >
+                <option value="" disabled>
+                  Year
+                </option>
+                {birthYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           {/* One note at a time: the error replaces the hint while active.
               The error line stays mounted (empty) so it is announced. */}
           {age.show === "hint" && (
             <p id={AGE_HINT_ID} className="text-base text-ink-700">
-              You need to be 13 or older to read on your own. Younger readers can join a class with a code from their
-              teacher.
+              We ask everyone who reads on their own. We don’t save your answer.
             </p>
           )}
           <ErrorMessage id={AGE_ERROR_ID}>
             {ageError}
           </ErrorMessage>
-        </div>
+        </fieldset>
       )}
+
+      {/* The class note: polite, so it is read out when it appears. */}
+      <div aria-live="polite">
+        {gateShown && (
+          <section
+            aria-labelledby="age-gate-title"
+            className="flex flex-col gap-4 rounded-3xl border-2 border-primary-200 bg-primary-50 p-5"
+          >
+            <h2 id="age-gate-title" className="text-xl font-bold text-ink-950">
+              Let’s get you into a class
+            </h2>
+            <p className="text-base text-ink-700">
+              Ask your teacher for a class code, then join their class to read and answer questions. You don’t need an
+              account for that.
+            </p>
+            <Link href="/join" className={`${primaryButtonLarge} sm:self-start`}>
+              Join with a code
+            </Link>
+          </section>
+        )}
+      </div>
 
       {warning && (
         <section
@@ -208,7 +278,7 @@ export function RolePicker({
         {errors.form}
       </ErrorMessage>
 
-      {!warning && (
+      {!warning && !gateShown && (
         <button type="submit" disabled={pending} className={`${primaryButtonLarge} sm:self-start`}>
           {pending ? "Saving…" : submitLabel}
         </button>

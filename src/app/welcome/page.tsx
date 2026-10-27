@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Sparkle } from "@/components/illustrations";
 import { RolePicker } from "@/components/role-picker";
 import { requireArea } from "@/lib/account";
+import { readAgeGate } from "@/lib/age-gate";
+import { birthYearOptions } from "@/lib/age-screen";
 import { chooseRoleAction } from "./actions";
 
 export const metadata: Metadata = {
@@ -26,6 +28,8 @@ export default async function WelcomePage() {
         legend="How will you use unpack?"
         submitLabel="Continue"
         ageConfirmed={account.ageConfirmedAt !== null}
+        ageGated={await readAgeGate()}
+        birthYears={birthYearOptions(new Date())}
       />
     </div>
   );
