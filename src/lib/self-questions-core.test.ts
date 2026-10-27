@@ -14,11 +14,12 @@ import {
   selfCommitStatement,
   selfQuestionsView,
   selfQuestionWriter,
+  SELF_QUESTIONS_LIMITED_MESSAGE,
   selfReleaseSlotStatement,
   selfReleaseStatement,
   type SelfQuestionStore,
 } from "./self-questions-core";
-import { CLAIM_STALE_SECONDS, STUDENT_GENERATION_THROTTLED_MESSAGE } from "./student-questions-core";
+import { CLAIM_STALE_SECONDS } from "./student-questions-core";
 import { QUESTIONS_ERROR_MESSAGE } from "./student-reading-view";
 
 const ACCOUNT = "00000000-0000-4000-8000-0000000000a1";
@@ -166,7 +167,7 @@ describe("getOrCreateSelfQuestionsWith", () => {
       },
       newToken,
     });
-    assert.deepEqual(result, { status: "rate_limited" });
+    assert.deepEqual(result, { status: "rate_limited", retryAt: null });
     assert.equal(state.writes, 0);
     assert.equal(state.released, true, "an open that can't write gives the slot back");
   });
@@ -182,7 +183,15 @@ describe("getOrCreateSelfQuestionsWith", () => {
 
 describe("selfQuestionsView", () => {
   it("maps results to the student read view kinds, with no teacher to ask", () => {
-    assert.deepEqual(selfQuestionsView({ status: "rate_limited" }), { kind: "throttled", message: STUDENT_GENERATION_THROTTLED_MESSAGE });
+    assert.deepEqual(selfQuestionsView({ status: "rate_limited", retryAt: null }), {
+      kind: "throttled",
+      message: `${SELF_QUESTIONS_LIMITED_MESSAGE} Try again in a few minutes.`,
+    });
+    const clock = { now: new Date("2026-10-27T14:30:00Z"), timeZone: "America/New_York", utcLabel: false };
+    assert.deepEqual(selfQuestionsView({ status: "rate_limited", retryAt: new Date("2026-10-27T14:40:00Z") }, clock), {
+      kind: "throttled",
+      message: "You’ve asked for a lot of questions in the last 10 minutes, so let’s take a short break. You can try again at 10:40 AM.",
+    });
     assert.deepEqual(selfQuestionsView({ status: "error", kind: "failed" }), { kind: "error", message: QUESTIONS_ERROR_MESSAGE });
     assert.deepEqual(selfQuestionsView({ status: "pending", retryAfterMs: 2000 }), { kind: "pending", retryAfterMs: 2000 });
     assert.deepEqual(selfQuestionsView({ status: "not_found" }), { kind: "not_found" });

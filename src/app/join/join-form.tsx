@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { LimitNotice } from "@/components/limit-notice";
 import { field, primaryButton, secondaryButton } from "@/components/ui";
 import { joinClassAction } from "./actions";
 import { FIRST_NAME_MAX_LENGTH, LAST_INITIALS_MAX_LENGTH, type JoinState } from "./form-state";
@@ -112,6 +113,7 @@ export function JoinForm({
       <p aria-live="polite" className={`${error} empty:hidden`}>
         {errors.form}
       </p>
+      {state.limit && <LimitNotice large>{state.limit}</LimitNotice>}
 
       <button
         type="submit"

@@ -4,12 +4,13 @@ import { notFound } from "next/navigation";
 import { AnswerForm } from "@/components/answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
+import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { QuestionSkeletons } from "@/components/question-skeletons";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
 import { backLink, card, primaryButton, secondaryButton } from "@/components/ui";
 import { requireSelfLearner } from "@/lib/account";
-import { requestTimeZone } from "@/lib/request-time-zone";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel } from "@/lib/question-modes";
 import { soloAnnouncement, soloStage, type SoloStage } from "@/lib/self-answers-core";
@@ -47,9 +48,9 @@ export default async function SelfReadingPage({ params }: Props) {
   if (!reading) notFound();
 
   const result = await getOrCreateSelfQuestions(account.id, reading.id);
-  const view = selfQuestionsView(result);
+  const clock = await requestRetryClock();
+  const view = selfQuestionsView(result, clock);
   if (view.kind === "not_found") notFound();
-  const zone = result.status === "limit_reached" ? await requestTimeZone() : null;
   const stage = view.kind === "questions" ? soloStage(await loadSelfProgress(account.id, reading.id)) : null;
   const host = sourceHost(reading.sourceUrl);
 
@@ -110,14 +111,22 @@ export default async function SelfReadingPage({ params }: Props) {
 
         {/* This reading's questions failed before, so it gave its weekly
             slot back, and every slot is in use now. */}
-        {result.status === "limit_reached" && zone && (
+        {result.status === "limit_reached" && (
           <div className="flex flex-col items-start gap-5">
-            <AllowanceLimit state={result.state} now={new Date()} timeZone={zone.timeZone} utcLabel={zone.fallback} />
+            <AllowanceLimit state={result.state} now={clock.now} timeZone={clock.timeZone} utcLabel={clock.utcLabel} />
             <RetryButton />
           </div>
         )}
 
-        {(view.kind === "throttled" || view.kind === "error") && (
+        {/* The question limit: a break, not an error. */}
+        {view.kind === "throttled" && (
+          <div className="flex flex-col items-start gap-5">
+            <LimitNotice large>{view.message}</LimitNotice>
+            <RetryButton />
+          </div>
+        )}
+
+        {view.kind === "error" && (
           <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
             <p aria-live="polite" className="text-lg text-zinc-700">
               {view.message}

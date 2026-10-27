@@ -5,6 +5,9 @@ import {
   JOIN_CODE_LIMIT,
   JOIN_IP_LIMIT,
   JOIN_LIMITED_MESSAGE,
+  joinLimitedMessage,
+  joinRetryFromRows,
+  joinRetryStatement,
   JOIN_PRUNE_BATCH,
   JOIN_WINDOW_MINUTES,
   joinAttemptStatements,
@@ -18,7 +21,32 @@ describe("join limit settings", () => {
     assert.equal(JOIN_IP_LIMIT, 60);
     assert.equal(JOIN_CODE_LIMIT, 100);
     assert.equal(JOIN_WINDOW_MINUTES, 10);
-    assert.equal(JOIN_LIMITED_MESSAGE, "Too many tries. Wait a few minutes and try again.");
+    assert.equal(
+      JOIN_LIMITED_MESSAGE,
+      "Lots of people have tried to join from here in the last few minutes, so joining is paused for a bit.",
+    );
+    assert.equal(joinLimitedMessage("ip"), JOIN_LIMITED_MESSAGE);
+    assert.equal(
+      joinLimitedMessage("code"),
+      "This class code has had lots of tries in the last few minutes, so it’s paused for a bit.",
+    );
+  });
+});
+
+describe("joinRetryStatement", () => {
+  it("frees up when the latest of the limited keys' oldest attempts leaves the window", () => {
+    const s = joinRetryStatement(KEYS);
+    assert.match(s.text, /where \(key_kind = 'ip' and n >= \$4::int\) or \(key_kind = 'code' and n >= \$5::int\)/);
+    assert.match(s.text, /\(select max\(oldest\) \+ make_interval\(mins => \$3::int\) from at_limit\) as retry_at/);
+    assert.deepEqual(s.params, [KEYS.ipHash, KEYS.codeHash, JOIN_WINDOW_MINUTES, JOIN_IP_LIMIT, JOIN_CODE_LIMIT]);
+  });
+
+  it("reads which key is limited (the code first) and the time", () => {
+    const at = new Date("2026-10-27T14:40:00Z");
+    assert.deepEqual(joinRetryFromRows([[{ code_limited: true, retry_at: at }]]), { by: "code", retryAt: at });
+    assert.deepEqual(joinRetryFromRows([[{ code_limited: false, retry_at: "2026-10-27T14:40:00Z" }]]), { by: "ip", retryAt: at });
+    assert.deepEqual(joinRetryFromRows([[{ code_limited: false, retry_at: null }]]), { by: "ip", retryAt: null });
+    assert.deepEqual(joinRetryFromRows([]), { by: "ip", retryAt: null });
   });
 });
 

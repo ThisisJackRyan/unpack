@@ -8,4 +8,6 @@ export type AnswerFormState = {
   // By question id.
   errors?: Record<string, string>;
   message?: string;
+  // Checking is paused (an outage): an amber note with the retry time.
+  limit?: string;
 };

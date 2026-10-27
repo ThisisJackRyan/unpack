@@ -51,18 +51,23 @@ import {
   type AllowanceState,
   type ReadingAllowance,
 } from "./self-allowance";
+import { dateFromRow, withRetryAt, type RetryClock } from "./local-time";
 import {
   QUESTION_GENERATION_LIMIT,
   QUESTION_GENERATION_PRUNE_HOURS,
   QUESTION_GENERATION_WINDOW_MINUTES,
+  questionGenerationRetryAtStatement,
 } from "./question-rate-limit";
 import {
   CLAIM_STALE_SECONDS,
   PENDING_RETRY_AFTER_MS,
-  STUDENT_GENERATION_THROTTLED_MESSAGE,
   type StudentQuestion,
 } from "./student-questions-core";
 import { QUESTIONS_ERROR_MESSAGE, type StudentReadingView } from "./student-reading-view";
+
+// At the account's question writing limit (the teacher limit, reused):
+// an amber note, then when the next one frees up.
+export const SELF_QUESTIONS_LIMITED_MESSAGE = `You’ve asked for a lot of questions in the last ${QUESTION_GENERATION_WINDOW_MINUTES} minutes, so let’s take a short break.`;
 
 export type SelfReadingContext = { bodyText: string; gradeLevel: GradeLevel; questionCount: number };
 
@@ -79,6 +84,9 @@ export type SelfQuestionStore = {
   releaseSlot(accountId: string, readingId: string): Promise<void>;
   // Where the allowance stands, for the limit_reached message.
   allowanceState(accountId: string, allowance: ReadingAllowance): Promise<AllowanceState>;
+  // After "rate_limited": when the next question write frees up, if the
+  // store can say.
+  rateLimitedUntil?(accountId: string): Promise<Date | null>;
   // False when the claim was lost (taken over after going stale).
   commit(accountId: string, readingId: string, token: string, prompts: string[]): Promise<boolean>;
 };
@@ -113,7 +121,7 @@ export type SelfQuestionDeps = {
 export type SelfQuestionsResult =
   | { status: "ready"; questions: StudentQuestion[] }
   | { status: "pending"; retryAfterMs: number }
-  | { status: "rate_limited" }
+  | { status: "rate_limited"; retryAt: Date | null }
   // A released reading's Try again with every slot in use.
   | { status: "limit_reached"; state: AllowanceState }
   | { status: "not_found" }
@@ -153,7 +161,8 @@ export async function getOrCreateSelfQuestionsWith(
   if (claim === "not_found") return { status: claim };
   if (claim === "rate_limited") {
     await store.releaseSlot(accountId, readingId);
-    return { status: claim };
+    // Only for the message: if it can't be read, a relative time.
+    return { status: claim, retryAt: (await store.rateLimitedUntil?.(accountId).catch(() => null)) ?? null };
   }
   if (claim === "limit_reached") return { status: claim, state: await store.allowanceState(accountId, allowance) };
   if (claim === "ready" || claim === "pending") return readyOrPending(store, accountId, readingId);
@@ -179,17 +188,19 @@ export async function getOrCreateSelfQuestionsWith(
 // What the reading page shows (the student view kinds, so the page reuses
 // the student read view's pieces). No teacher to ask: an error or the
 // limit is a break and Try again.
-export function selfQuestionsView(result: SelfQuestionsResult): StudentReadingView {
+// `clock` (now and the reader's zone) turns the question limit's retry
+// time into "You can try again at 2:40 PM."; without it, a relative time.
+export function selfQuestionsView(result: SelfQuestionsResult, clock: RetryClock | null = null): StudentReadingView {
   switch (result.status) {
     case "ready":
       return { kind: "questions", questions: result.questions };
     case "pending":
       return { kind: "pending", retryAfterMs: result.retryAfterMs };
     case "rate_limited":
-      return { kind: "throttled", message: STUDENT_GENERATION_THROTTLED_MESSAGE };
+      return { kind: "throttled", message: withRetryAt(SELF_QUESTIONS_LIMITED_MESSAGE, result.retryAt, clock) };
     case "limit_reached":
       // The page shows the allowance note (with the time) instead.
-      return { kind: "limit_reached", message: STUDENT_GENERATION_THROTTLED_MESSAGE };
+      return { kind: "limit_reached", message: SELF_QUESTIONS_LIMITED_MESSAGE };
     case "error":
       return { kind: "error", message: QUESTIONS_ERROR_MESSAGE };
     case "not_found":
@@ -400,6 +411,10 @@ export function postgresSelfQuestionStore(execute: StatementExecutor): SelfQuest
     async allowanceState(accountId, allowance) {
       const [row] = await one(allowanceStatement(accountId, allowance));
       return allowanceFromRow(row, allowance);
+    },
+    async rateLimitedUntil(accountId) {
+      const [row] = await one(questionGenerationRetryAtStatement(accountId));
+      return dateFromRow(row?.retry_at);
     },
     async commit(accountId, readingId, token, prompts) {
       const rows = await one(selfCommitStatement(accountId, readingId, token, prompts));

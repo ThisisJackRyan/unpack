@@ -7,6 +7,7 @@
 
 import { FetchArticleError, type FetchArticleErrorKind } from "./fetch-errors";
 import { LINK_FETCH_LIMITED_MESSAGE } from "./link-rate-limit";
+import { withRetryAt } from "./local-time";
 import {
   BODY_TEXT_MAX_LENGTH,
   resolveLinkTitle,
@@ -37,12 +38,17 @@ export type ReadingSourceResult =
       errors: ReadingFormErrors & { form?: string };
       // Shown after a link error as a control that switches to "Paste text".
       suggestText?: string;
+      // The link limit (an amber note, not an error), with its retry time.
+      limit?: string;
     };
 
 export type ReadingSourceDeps = {
   // Records a link fetch against the account's limit; false at the limit.
   // Throws when the limit can't be checked (we then don't fetch).
   recordLinkFetch: () => Promise<boolean>;
+  // The note at the limit, with when the next link frees up (the action
+  // reads the time and the reader's zone). Without it, a relative time.
+  limitedMessage?: () => Promise<string>;
   fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
   // Safe fields only (kind, host, error names), never the URL or text.
   log: (message: string, fields: Record<string, unknown>) => void;
@@ -68,8 +74,15 @@ export async function resolveReadingSource(
     return { ok: false, errors: { form: SAVE_READING_FAILED_MESSAGE } };
   }
   if (!allowed) {
-    // Pasted text isn't limited.
-    return { ok: false, errors: { url: LINK_FETCH_LIMITED_MESSAGE }, suggestText: "Paste the text instead." };
+    // Pasted text isn't limited. The time is a nicety: if it can't be
+    // read, say a relative time.
+    let limit: string;
+    try {
+      limit = deps.limitedMessage ? await deps.limitedMessage() : withRetryAt(LINK_FETCH_LIMITED_MESSAGE, null, null);
+    } catch {
+      limit = withRetryAt(LINK_FETCH_LIMITED_MESSAGE, null, null);
+    }
+    return { ok: false, errors: {}, limit, suggestText: "Paste the text instead." };
   }
 
   let article: { title: string; text: string; url: string };

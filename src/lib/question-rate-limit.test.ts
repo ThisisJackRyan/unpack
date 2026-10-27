@@ -5,6 +5,7 @@ import {
   checkQuestionGenerationLimit,
   QUESTION_GENERATION_LIMIT,
   QUESTION_GENERATION_LIMITED_MESSAGE,
+  questionGenerationRetryAtStatement,
   QUESTION_GENERATION_PRUNE_HOURS,
   QUESTION_GENERATION_WINDOW_MINUTES,
   questionGenerationStatements,
@@ -31,9 +32,15 @@ describe("question generation limit settings", () => {
   it("has its own message, not the link fetch one", () => {
     assert.equal(
       QUESTION_GENERATION_LIMITED_MESSAGE,
-      "You’ve made a lot of questions. Try again in a few minutes.",
+      "You’ve written a lot of questions in the last 10 minutes, so question writing is taking a short break.",
     );
     assert.notEqual(QUESTION_GENERATION_LIMITED_MESSAGE, LINK_FETCH_LIMITED_MESSAGE);
+  });
+
+  it("the next one frees up when the oldest counted one leaves the window", () => {
+    const s = questionGenerationRetryAtStatement(TEACHER);
+    assert.match(s.text, /^select min\(created_at\) \+ make_interval\(mins => \$2::int\) as retry_at\nfrom question_generation_attempts\nwhere teacher_id = \$1::uuid/);
+    assert.deepEqual(s.params, [TEACHER, QUESTION_GENERATION_WINDOW_MINUTES]);
   });
 });
 

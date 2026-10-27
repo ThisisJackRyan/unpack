@@ -5,6 +5,7 @@
 // reveal that the reading exists.
 
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
+import { withRetryAt, type RetryClock } from "./local-time";
 import {
   PENDING_RETRY_AFTER_MS,
   STUDENT_GENERATION_THROTTLED_MESSAGE,
@@ -28,7 +29,8 @@ export type StudentReadingView =
   | { kind: "questions"; questions: StudentQuestion[] }
   | { kind: "pending"; retryAfterMs: number }
   | { kind: "limit_reached"; message: string }
-  // The "Try again" throttle: a break, then Try again works.
+  // The "Try again" throttle: a break (with when it ends), then Try again
+  // works.
   | { kind: "throttled"; message: string }
   // Every call for this reading is used: Try again works once the teacher
   // has used "Let them try again".
@@ -39,7 +41,9 @@ export type StudentReadingView =
 // Unique per student mode. The error message is the student's own, not the
 // teacher-facing QUESTION_ERROR_MESSAGES (a student can't fix "isn't set
 // up yet").
-export function perStudentView(result: StudentQuestionsResult): StudentReadingView {
+// `clock` (now and the reader's zone) turns a throttle's retry time into
+// "You can try again at 2:40 PM."; without it, a relative time.
+export function perStudentView(result: StudentQuestionsResult, clock: RetryClock | null = null): StudentReadingView {
   const facing = studentFacingResult(result);
   switch (facing.status) {
     case "ready":
@@ -51,7 +55,7 @@ export function perStudentView(result: StudentQuestionsResult): StudentReadingVi
     case "calls_used_up":
       return { kind: "calls_used_up", message: STUDENT_GENERATION_USED_UP_MESSAGE };
     case "throttled":
-      return { kind: "throttled", message: STUDENT_GENERATION_THROTTLED_MESSAGE };
+      return { kind: "throttled", message: withRetryAt(STUDENT_GENERATION_THROTTLED_MESSAGE, facing.retryAt, clock) };
     case "error":
       return { kind: "error", message: QUESTIONS_ERROR_MESSAGE };
     case "not_found":

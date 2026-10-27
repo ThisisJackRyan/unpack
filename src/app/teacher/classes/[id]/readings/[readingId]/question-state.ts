@@ -31,6 +31,9 @@ export type QuestionActionState = {
   // For the live region: what just happened, or what went wrong.
   status?: string;
   error?: string;
+  // At the question writing limit: an amber note with the retry time (not
+  // an error).
+  limit?: string;
   // Per-student preview: a sample set, shown once and never saved.
   sample?: string[];
 };

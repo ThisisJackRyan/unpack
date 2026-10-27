@@ -17,6 +17,7 @@ import {
 } from "./answer-parts";
 import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH } from "@/lib/validate-answers";
 import type { AnswerFormState } from "./answer-form-state";
+import { LimitNotice } from "./limit-notice";
 
 type Props = {
   action: (state: AnswerFormState, formData: FormData) => Promise<AnswerFormState>;
@@ -142,6 +143,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
       <p aria-live="polite" className="text-lg font-medium text-zinc-800 empty:hidden">
         {state.message}
       </p>
+      {state.limit && <LimitNotice large>{state.limit}</LimitNotice>}
 
       {/* Always shown, before the click too, so a student knows not to
           give up or click again while a check runs (up to the 60s

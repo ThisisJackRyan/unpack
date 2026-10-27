@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { backLink, card } from "@/components/ui";
 import { questionCountLabel } from "@/lib/question-modes";
@@ -9,6 +10,7 @@ import { loadReadingProgress } from "@/lib/reading-progress-db";
 import { getStudentSession, requireStudentSession } from "@/lib/student-auth";
 import type { StudentQuestion } from "@/lib/student-questions-core";
 import { PENDING_MAX_REFRESHES, readingParagraphs, sourceHost } from "@/lib/student-reading-view";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { getPublishedReading, loadStudentReading } from "@/lib/student-readings";
 import { MAX_TRIES } from "@/lib/validate-answers";
 import { sendChallengeAction, submitAnswersAction } from "./actions";
@@ -43,7 +45,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function StudentReadingPage({ params }: Props) {
   const { readingId } = await params;
   const session = await requireStudentSession();
-  const { reading, view } = await loadStudentReading(session, readingId);
+  const { reading, view } = await loadStudentReading(session, readingId, {}, await requestRetryClock());
   if (!reading) notFound();
 
   const host = sourceHost(reading.sourceUrl);
@@ -102,24 +104,12 @@ export default async function StudentReadingPage({ params }: Props) {
           </PendingRefresh>
         )}
 
-        {view.kind === "limit_reached" && (
-          <p className={`${card} rounded-2xl px-6 py-10 text-center text-lg text-zinc-700`}>{view.message}</p>
-        )}
+        {/* Limits, not errors: amber notes. */}
+        {view.kind === "limit_reached" && <LimitNotice large>{view.message}</LimitNotice>}
 
-        {view.kind === "calls_used_up" && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p aria-live="polite" className="text-lg text-zinc-700">
-              {view.message}
-            </p>
-            <RetryButton />
-          </div>
-        )}
-
-        {view.kind === "throttled" && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p aria-live="polite" className="text-lg text-zinc-700">
-              {view.message}
-            </p>
+        {(view.kind === "calls_used_up" || view.kind === "throttled") && (
+          <div className="flex flex-col items-start gap-5">
+            <LimitNotice large>{view.message}</LimitNotice>
             <RetryButton />
           </div>
         )}

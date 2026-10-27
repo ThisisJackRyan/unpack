@@ -21,7 +21,7 @@
 //    not the name, so taking over a name would hand one student another's
 //    work.
 
-import { checkJoinLimit } from "./join-rate-limit";
+import { checkJoinLimit, joinRetryFromRows, joinRetryStatement, type JoinRetry } from "./join-rate-limit";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { studentNameKey } from "./student-name";
 import { generateSessionToken, hashSessionToken } from "./student-session-token";
@@ -37,7 +37,9 @@ export type JoinOutcome =
   // Unknown code, or the class's code is turned off.
   | { status: "class_not_found" }
   | { status: "name_taken" }
-  | { status: "limited" };
+  // At the per-IP or per-code limit: which, and when the next join frees
+  // up (null when that couldn't be read).
+  | { status: "limited"; retry: JoinRetry };
 
 // Postgres unique violation (23505) on the per-class name key. Drizzle and
 // the Neon driver can wrap the error, so walk the cause chain (as
@@ -85,11 +87,18 @@ export type JoinDeps = {
 // `data` must come from validateJoin. Errors other than a name clash
 // propagate.
 export async function joinClassWith(data: JoinValues, deps: JoinDeps): Promise<JoinOutcome> {
-  const allowed = await checkJoinLimit(
-    { ipHash: deps.ipHash, codeHash: hashJoinCode(data.code) },
-    deps.execute,
-  );
-  if (!allowed) return { status: "limited" };
+  const keys = { ipHash: deps.ipHash, codeHash: hashJoinCode(data.code) };
+  const allowed = await checkJoinLimit(keys, deps.execute);
+  if (!allowed) {
+    // Only for the message: a failure here still refuses, with no time.
+    let retry: JoinRetry = { by: "ip", retryAt: null };
+    try {
+      retry = joinRetryFromRows(await deps.execute([joinRetryStatement(keys)]));
+    } catch {
+      // Keep the default.
+    }
+    return { status: "limited", retry };
+  }
 
   const token = (deps.newToken ?? generateSessionToken)();
   let rows: Record<string, unknown>[];

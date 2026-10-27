@@ -57,12 +57,16 @@ describe("joinStudentStatement", () => {
 });
 
 // Answers the limit batch (4 statements) and then the insert.
-function fakeDb(opts: { allowed?: boolean; inserted?: Record<string, unknown>[]; insertError?: unknown }) {
+function fakeDb(opts: { allowed?: boolean; inserted?: Record<string, unknown>[]; insertError?: unknown; retryError?: unknown }) {
   const calls: Statement[][] = [];
   const execute = async (statements: Statement[]) => {
     calls.push(statements);
     if (statements.length === 4) {
       return [[{}], [{}], opts.allowed === false ? [] : [{}, {}], []];
+    }
+    if (statements[0].text.startsWith("with k as")) {
+      if (opts.retryError) throw opts.retryError;
+      return [[{ code_limited: true, retry_at: new Date("2026-10-27T14:40:00Z") }]];
     }
     if (opts.insertError) throw opts.insertError;
     return [opts.inserted ?? []];
@@ -82,10 +86,20 @@ describe("joinClassWith", () => {
     assert.ok(!insertParams.includes(TOKEN));
   });
 
-  it("stops before the insert when limited", async () => {
+  it("stops before the insert when limited, with which key and when it frees up", async () => {
     const db = fakeDb({ allowed: false });
-    assert.deepEqual(await joinClassWith(DATA, { execute: db.execute, ipHash: IP }), { status: "limited" });
-    assert.equal(db.calls.length, 1);
+    assert.deepEqual(await joinClassWith(DATA, { execute: db.execute, ipHash: IP }), {
+      status: "limited",
+      retry: { by: "code", retryAt: new Date("2026-10-27T14:40:00Z") },
+    });
+    assert.equal(db.calls.length, 2);
+    assert.ok(db.calls.every((c) => !c.some((s) => s.text.startsWith("insert into students"))));
+    // The time is only for the message: if it can't be read, still limited.
+    const broken = fakeDb({ allowed: false, retryError: new Error("db down") });
+    assert.deepEqual(await joinClassWith(DATA, { execute: broken.execute, ipHash: IP }), {
+      status: "limited",
+      retry: { by: "ip", retryAt: null },
+    });
   });
 
   it("reports an unknown or turned-off code as class_not_found", async () => {

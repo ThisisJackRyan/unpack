@@ -32,6 +32,11 @@
 
 import type { GradeLevel } from "./grade-levels";
 import type { Statement } from "./link-rate-limit";
+import { dateFromRow } from "./local-time";
+
+// The time helpers moved to local-time.ts (shared with every limiter's
+// retry time); re-exported for the allowance's callers.
+export { formatNextFree, resolveTimeZone } from "./local-time";
 
 // The plan a self-learner is on. Only "free" exists; a paid plan is TBD
 // (product). Add it here and in allowanceFor, and have the account's plan
@@ -89,38 +94,6 @@ export function allowanceFromCreations(creations: Date[], now: Date, allowance: 
   const inWindow = creations.filter((c) => countsAt(c, now, allowance.windowDays));
   const oldest = inWindow.reduce<Date | null>((min, c) => (!min || c < min ? c : min), null);
   return allowanceState(inWindow.length, oldest, allowance);
-}
-
-// A time zone name from the request (Vercel's x-vercel-ip-timezone), if
-// Intl knows it; else UTC.
-export function resolveTimeZone(candidate: string | null | undefined): { timeZone: string; fallback: boolean } {
-  if (candidate) {
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: candidate });
-      return { timeZone: candidate, fallback: false };
-    } catch {
-      // Not a zone Intl knows.
-    }
-  }
-  return { timeZone: "UTC", fallback: true };
-}
-
-function dayKey(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-}
-
-// "today at 3:15 PM", "tomorrow at 9:00 AM", or "on Friday at 9:00 AM",
-// in `timeZone`. Formatted on the server only (the page passes a string),
-// so there is nothing for hydration to disagree with. `utcLabel` adds
-// " UTC" when we couldn't tell the reader's zone.
-export function formatNextFree(at: Date, now: Date, timeZone: string, utcLabel = false): string {
-  const time = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(at);
-  const zone = utcLabel ? " UTC" : "";
-  const day = dayKey(at, timeZone);
-  if (day === dayKey(now, timeZone)) return `today at ${time}${zone}`;
-  if (day === dayKey(new Date(now.getTime() + DAY_MS), timeZone)) return `tomorrow at ${time}${zone}`;
-  const weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long" }).format(at);
-  return `on ${weekday} at ${time}${zone}`;
 }
 
 // "You’ve read 5 this week. Your next one frees up on Friday at 9:00 AM."
@@ -210,17 +183,8 @@ export type CreateOutcome =
   // No such account, or it isn't a self-learner (now).
   | { status: "not_allowed" };
 
-function asDate(value: unknown): Date | null {
-  if (value instanceof Date) return value;
-  if (typeof value === "string" && value) {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
-
 export function allowanceFromRow(row: Record<string, unknown> | undefined, allowance: ReadingAllowance): AllowanceState {
-  return allowanceState(Number(row?.used ?? 0), asDate(row?.oldest), allowance);
+  return allowanceState(Number(row?.used ?? 0), dateFromRow(row?.oldest), allowance);
 }
 
 export function createOutcome(results: Record<string, unknown>[][], allowance: ReadingAllowance): CreateOutcome {

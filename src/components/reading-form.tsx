@@ -8,6 +8,7 @@ import {
   questionModeHint,
   questionModeLabel,
 } from "@/lib/question-modes";
+import { LimitNotice } from "@/components/limit-notice";
 import { field, primaryButton, secondaryButton } from "@/components/ui";
 import {
   BODY_TEXT_MAX_LENGTH,
@@ -205,6 +206,22 @@ export function ReadingForm({
                   </>
                 )}
               </p>
+              {state.limit && (
+                <LimitNotice>
+                  {state.limit}
+                  {state.suggestText && (
+                    <>
+                      {" "}
+                      <label
+                        htmlFor="source-text"
+                        className="cursor-pointer font-semibold text-indigo-800 underline underline-offset-2 hover:text-indigo-950"
+                      >
+                        {state.suggestText}
+                      </label>
+                    </>
+                  )}
+                </LimitNotice>
+              )}
             </div>
           </>
         )}

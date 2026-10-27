@@ -4,6 +4,7 @@ import {
   checkLinkFetchLimit,
   LINK_FETCH_LIMIT,
   LINK_FETCH_LIMITED_MESSAGE,
+  linkFetchRetryAtStatement,
   LINK_FETCH_PRUNE_HOURS,
   LINK_FETCH_WINDOW_MINUTES,
   linkFetchStatements,
@@ -26,7 +27,19 @@ describe("link fetch limit settings", () => {
     assert.equal(LINK_FETCH_LIMIT, 20);
     assert.equal(LINK_FETCH_WINDOW_MINUTES, 10);
     assert.equal(LINK_FETCH_PRUNE_HOURS, 24);
-    assert.equal(LINK_FETCH_LIMITED_MESSAGE, "Slow down a sec. Try again in a few minutes.");
+    assert.equal(
+      LINK_FETCH_LIMITED_MESSAGE,
+      "You’ve added a lot of links in the last 10 minutes, so adding by link is paused for a bit. Pasted text still works.",
+    );
+  });
+
+  it("the next link frees up when the oldest counted one leaves the window", () => {
+    const s = linkFetchRetryAtStatement(TEACHER);
+    assert.equal(
+      s.text,
+      "select min(created_at) + make_interval(mins => $2::int) as retry_at\nfrom link_fetch_attempts\nwhere teacher_id = $1::uuid and created_at > now() - make_interval(mins => $2::int)",
+    );
+    assert.deepEqual(s.params, [TEACHER, LINK_FETCH_WINDOW_MINUTES]);
   });
 });
 

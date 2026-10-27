@@ -10,8 +10,10 @@ export const LINK_FETCH_WINDOW_MINUTES = 10;
 // Attempts older than this are deleted as new ones are recorded.
 export const LINK_FETCH_PRUNE_HOURS = 24;
 
+// Shown as an amber note, then the time the next link frees up (see
+// linkFetchRetryAtStatement and retryAtSentence).
 export const LINK_FETCH_LIMITED_MESSAGE =
-  "Slow down a sec. Try again in a few minutes.";
+  `You’ve added a lot of links in the last ${LINK_FETCH_WINDOW_MINUTES} minutes, so adding by link is paused for a bit. Pasted text still works.`;
 
 export type Statement = { text: string; params: unknown[] };
 
@@ -63,6 +65,18 @@ where teacher_id = $1::uuid
       params: [teacherId, LINK_FETCH_PRUNE_HOURS],
     },
   ];
+}
+
+// When the next link fetch frees up, after a refusal: the oldest counted
+// attempt in the window, plus the window. No row (or a null) when nothing
+// is in the window.
+export function linkFetchRetryAtStatement(teacherId: string): Statement {
+  return {
+    text: `select min(created_at) + make_interval(mins => $2::int) as retry_at
+from link_fetch_attempts
+where teacher_id = $1::uuid and created_at > now() - make_interval(mins => $2::int)`,
+    params: [teacherId, LINK_FETCH_WINDOW_MINUTES],
+  };
 }
 
 // Records an attempt and returns true if the teacher may fetch, or false

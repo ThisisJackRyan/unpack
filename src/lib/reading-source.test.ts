@@ -57,14 +57,29 @@ describe("resolveReadingSource", () => {
     assert.equal(result.ok && result.source.title, "My title");
   });
 
-  it("at the limit: no fetch, the limit message, and the paste suggestion", async () => {
+  it("at the limit: no fetch, the limit note (not an error) with a relative time, and the paste suggestion", async () => {
     const { d, calls } = deps({ recordLinkFetch: async () => false });
     assert.deepEqual(await resolveReadingSource(LINK, d), {
       ok: false,
-      errors: { url: LINK_FETCH_LIMITED_MESSAGE },
+      errors: {},
+      limit: `${LINK_FETCH_LIMITED_MESSAGE} Try again in a few minutes.`,
       suggestText: "Paste the text instead.",
     });
     assert.equal(calls.fetch, 0);
+  });
+
+  it("at the limit with the action's retry time; a failure reading it falls back to relative", async () => {
+    const timed = deps({ recordLinkFetch: async () => false, limitedMessage: async () => "Paused. You can try again at 2:40 PM." });
+    const result = await resolveReadingSource(LINK, timed.d);
+    assert.equal(!result.ok && result.limit, "Paused. You can try again at 2:40 PM.");
+    const broken = deps({
+      recordLinkFetch: async () => false,
+      limitedMessage: async () => {
+        throw new Error("db down");
+      },
+    });
+    const fallback = await resolveReadingSource(LINK, broken.d);
+    assert.equal(!fallback.ok && fallback.limit, `${LINK_FETCH_LIMITED_MESSAGE} Try again in a few minutes.`);
   });
 
   it("fails closed when the limit can't be checked", async () => {

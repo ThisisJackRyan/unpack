@@ -71,6 +71,7 @@ import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
 import { EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
+import { dateFromRow } from "./local-time";
 import { hasPgCode, isUniqueViolation } from "./pg-errors";
 import { checksAllowedSql, countedCheckSql, effortLockStatement, limitsFromRow, triesAllowedSql } from "./reading-limits";
 import type { StudentQuestion } from "./student-questions-core";
@@ -473,13 +474,7 @@ where ${owner} = $1::uuid and reading_id = $2::uuid and outcome = 'given_back'
 }
 
 export function retryAtFromRows(results: Record<string, unknown>[][]): Date | null {
-  const value = results[0]?.[0]?.retry_at;
-  if (value instanceof Date) return value;
-  if (typeof value === "string" && value) {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
+  return dateFromRow(results[0]?.[0]?.retry_at);
 }
 
 // The commit, as ONE transaction:

@@ -3,7 +3,10 @@
 import { redirect } from "next/navigation";
 import { getClassForTeacher } from "@/lib/classes";
 import { fetchArticle } from "@/lib/fetch-article";
-import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { linkFetchRetryAt, recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { resolveReadingSource, SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
 import {
   getReadingForTeacher,
@@ -58,11 +61,13 @@ export async function createReading(
 
   const resolved = await resolveReadingSource(data, {
     recordLinkFetch: () => recordLinkFetchAttempt(teacher.id),
+    limitedMessage: async () =>
+      withRetryAt(LINK_FETCH_LIMITED_MESSAGE, await linkFetchRetryAt(teacher.id), await requestRetryClock()),
     fetchArticle: (url) => fetchArticle(url),
     log: (message, fields) => console.error(`createReading: ${message}`, fields),
   });
   if (!resolved.ok) {
-    return { errors: resolved.errors, values, suggestText: resolved.suggestText };
+    return { errors: resolved.errors, values, suggestText: resolved.suggestText, limit: resolved.limit };
   }
   const draft: ReadingDraft = {
     ...resolved.source,

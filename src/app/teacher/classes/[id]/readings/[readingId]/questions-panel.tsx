@@ -12,6 +12,7 @@ import {
 import { questionRole, type QuestionRole } from "@/lib/ai/prompts";
 import { questionCountLabel } from "@/lib/question-modes";
 import { LAST_QUESTION_MESSAGE } from "@/lib/shared-questions";
+import { LimitNotice } from "@/components/limit-notice";
 import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
 import {
   QUESTION_MAX_LENGTH,
@@ -142,6 +143,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
       <p role="alert" className="text-base text-red-700 empty:hidden">
         {panelError}
       </p>
+      {!pending && state.limit && <LimitNotice>{state.limit}</LimitNotice>}
 
       {shared ? (
         busy("generate") || busy("regenerate_all") ? (

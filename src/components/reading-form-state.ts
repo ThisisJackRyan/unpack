@@ -25,4 +25,6 @@ export type ReadingFormState = {
   // Set when a link couldn't be read: the form shows this after the link
   // error as a control that switches to "Paste text".
   suggestText?: string;
+  // At the link limit: an amber note with the retry time.
+  limit?: string;
 };

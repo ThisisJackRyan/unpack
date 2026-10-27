@@ -4,7 +4,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { clientIpFromHeaders, hashJoinIp } from "@/lib/client-ip";
 import { botCheckMessage, TURNSTILE_RESPONSE_FIELD, verifyJoinBotCheck } from "@/lib/join-bot-check";
-import { JOIN_LIMITED_MESSAGE } from "@/lib/join-rate-limit";
+import { joinLimitedMessage } from "@/lib/join-rate-limit";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { joinClass } from "@/lib/student-join";
 import { NAME_TAKEN_MESSAGE, type JoinOutcome } from "@/lib/student-join-core";
 import { setStudentSessionCookie } from "@/lib/student-session";
@@ -53,7 +55,11 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
 
   switch (outcome.status) {
     case "limited":
-      return { errors: { form: JOIN_LIMITED_MESSAGE }, values };
+      // A limit, not a mistake: an amber note with when to try again.
+      return {
+        limit: withRetryAt(joinLimitedMessage(outcome.retry.by), outcome.retry.retryAt, await requestRetryClock()),
+        values,
+      };
     case "class_not_found":
       return { errors: { code: CLASS_NOT_FOUND_MESSAGE }, values };
     case "name_taken":

@@ -20,8 +20,10 @@ export const QUESTION_GENERATION_WINDOW_MINUTES = 10;
 // Attempts older than this are deleted as new ones are recorded.
 export const QUESTION_GENERATION_PRUNE_HOURS = 24;
 
+// Shown as an amber note, then the time the next one frees up (see
+// questionGenerationRetryAtStatement and retryAtSentence).
 export const QUESTION_GENERATION_LIMITED_MESSAGE =
-  "You’ve made a lot of questions. Try again in a few minutes.";
+  `You’ve written a lot of questions in the last ${QUESTION_GENERATION_WINDOW_MINUTES} minutes, so question writing is taking a short break.`;
 
 // Teacher row lock, then a conditional insert counted under a fresh
 // READ COMMITTED snapshot, then a prune: see linkFetchStatements for why
@@ -54,6 +56,18 @@ where teacher_id = $1::uuid
       params: [teacherId, QUESTION_GENERATION_PRUNE_HOURS],
     },
   ];
+}
+
+// When the next generation frees up, after a refusal: the oldest counted
+// one in the window, plus the window. Also used for a self-learner's
+// question limit (the same table and limit).
+export function questionGenerationRetryAtStatement(accountId: string): Statement {
+  return {
+    text: `select min(created_at) + make_interval(mins => $2::int) as retry_at
+from question_generation_attempts
+where teacher_id = $1::uuid and created_at > now() - make_interval(mins => $2::int)`,
+    params: [accountId, QUESTION_GENERATION_WINDOW_MINUTES],
+  };
 }
 
 // Records a generation and returns true if the teacher may call the model,

@@ -7,6 +7,7 @@ import { writeQuestionSet } from "./ai/questions";
 import { logModelError } from "./ai/errors";
 import { isUuid } from "./classes";
 import type { GradeLevel } from "./grade-levels";
+import { dateFromRow } from "./local-time";
 import {
   claimOutcome,
   claimStatements,
@@ -17,6 +18,7 @@ import {
   studentQuestionsStatement,
   takeOverOutcome,
   takeOverStatements,
+  throttledUntilStatement,
   type StudentQuestionStore,
   type StudentQuestionWriter,
   type StudentQuestionsResult,
@@ -74,6 +76,10 @@ export function postgresStudentQuestionStore(
     async commit(readingId, studentId, token, prompts) {
       const results = await execute(commitStatements(readingId, studentId, token, prompts));
       return (results[1]?.length ?? 0) === prompts.length;
+    },
+    async throttledUntil(readingId, studentId) {
+      const [row] = await one(throttledUntilStatement(readingId, studentId));
+      return dateFromRow(row?.retry_at);
     },
   };
 }

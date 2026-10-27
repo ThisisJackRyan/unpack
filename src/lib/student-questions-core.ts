@@ -118,8 +118,11 @@ export const STUDENT_GENERATION_WINDOW_LIMIT = 3;
 export const STUDENT_GENERATION_WINDOW_MINUTES = 10;
 export const STUDENT_GENERATION_CALL_LIMIT = 6;
 
-// What the student reading page shows on "throttled".
-export const STUDENT_GENERATION_THROTTLED_MESSAGE = "Let’s take a little break. Try again in a few minutes.";
+// What the student reading page shows on "throttled" (an amber note),
+// then when the next call frees up (throttledUntilStatement and
+// retryAtSentence).
+export const STUDENT_GENERATION_THROTTLED_MESSAGE =
+  "We tried a few times to get your questions ready, so let’s take a short break.";
 
 // What it shows on "calls_used_up", with a Try again button. The teacher
 // sees this student as "Needs a reset" on Class progress, with a "Let them
@@ -154,8 +157,8 @@ export type StudentQuestionsResult =
   // STUDENT_SETS_LIMITED_MESSAGE.
   | { status: "limit_reached" }
   // STUDENT_GENERATION_WINDOW_LIMIT calls in the window (given back or
-  // not): try again later.
-  | { status: "throttled" }
+  // not): try again later, at retryAt when the store can say.
+  | { status: "throttled"; retryAt: Date | null }
   // STUDENT_GENERATION_CALL_LIMIT answered calls for all time: ask the
   // teacher.
   | { status: "calls_used_up" }
@@ -205,6 +208,8 @@ export type StudentQuestionStore = {
   // Marks the claim done and saves the set, in one transaction, only if
   // this token still holds it. False when the claim was lost.
   commit(readingId: string, studentId: string, token: string, prompts: string[]): Promise<boolean>;
+  // After "throttled": when the next call frees up, if the store can say.
+  throttledUntil?(readingId: string, studentId: string): Promise<Date | null>;
 };
 
 export type StudentQuestionWriterHooks = {
@@ -275,14 +280,21 @@ export async function getOrCreateStudentQuestionsWith(
   const token = deps.newToken();
   // The default cap; the claim uses the raised one where the teacher
   // raised it.
+  const throttled = async (): Promise<StudentQuestionsResult> => ({
+    status: "throttled",
+    // Only for the message: if it can't be read, a relative time.
+    retryAt: (await store.throttledUntil?.(readingId, studentId).catch(() => null)) ?? null,
+  });
   const claim = await store.claim(readingId, studentId, token, STUDENT_SETS_PER_READING_LIMIT);
-  if (claim === "limit_reached" || claim === "throttled" || claim === "calls_used_up") return { status: claim };
+  if (claim === "throttled") return throttled();
+  if (claim === "limit_reached" || claim === "calls_used_up") return { status: claim };
   if (claim === "refused") return { status: "not_found" };
   if (claim === "exists") {
     // An existing claim already holds a slot, so taking it over is never
     // blocked by the cap; it is by the throttle, since it calls the model.
     const takeOver = await store.takeOverStale(readingId, studentId, token, CLAIM_STALE_SECONDS);
-    if (takeOver === "throttled" || takeOver === "calls_used_up") return { status: takeOver };
+    if (takeOver === "throttled") return throttled();
+    if (takeOver === "calls_used_up") return { status: takeOver };
     if (takeOver === "not_stale") return readyOrPending(store, readingId, studentId);
   }
 
@@ -435,6 +447,18 @@ returning id`,
       params: [readingId, studentId, STUDENT_GENERATION_WINDOW_MINUTES, limit],
     },
   ];
+}
+
+// When the next call frees up after "throttled": the oldest call in the
+// window (given back or not, as the throttle counts them), plus the window.
+export function throttledUntilStatement(readingId: string, studentId: string): Statement {
+  return {
+    text: `select min(created_at) + make_interval(mins => $3::int) as retry_at
+from student_question_calls
+where reading_id = $1::uuid and student_id = $2::uuid
+  and created_at > now() - make_interval(mins => $3::int)`,
+    params: [readingId, studentId, STUDENT_GENERATION_WINDOW_MINUTES],
+  };
 }
 
 // Which throttle refuses another call, if any, from a row's recent_calls

@@ -4,7 +4,10 @@ import { redirect } from "next/navigation";
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { requireSelfLearner } from "@/lib/account";
 import { fetchArticle } from "@/lib/fetch-article";
-import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { linkFetchRetryAt, recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { resolveReadingSource, SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
 import type { CreateOutcome } from "@/lib/self-allowance";
 import { validateSoloReadingForm } from "@/lib/self-reading-form";
@@ -49,10 +52,12 @@ export async function createSelfReadingAction(_prev: ReadingFormState, formData:
 
   const resolved = await resolveReadingSource(data, {
     recordLinkFetch: () => recordLinkFetchAttempt(account.id),
+    limitedMessage: async () =>
+      withRetryAt(LINK_FETCH_LIMITED_MESSAGE, await linkFetchRetryAt(account.id), await requestRetryClock()),
     fetchArticle: (url) => fetchArticle(url),
     log: (message, fields) => console.error(`createSelfReadingAction: ${message}`, fields),
   });
-  if (!resolved.ok) return { errors: resolved.errors, values, suggestText: resolved.suggestText };
+  if (!resolved.ok) return { errors: resolved.errors, values, suggestText: resolved.suggestText, limit: resolved.limit };
 
   // redirect() throws, so it stays outside this try.
   let outcome: CreateOutcome;

@@ -7,6 +7,8 @@ import { isQuestionWritingConfigured } from "@/lib/ai/client";
 import { soloSubmitMessage } from "@/lib/self-answers-core";
 import { submitSelfAnswers } from "@/lib/self-readings";
 import { CHECK_FAILED_MESSAGE, type SubmitResult } from "@/lib/submit-answers-core";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
 
 const SUBMIT_FAILED_MESSAGE = "Something went wrong. Try again.";
@@ -51,6 +53,9 @@ export async function submitSelfAnswersAction(
     case "check_failed":
       refresh();
       return { message: soloSubmitMessage(result.status) };
+    case "paused":
+      // An outage: a short break, with when checking frees up again.
+      return { limit: withRetryAt(soloSubmitMessage(result.status), result.retryAt, await requestRetryClock()) };
     default:
       return { message: soloSubmitMessage(result.status) };
   }
