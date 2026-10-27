@@ -5,11 +5,14 @@ import {
   AGE_REQUIRED_MESSAGE,
   homeFor,
   isAccountRole,
+  needsSwitchConfirm,
   parseRoleChoice,
+  parseSettingsRoleChoice,
   ROLE_REQUIRED_MESSAGE,
   roleRedirect,
   setRoleOutcome,
   setRoleStatements,
+  SWITCH_CONFIRM_VALUE,
 } from "./account-role";
 
 const ID = "00000000-0000-4000-8000-000000000001";
@@ -142,5 +145,79 @@ describe("setRoleOutcome", () => {
 
   it("not_found with no account row", () => {
     assert.deepEqual(setRoleOutcome([[], []], "teacher", false), { status: "not_found" });
+  });
+});
+
+describe("parseSettingsRoleChoice (the switch confirm)", () => {
+  const teacher = { role: "teacher" as const, ageConfirmed: true };
+  const newTeacher = { role: "teacher" as const, ageConfirmed: false };
+  const learner = { role: "self_learner" as const, ageConfirmed: true };
+
+  it("refuses a teacher's switch to self-learner without the confirm", () => {
+    for (const confirmSwitch of [null, "", "no", "YES", "true"]) {
+      assert.deepEqual(parseSettingsRoleChoice({ role: "self_learner", ageConfirmed: null, confirmSwitch }, teacher), {
+        ok: false,
+        confirmSwitch: true,
+      });
+    }
+  });
+
+  it("saves a teacher's confirmed switch", () => {
+    assert.deepEqual(
+      parseSettingsRoleChoice({ role: "self_learner", ageConfirmed: null, confirmSwitch: SWITCH_CONFIRM_VALUE }, teacher),
+      { ok: true, role: "self_learner", confirmAge: false },
+    );
+  });
+
+  it("asks for the age box before the confirm, and still needs it after", () => {
+    assert.deepEqual(parseSettingsRoleChoice({ role: "self_learner", ageConfirmed: null, confirmSwitch: null }, newTeacher), {
+      ok: false,
+      errors: { age: AGE_REQUIRED_MESSAGE },
+    });
+    assert.deepEqual(
+      parseSettingsRoleChoice({ role: "self_learner", ageConfirmed: null, confirmSwitch: SWITCH_CONFIRM_VALUE }, newTeacher),
+      { ok: false, errors: { age: AGE_REQUIRED_MESSAGE } },
+    );
+    assert.deepEqual(
+      parseSettingsRoleChoice(
+        { role: "self_learner", ageConfirmed: AGE_CONFIRMED_VALUE, confirmSwitch: SWITCH_CONFIRM_VALUE },
+        newTeacher,
+      ),
+      { ok: true, role: "self_learner", confirmAge: true },
+    );
+  });
+
+  it("needs no confirm for staying a teacher, switching back, or staying a self-learner", () => {
+    assert.deepEqual(parseSettingsRoleChoice({ role: "teacher", ageConfirmed: null, confirmSwitch: null }, teacher), {
+      ok: true,
+      role: "teacher",
+      confirmAge: false,
+    });
+    assert.deepEqual(parseSettingsRoleChoice({ role: "teacher", ageConfirmed: null, confirmSwitch: null }, learner), {
+      ok: true,
+      role: "teacher",
+      confirmAge: false,
+    });
+    assert.deepEqual(parseSettingsRoleChoice({ role: "self_learner", ageConfirmed: null, confirmSwitch: null }, learner), {
+      ok: true,
+      role: "self_learner",
+      confirmAge: false,
+    });
+  });
+
+  it("keeps the role errors", () => {
+    assert.deepEqual(parseSettingsRoleChoice({ role: "admin", ageConfirmed: null, confirmSwitch: SWITCH_CONFIRM_VALUE }, teacher), {
+      ok: false,
+      errors: { role: ROLE_REQUIRED_MESSAGE },
+    });
+  });
+
+  it("needsSwitchConfirm: only teacher to self-learner", () => {
+    assert.equal(needsSwitchConfirm("teacher", "self_learner"), true);
+    assert.equal(needsSwitchConfirm("teacher", "teacher"), false);
+    assert.equal(needsSwitchConfirm("self_learner", "self_learner"), false);
+    assert.equal(needsSwitchConfirm("self_learner", "teacher"), false);
+    assert.equal(needsSwitchConfirm(null, "self_learner"), false);
+    assert.equal(needsSwitchConfirm("teacher", null), false);
   });
 });

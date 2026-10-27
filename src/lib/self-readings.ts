@@ -109,7 +109,7 @@ const modelWriter = selfQuestionWriter(getQuestionModel);
 
 export type SelfOptions = {
   // For scripts/check-self-learner.ts: fakes, so the check never calls
-  // Anthropic. The app passes nothing.
+  // the model. The app passes nothing.
   write?: SelfQuestionWriter;
   check?: EffortChecker;
   execute?: StatementExecutor;

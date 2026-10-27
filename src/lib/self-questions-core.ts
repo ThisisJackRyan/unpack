@@ -74,7 +74,8 @@ export type SelfQuestionDeps = {
   store: SelfQuestionStore;
   write: SelfQuestionWriter;
   newToken: () => string;
-  // False without an API key: fail before claiming, so nothing is counted.
+  // False without AI Gateway credentials: fail before claiming, so nothing
+  // is counted.
   configured?: boolean;
   // Safe fields only (never the text or prompts).
   onError?: (fields: Record<string, unknown>) => void;

@@ -80,7 +80,7 @@ export function postgresStudentQuestionStore(
 // The real writer: the configured model, at the reading's grade and count.
 // Reports each reply the model sends, so the throttle counts a write only
 // if the model answered (see failureCounts). getQuestionModel throws
-// before any call when the key is missing, so that never counts.
+// before any call without AI Gateway credentials, so that never counts.
 const modelWriter: StudentQuestionWriter = (context, hooks) => {
   const model = getQuestionModel();
   return writeQuestionSet(
@@ -98,7 +98,7 @@ const modelWriter: StudentQuestionWriter = (context, hooks) => {
 
 export type GetStudentQuestionsOptions = {
   // For scripts/check-student-questions.ts: a mock model, so the check
-  // never calls Anthropic. The app passes nothing.
+  // never calls the model. The app passes nothing.
   write?: StudentQuestionWriter;
   store?: StudentQuestionStore;
 };

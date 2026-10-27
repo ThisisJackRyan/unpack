@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import Anthropic from "@anthropic-ai/sdk";
 import type { EffortCheckInput, EffortVerdict } from "./ai/effort-check";
 import { EFFORT_SYSTEM_PROMPT, EFFORT_TOOL_NAME, SOLO_EFFORT_SYSTEM_PROMPT } from "./ai/effort-prompts";
+import type { ModelRequest } from "./ai/model";
 import type { QuestionModel } from "./ai/questions";
+import { toolReply } from "./ai/test-fixtures";
 import type { AttemptView, ReadingProgress } from "./reading-progress";
 import {
   postgresSelfAttemptStore,
@@ -287,22 +288,14 @@ describe("self store statements", () => {
 
 describe("selfEffortChecker", () => {
   it("checks with the solo prompts", async () => {
-    const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
+    const calls: ModelRequest[] = [];
     const model: QuestionModel = {
-      model: "claude-sonnet-5-5",
+      model: "anthropic/claude-sonnet-5.5",
       create: async (params) => {
         calls.push(params);
-        return {
-          content: [
-            {
-              type: "tool_use",
-              id: "t",
-              name: EFFORT_TOOL_NAME,
-              input: { results: [{ answer: 1, pass: false, nudge: "Look at what the fox did first." }] },
-            },
-          ],
-          stop_reason: "tool_use",
-        } as unknown as Anthropic.Message;
+        return toolReply(EFFORT_TOOL_NAME, {
+          results: [{ answer: 1, pass: false, nudge: "Look at what the fox did first." }],
+        });
       },
     };
     const check = selfEffortChecker(() => model);

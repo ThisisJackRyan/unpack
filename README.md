@@ -18,7 +18,7 @@ Self-learners (13+) can also sign in and use the same loop on their own readings
 - [Next.js 16](https://nextjs.org) on [Vercel](https://vercel.com)
 - [Neon](https://neon.tech) Postgres
 - [Clerk](https://clerk.com) auth for **teachers and self-learners** (a new account chooses its role on `/welcome`). Students have no accounts: they join with a class code, their first name, and the first 1-2 letters of their last name.
-- [Claude](https://www.anthropic.com/claude) via the Anthropic API for question generation and the effort check
+- [Claude](https://www.anthropic.com/claude) through [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) (with the [AI SDK](https://ai-sdk.dev)) for question generation and the effort check
 
 ## Docs
 
@@ -35,10 +35,10 @@ pnpm install   # install dependencies
 pnpm dev       # start the dev server at http://localhost:3000
 pnpm lint      # run ESLint
 pnpm build     # production build
-pnpm test      # unit tests (no network; the Anthropic SDK is mocked)
+pnpm test      # unit tests (no network; the model and the gateway are faked)
 ```
 
-Copy `.env.example` to `.env.local` and fill it in. Sign-in and sign-up land on `/home`, which sends each account to its home; `NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL` and `NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL` are optional (keep them `/home` if set). Apply migration `drizzle/0008_self_learner.sql` (`pnpm db:migrate`) before running this version. `ANTHROPIC_API_KEY` is needed for question generation (without it, teachers see "Question writing isn’t set up yet."); `ANTHROPIC_MODEL` is optional and defaults to `claude-sonnet-5-5`. The question request (`output_config.effort`, strict tools, auto tool choice) targets current 5.x models; an older `ANTHROPIC_MODEL` may return a 400.
+Copy `.env.example` to `.env.local` and fill it in. Sign-in and sign-up land on `/home`, which sends each account to its home; `NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL` and `NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL` are optional (keep them `/home` if set). Apply migration `drizzle/0008_self_learner.sql` (`pnpm db:migrate`) before running this version. Question writing and the effort check call Claude through Vercel AI Gateway. On Vercel, enable AI Gateway for the project and it authenticates with the deployment's OIDC token: no env needed. Locally, run `vercel link` and `vercel env pull` (writes the project's Development env vars, `VERCEL_OIDC_TOKEN` included, to `.env.local`; it expires after 12 hours, so pull again, or use `vercel dev`, which refreshes it), or set `AI_GATEWAY_API_KEY` to an AI Gateway API key. A key, if set, always wins over OIDC. With neither, teachers see "Question writing isn’t set up yet." and the server logs what's missing. `AI_MODEL` is optional and defaults to `anthropic/claude-sonnet-5.5`; the old `ANTHROPIC_MODEL` is still read (a bare id like `claude-sonnet-5-5` becomes `anthropic/claude-sonnet-5.5`), and `ANTHROPIC_API_KEY` is no longer used. The request (low effort, strict tools, auto tool choice) targets current 5.x models; an older model may return a 400.
 
 The student join form's bot check (Cloudflare Turnstile) is on when both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` are set. In production both are required: with either missing, every join is refused and the server logs which one (set `TURNSTILE_DISABLED=1` to opt out on purpose; it logs a warning on every join). For local dev leave both empty (off), or use Cloudflare's public test keys (see `.env.example`). On Vercel Preview the hostname check uses the branch and deployment URLs (`VERCEL_BRANCH_URL`, `VERCEL_URL`); if previews are served on a custom domain, set `TURNSTILE_EXPECTED_HOSTNAMES` for the Preview environment. `TURNSTILE_DISABLED=1` is an emergency switch only; remove it once the problem is fixed. Teacher sign-up's bot check is Clerk's own "Challenge suspicious sign-ups" (Clerk Dashboard, Protect, Protections), on by default for new Clerk apps; see the v1 spec for exactly what it covers.
 

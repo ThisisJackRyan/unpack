@@ -8,7 +8,6 @@
 // with the text and the question. Never quality, spelling, grammar, or
 // correctness (see EFFORT_SYSTEM_PROMPT).
 
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { GradeLevel } from "../grade-levels";
 import {
@@ -18,6 +17,7 @@ import {
   effortSystemPrompt,
   NUDGE_MAX_LENGTH,
 } from "./effort-prompts";
+import { isRefusal, wasCutOff, type ModelReply, type ModelRequest, type ToolSpec } from "./model";
 import type { PromptAudience } from "./prompts";
 import {
   questionErrorKind,
@@ -142,12 +142,12 @@ export function effortOutputSchema(count: number) {
 }
 
 // JSON Schema for the tool. Strict tool use keeps the input to this shape.
-export const EFFORT_TOOL: Anthropic.Tool = {
+export const EFFORT_TOOL: ToolSpec = {
   name: EFFORT_TOOL_NAME,
   description:
     "Submit the effort check: one result for every answer. Call this exactly once.",
   strict: true,
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       results: {
@@ -177,26 +177,22 @@ export type ParsedEffort =
   | { ok: true; verdicts: { pass: boolean; nudge: string }[] }
   | { ok: false; problem: string };
 
-// Pulls the verdicts out of a response, in answer order (index 0 is answer
-// 1). The tool call is found by type and name, as in parseQuestionsResponse.
+// Pulls the verdicts out of a reply, in answer order (index 0 is answer
+// 1). The tool call is found by name, as in parseQuestionsResponse.
 export function parseEffortResponse(
-  response: Pick<Anthropic.Message, "content" | "stop_reason">,
+  reply: ModelReply,
   count: number,
 ): ParsedEffort {
-  if (response.stop_reason === "refusal") {
+  if (isRefusal(reply)) {
     return { ok: false, problem: "the model declined" };
   }
-  const call = response.content.find(
-    (block): block is Anthropic.ToolUseBlock =>
-      block.type === "tool_use" && block.name === EFFORT_TOOL_NAME,
-  );
+  const call = reply.toolCalls.find((c) => c.toolName === EFFORT_TOOL_NAME);
   if (!call) {
     return {
       ok: false,
-      problem:
-        response.stop_reason === "max_tokens"
-          ? "the answer was cut off before the tool call"
-          : `no ${EFFORT_TOOL_NAME} tool call`,
+      problem: wasCutOff(reply)
+        ? "the answer was cut off before the tool call"
+        : `no ${EFFORT_TOOL_NAME} tool call`,
     };
   }
   const parsed = effortOutputSchema(count).safeParse(call.input);
@@ -215,15 +211,14 @@ export function buildEffortRequest(
   model: string,
   userPrompt: string,
   audience: PromptAudience = "class",
-): Anthropic.MessageCreateParamsNonStreaming {
+): ModelRequest {
   return {
     model,
-    max_tokens: EFFORT_CHECK_MAX_TOKENS,
     system: effortSystemPrompt(audience),
-    tools: [EFFORT_TOOL],
-    tool_choice: { type: "auto", disable_parallel_tool_use: true },
-    output_config: { effort: EFFORT_CHECK_EFFORT },
     messages: [{ role: "user", content: userPrompt }],
+    tool: EFFORT_TOOL,
+    maxOutputTokens: EFFORT_CHECK_MAX_TOKENS,
+    effort: EFFORT_CHECK_EFFORT,
   };
 }
 
@@ -235,7 +230,7 @@ export type EffortCheckOptions = {
 };
 
 // Every answer in one call, and once more if the output is invalid. One
-// deadline covers it all, as in writeValidated. API errors reach the
+// deadline covers it all, as in writeValidated. Gateway errors reach the
 // caller (the SDK has already retried them).
 export async function checkEffort(
   model: QuestionModel,

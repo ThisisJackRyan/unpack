@@ -1,5 +1,5 @@
 // Checks the abuse protection PR through the real neon-http driver and the
-// real app functions, with a MOCK model (no Anthropic calls):
+// real app functions, with a MOCK model (no model calls):
 //
 // - The "Try again" throttle on a student's own question set: a burst of
 //   --burst parallel Try agains (each retrying while pending, as the page
@@ -11,11 +11,12 @@
 //   opens add no call rows. The failing model answers with unusable
 //   output, which counts.
 // - Provider failures are given back: a model throwing a 529 overloaded,
-//   a 503, a 401 bad key, or a network error fills the window like any
-//   call (STUDENT_GENERATION_WINDOW_LIMIT calls, then "throttled" with no
-//   model call) but never counts toward STUDENT_GENERATION_CALL_LIMIT:
-//   window after window, more calls than the cap, none counted, never
-//   "calls_used_up", and the student then still gets a set. A burst
+//   a 503, a 401 bad key, a 402 out of credits, or a network error fills
+//   the window like any call (STUDENT_GENERATION_WINDOW_LIMIT calls, then
+//   "throttled" with no model call) but never counts toward
+//   STUDENT_GENERATION_CALL_LIMIT: window after window, more calls than
+//   the cap, none counted, never "calls_used_up", and the student then
+//   still gets a set. A burst
 //   against an outage makes one call at a time, exactly the window limit.
 // - "Let them try again": at the cap, class status says Needs a reset;
 //   another teacher's reset is not_found with every call row intact; the
@@ -46,7 +47,6 @@
 // teachers named test_abuse_<run> and test_abuse_other_<run> and deletes
 // them (and everything under them, by cascade) and this run's
 // join_attempts rows at the end. Never run against production.
-import Anthropic from "@anthropic-ai/sdk";
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import { QuestionWriterError } from "@/lib/ai/questions";
@@ -55,6 +55,7 @@ import { cellKey } from "@/lib/class-status";
 import { deleteStudent, newJoinCode, resetStudentQuestionCalls, setJoinCodeActive } from "@/lib/classes";
 import { hashJoinCode, hashJoinIp } from "@/lib/client-ip";
 import { findStudentBySessionToken } from "@/lib/student-lookup";
+import { gatewayErrors, retried } from "@/lib/ai/test-fixtures";
 import { joinClass } from "@/lib/student-join";
 import type { JoinOutcome } from "@/lib/student-join-core";
 import { getOrCreateStudentQuestions } from "@/lib/student-questions";
@@ -98,9 +99,9 @@ if (process.env.ALLOW_DB_WRITES !== "1") {
   process.exit(2);
 }
 // Belt and braces: the mock model is always injected, but make sure no
-// code path could reach Anthropic with a real key. The bot check is off
+// code path could reach the model with real credentials. The bot check is off
 // here too (joinClass doesn't run it; that's the action's job).
-delete process.env.ANTHROPIC_API_KEY;
+for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
 const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
 if (fetchEndpoint) {
   neonConfig.fetchEndpoint = () => fetchEndpoint;
@@ -347,12 +348,13 @@ async function checkReset(studentId: string) {
 // Provider failures are given back: they fill the window, not the cap.
 async function checkProviderFailures() {
   console.log("\n== PROVIDER FAILURES: COUNT TOWARD THE WINDOW, NOT THE LIFETIME CAP ==");
-  const h = new Headers();
+  // As Vercel AI Gateway and the AI SDK report them.
   const errors: [string, Error][] = [
-    ["529 overloaded", new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error" } }, "overloaded", h)],
-    ["503 unavailable", new Anthropic.InternalServerError(503, {}, "unavailable", h)],
-    ["401 bad key", new Anthropic.AuthenticationError(401, {}, "invalid x-api-key", h)],
-    ["network error", new Anthropic.APIConnectionError({ message: "fetch failed" })],
+    ["529 overloaded", retried(gatewayErrors.overloaded())],
+    ["503 unavailable", retried(gatewayErrors.unavailable())],
+    ["401 bad key", gatewayErrors.wrappedAuthProduction()],
+    ["402 out of credits", gatewayErrors.outOfCredits()],
+    ["network error", retried(gatewayErrors.network())],
   ];
   const total = STUDENT_GENERATION_CALL_LIMIT + 2;
   for (const [name, error] of errors) {
@@ -395,7 +397,7 @@ async function checkProviderFailures() {
   // A burst against an outage: the in-flight call holds the slot, so it's
   // one call at a time, and the given-back calls fill the window.
   const burster = await newStudent("Outageburst");
-  const b = await burst(burster.id, downModel(new Anthropic.InternalServerError(503, {}, "unavailable", h)));
+  const b = await burst(burster.id, downModel(retried(gatewayErrors.unavailable())));
   check(
     b.calls === STUDENT_GENERATION_WINDOW_LIMIT &&
       b.statuses.error === STUDENT_GENERATION_WINDOW_LIMIT &&

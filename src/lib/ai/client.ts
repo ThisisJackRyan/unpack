@@ -1,48 +1,46 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
-import { QuestionWriterError, type QuestionModel } from "./questions";
-import {
-  AI_MAX_RETRIES,
-  AI_TIMEOUT_MS,
-  DEFAULT_ANTHROPIC_MODEL,
-} from "./settings";
+import { AI_NOT_CONFIGURED_LOG, resolveAiCredentials, resolveModelId } from "./config";
+import { QuestionWriterError } from "./errors";
+import { createGatewayCall } from "./gateway-adapter";
+import type { ModelCall, QuestionModel } from "./model";
+import { AI_MAX_RETRIES, AI_TIMEOUT_MS } from "./settings";
 
-// Server-only: the Anthropic client, built on first use from
-// ANTHROPIC_API_KEY and ANTHROPIC_MODEL. Nothing here runs at import, so
-// `next build` works without a real key.
+// Server-only: the model behind Vercel AI Gateway, built on first use from
+// the environment (see config.ts for credentials and the model id).
+// Nothing here runs at import, so `next build` works without credentials.
 
-let cached: { key: string; client: Anthropic } | undefined;
+let cached: { key: string; call: ModelCall } | undefined;
 
+// True when an API key or an OIDC token is available. Logs loudly when
+// not (naming what's missing, never a value), since every caller then
+// shows "isn't set up yet" and nothing else would say why.
 export function isQuestionWritingConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+  if (resolveAiCredentials(process.env).method !== "none") return true;
+  console.error(AI_NOT_CONFIGURED_LOG);
+  return false;
 }
 
-// Throws QuestionWriterError("not_configured") when the key is missing,
-// which the caller shows as a friendly message instead of crashing.
+// Throws QuestionWriterError("not_configured") with no credentials, which
+// the caller shows as a friendly message instead of crashing. Called per
+// write, so a changed key is picked up.
 export function getQuestionModel(): QuestionModel {
-  const key = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!key) {
-    throw new QuestionWriterError("not_configured", "ANTHROPIC_API_KEY is not set");
+  const credentials = resolveAiCredentials(process.env);
+  if (credentials.method === "none") {
+    console.error(AI_NOT_CONFIGURED_LOG);
+    throw new QuestionWriterError("not_configured", "no AI Gateway API key or OIDC token");
   }
+  const apiKey = credentials.method === "api-key" ? credentials.apiKey : undefined;
+  // The cache key is the key itself or "oidc"; it is never logged.
+  const key = apiKey ?? "oidc";
   if (cached?.key !== key) {
     cached = {
       key,
-      // The key is passed explicitly so the SDK never falls back to other
-      // credential sources on the server.
-      client: new Anthropic({
-        apiKey: key,
-        timeout: AI_TIMEOUT_MS,
-        maxRetries: AI_MAX_RETRIES,
-      }),
+      call: createGatewayCall({ apiKey, timeoutMs: AI_TIMEOUT_MS, maxRetries: AI_MAX_RETRIES }),
     };
   }
-  const client = cached.client;
-  return {
-    model: process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL,
-    create: (params, options) => client.messages.create(params, options),
-  };
+  return { model: resolveModelId(process.env), create: cached.call };
 }
 
-// The effort check uses the same client, key, and model as question
-// writing. A missing key throws the same not_configured error.
+// The effort check uses the same gateway, credentials, and model as
+// question writing. No credentials throws the same not_configured error.
 export const getEffortCheckModel = getQuestionModel;

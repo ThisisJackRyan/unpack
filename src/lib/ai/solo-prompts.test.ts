@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
-import Anthropic from "@anthropic-ai/sdk";
 import { GRADE_LEVELS } from "../grade-levels";
 import { QUESTION_COUNT_MAX, QUESTION_COUNT_MIN } from "../validate-reading";
 import { buildEffortRequest, checkEffort } from "./effort-check";
@@ -27,6 +26,7 @@ import {
   SOLO_PRIVACY_RULE,
   SOLO_QUESTIONS_SYSTEM_PROMPT,
 } from "./prompts";
+import type { ModelReply, ModelRequest } from "./model";
 import {
   buildQuestionRequest,
   writeQuestionSet,
@@ -74,12 +74,12 @@ function userPrompts(audience: PromptAudience): string[] {
 }
 
 function fakeModel(response: unknown) {
-  const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
+  const calls: ModelRequest[] = [];
   const model: QuestionModel = {
-    model: "claude-sonnet-5-5",
+    model: "anthropic/claude-sonnet-5.5",
     create: async (params) => {
       calls.push(params);
-      return response as Anthropic.Message;
+      return response as ModelReply;
     },
   };
   return { model, calls };
@@ -186,12 +186,12 @@ describe("solo prompts", () => {
 
 describe("audience option", () => {
   const questions = {
-    content: [{ type: "tool_use", id: "t", name: QUESTIONS_TOOL_NAME, input: { questions: ["Why?", "What then?"] } }],
-    stop_reason: "tool_use",
+    toolCalls: [{ toolName: QUESTIONS_TOOL_NAME, input: { questions: ["Why?", "What then?"] } }],
+    finishReason: "tool-calls",
   };
   const effort = {
-    content: [{ type: "tool_use", id: "t", name: EFFORT_TOOL_NAME, input: { results: [{ answer: 1, pass: true, nudge: "" }] } }],
-    stop_reason: "tool_use",
+    toolCalls: [{ toolName: EFFORT_TOOL_NAME, input: { results: [{ answer: 1, pass: true, nudge: "" }] } }],
+    finishReason: "tool-calls",
   };
   const effortInput = { bodyText: "A fox ran.", gradeLevel: "7" as const, items: [{ questionId: "q1", question: "Why?", answer: "It was scared." }] };
 
@@ -208,7 +208,7 @@ describe("audience option", () => {
   });
 
   it("writeReplacementQuestion sends the solo prompts only when asked", async () => {
-    const one = { ...questions, content: [{ ...questions.content[0], input: { questions: ["How so?"] } }] };
+    const one = { ...questions, toolCalls: [{ ...questions.toolCalls[0], input: { questions: ["How so?"] } }] };
     const input = { bodyText: "A fox ran.", gradeLevel: "7" as const, position: 2, count: 2, current: ["Why?", "What then?"] };
     const expected = { bodyText: "A fox ran.", gradeLevel: "7" as const, position: 2, count: 2, replacing: "What then?", others: ["Why?"] };
     const solo = fakeModel(one);

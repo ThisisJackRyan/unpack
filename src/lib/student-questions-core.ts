@@ -57,10 +57,10 @@
 // reached the model and got a response back, including a response we then
 // reject as unusable output (no tool call, wrong count, a refusal). A
 // failure where no response came back is the provider's or our setup's
-// fault, not the student's, so it is given back: a 400/401/403/404 (bad
-// request, bad key, no permission, unknown model), 429 or 529 (busy or
-// overloaded), any other 5xx, a network error, or a timeout (the SDK's or
-// our write deadline). "Got a response" is reported by the writer
+// fault, not the student's, so it is given back: a 400/401/402/403/404
+// (bad request, bad key, out of credits, no permission, unknown model),
+// 429 or 529 (busy or overloaded), any other 5xx, a network error, or a
+// timeout (the SDK's or our write deadline). "Got a response" is reported by the writer
 // (onModelResponse, called after each reply arrives), so a write whose
 // first reply was unusable and whose second try then hit a 5xx still
 // counts.
@@ -222,8 +222,9 @@ export type StudentQuestionDeps = {
   store: StudentQuestionStore;
   write: StudentQuestionWriter;
   newToken: () => string;
-  // False when the model isn't set up (no API key): an open then fails
-  // before claiming, so no call is counted that never reached the model.
+  // False when the model isn't set up (no AI Gateway credentials): an open
+  // then fails before claiming, so no call is counted that never reached
+  // the model.
   configured?: boolean;
   // Logs safe fields only (never the text, prompts, or names).
   onError?: (fields: Record<string, unknown>) => void;

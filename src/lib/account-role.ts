@@ -16,6 +16,9 @@
 //   account sees. Classes stay with the account while it is a self-learner
 //   (and come back when it switches back); self-learner readings stay while
 //   it is a teacher. Nothing is deleted.
+// - A teacher switching to self-learner in /settings confirms it first
+//   (SWITCH_CONFIRM_VALUE): their classes and join codes stay live while
+//   they read for themselves. The action refuses the switch without it.
 // - Every page, action, and route guards its area with roleRedirect, on
 //   the server.
 
@@ -80,6 +83,35 @@ export function parseRoleChoice(
   const ticked = input.ageConfirmed === AGE_CONFIRMED_VALUE;
   if (!ticked && !ageAlreadyConfirmed) return { ok: false, errors: { age: AGE_REQUIRED_MESSAGE } };
   return { ok: true, role, confirmAge: ticked };
+}
+
+// The confirm button's value on a teacher's switch to self-learner.
+export const SWITCH_CONFIRM_VALUE = "yes";
+
+// A teacher's switch to self-learner needs the confirm; any other change
+// (or no change) doesn't.
+export function needsSwitchConfirm(current: AccountRole | null, chosen: string | null | undefined): boolean {
+  return current === "teacher" && chosen === "self_learner";
+}
+
+export type SettingsRoleChoice =
+  | RoleChoice
+  // A teacher chose self-learner without the confirm: show the warning.
+  | { ok: false; confirmSwitch: true };
+
+// The /settings form: parseRoleChoice, then the switch confirm. The age
+// box is checked first, so a confirmed switch that still needs it doesn't
+// ask to confirm again.
+export function parseSettingsRoleChoice(
+  input: { role: unknown; ageConfirmed: unknown; confirmSwitch: unknown },
+  account: { role: AccountRole | null; ageConfirmed: boolean },
+): SettingsRoleChoice {
+  const choice = parseRoleChoice(input, account.ageConfirmed);
+  if (!choice.ok) return choice;
+  if (needsSwitchConfirm(account.role, choice.role) && input.confirmSwitch !== SWITCH_CONFIRM_VALUE) {
+    return { ok: false, confirmSwitch: true };
+  }
+  return choice;
 }
 
 // One transaction:

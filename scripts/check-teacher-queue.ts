@@ -1,6 +1,6 @@
 // Checks the teacher's challenge queue, decisions, one more try, and the
 // follow-ups through the real neon-http driver and the real app functions,
-// with a FAKE effort checker (no Anthropic calls; it sleeps a little,
+// with a FAKE effort checker (no model calls; it sleeps a little,
 // returns the pass or fail it is told to, and counts its calls):
 //
 // - Decisions race: --n parallel Accept and Deny calls (mixed, some with
@@ -77,7 +77,7 @@ if (process.env.ALLOW_DB_WRITES !== "1") {
   process.exit(2);
 }
 // Belt and braces: the fake checker is always injected.
-delete process.env.ANTHROPIC_API_KEY;
+for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
 const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
 if (fetchEndpoint) {
   neonConfig.fetchEndpoint = () => fetchEndpoint;
