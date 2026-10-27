@@ -24,8 +24,8 @@ import {
   type ReadingFormValues,
 } from "./reading-form-state";
 
-const label = "text-base font-semibold text-ink-900";
-const hint = "text-base text-ink-600";
+const label = "text-lg font-semibold text-ink-950";
+const hint = "text-base text-ink-700";
 const errorText = "text-base text-danger-700";
 
 // A pill segmented control: a light gray track, the chosen option white.
@@ -33,7 +33,7 @@ const errorText = "text-base text-danger-700";
 // arrow keys move between options and the focus ring shows on the option.
 const track = "grid gap-1 rounded-2xl bg-ink-100 p-1";
 const option =
-  "flex min-h-12 cursor-pointer rounded-xl px-4 text-ink-600 transition-colors hover:text-ink-950 has-checked:bg-white has-checked:text-ink-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-ink-200 has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600";
+  "flex min-h-12 cursor-pointer rounded-xl px-4 text-ink-700 transition-colors hover:text-ink-950 has-checked:bg-white has-checked:text-ink-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-ink-200 has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600";
 
 const SOURCES = [
   { value: "link", label: "Paste a link" },
@@ -230,7 +230,7 @@ export function ReadingForm({
           <label htmlFor="title" className={label}>
             Title
             {create && (
-              <span className={`font-normal text-ink-500 ${linkOnly}`}> (optional)</span>
+              <span className={`font-normal text-ink-700 ${linkOnly}`}> (optional)</span>
             )}
           </label>
           <input
@@ -285,7 +285,7 @@ export function ReadingForm({
               <p
                 id="body-count"
                 aria-live="polite"
-                className={`text-sm tabular-nums ${overLimit ? "font-semibold text-danger-700" : "text-ink-500"}`}
+                className={`text-base tabular-nums ${overLimit ? "font-semibold text-danger-700" : "text-ink-700"}`}
               >
                 {bodyLength.toLocaleString("en-US")} /{" "}
                 {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
@@ -384,7 +384,7 @@ export function ReadingForm({
                       className="sr-only"
                     />
                     <span className="text-base font-semibold">{questionModeLabel(m)}</span>
-                    <span id={`mode-${m}-hint`} className="text-sm text-ink-600">
+                    <span id={`mode-${m}-hint`} className="text-base text-ink-700">
                       {questionModeHint(m)}
                     </span>
                   </label>

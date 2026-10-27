@@ -22,7 +22,7 @@ export default function TeacherError({
       <h1 className="text-2xl font-semibold text-ink-950">
         Something went wrong
       </h1>
-      <p className="text-base text-ink-600">
+      <p className="text-base text-ink-700">
         We couldn’t load this page. Please try again.
       </p>
       <button

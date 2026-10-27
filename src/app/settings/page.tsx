@@ -30,7 +30,7 @@ export default async function SettingsPage() {
           ageConfirmed={account.ageConfirmedAt !== null}
           confirmSwitch={account.role === "teacher"}
         />
-        <p className="border-t border-ink-200 pt-5 text-base text-ink-600">
+        <p className="border-t border-ink-200 pt-5 text-base text-ink-700">
           Switching only changes which home you see. Nothing is deleted: your classes and your own readings stay saved,
           and switching back brings them right back.
         </p>

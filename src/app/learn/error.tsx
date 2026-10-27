@@ -22,7 +22,7 @@ export default function LearnError({
       <h1 className="text-2xl font-bold text-ink-950">
         Something went wrong
       </h1>
-      <p className="text-lg text-ink-600">
+      <p className="text-lg text-ink-700">
         We couldn’t load this page. Please try again.
       </p>
       <button

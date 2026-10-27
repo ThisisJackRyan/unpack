@@ -63,7 +63,7 @@ export default async function SelfReadingPage({ params }: Props) {
 
       <div className="flex flex-col gap-2">
         <MetaLine
-          className="text-lg font-medium text-ink-600"
+          className="text-lg font-medium text-ink-700"
           parts={[gradeLevelLabel(reading.gradeLevel), questionCountLabel(reading.questionCount), host && `From ${host}`]}
         />
         <h1 id="reading-title" className="text-4xl font-bold tracking-tight break-words text-ink-950">

@@ -36,7 +36,7 @@ export default async function ChallengesPage({ params }: Props) {
         <h1 id="queue-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink-950 focus:outline-none">
           Challenges
         </h1>
-        <p className="text-lg text-ink-600">
+        <p className="text-lg text-ink-700">
           Students who think they did their best can ask you to look. Accept counts the reading as passed.
         </p>
       </div>
@@ -46,7 +46,7 @@ export default async function ChallengesPage({ params }: Props) {
       {items.length === 0 && (
         <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
           <PaperPlane className="h-24 w-32" />
-          <p className="text-lg text-ink-600">You’re all caught up. New challenges show up here.</p>
+          <p className="text-lg text-ink-700">You’re all caught up. New challenges show up here.</p>
         </div>
       )}
     </div>

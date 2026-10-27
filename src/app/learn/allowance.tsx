@@ -34,5 +34,5 @@ export function AllowanceLimit({
 }
 
 export function AllowanceLeft({ state, allowance }: { state: AllowanceState; allowance: ReadingAllowance }) {
-  return <p className="text-lg text-ink-600">{allowanceRemainingLabel(state, allowance)}</p>;
+  return <p className="text-lg text-ink-700">{allowanceRemainingLabel(state, allowance)}</p>;
 }

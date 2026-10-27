@@ -102,7 +102,7 @@ export function AnswerReview({
             </div>
             {answer && (
               <div className="flex flex-col gap-3 sm:pl-14">
-                <p className="text-lg font-semibold text-ink-600">Your answer</p>
+                <p className="text-lg font-semibold text-ink-700">Your answer</p>
                 <p className="rounded-2xl bg-ink-50 px-4 py-3 text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">
                   {answer.text}
                 </p>
@@ -125,7 +125,7 @@ export function AnswerReview({
 export function CharacterCount({ id, length, max }: { id: string; length: number; max: number }) {
   const near = length >= max * 0.9;
   return (
-    <p id={id} className={`text-lg tabular-nums ${near ? "font-medium text-warning-800" : "text-ink-500"}`}>
+    <p id={id} className={`text-lg tabular-nums ${near ? "font-medium text-warning-800" : "text-ink-700"}`}>
       <span aria-hidden="true">
         {length.toLocaleString("en-US")} / {max.toLocaleString("en-US")}
       </span>

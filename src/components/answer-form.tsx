@@ -65,7 +65,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
         <span className={`${pill} bg-primary-100 px-4 py-1.5 text-lg font-bold text-primary-800`}>
           {extraTry ? "1 try left" : `Try ${tryNumber} of ${maxTries}`}
         </span>
-        <span className="text-lg text-ink-600">Copy and paste are off. Use your own words.</span>
+        <span className="text-lg text-ink-700">Copy and paste are off. Use your own words.</span>
       </div>
 
       {extraTry ? (
@@ -158,7 +158,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
           {pending && <Spinner />}
           {pending ? "Checking your answers…" : "Check my answers"}
         </button>
-        <p id="check-time" className="text-lg text-ink-600">
+        <p id="check-time" className="text-lg text-ink-700">
           This can take up to a minute.
         </p>
       </div>

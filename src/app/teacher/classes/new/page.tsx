@@ -22,7 +22,7 @@ export default async function NewClassPage() {
           <h1 className="text-2xl font-semibold text-ink-950">
             You’re at your class limit
           </h1>
-          <p className="text-base text-ink-600">
+          <p className="text-base text-ink-700">
             The free plan includes 1 class.
           </p>
           <Link href="/teacher" className={`${secondaryButton} mt-3`}>

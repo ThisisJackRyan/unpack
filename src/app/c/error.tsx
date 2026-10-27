@@ -17,7 +17,7 @@ export default function StudentError({
   return (
     <div role="alert" className={`${card} flex flex-col items-center gap-3 px-6 py-14 text-center`}>
       <h1 className="text-2xl font-bold text-ink-950">Something went wrong</h1>
-      <p className="text-lg text-ink-600">We couldn’t load this page. Please try again.</p>
+      <p className="text-lg text-ink-700">We couldn’t load this page. Please try again.</p>
       <button type="button" onClick={() => unstable_retry()} className={`${primaryButtonLarge} mt-3`}>
         Try again
       </button>

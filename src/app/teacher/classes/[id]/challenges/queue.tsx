@@ -89,7 +89,7 @@ function ChallengeCard({
           <span className="sr-only">, </span>
           <span className="font-medium text-ink-700">{item.readingTitle}</span>
         </h2>
-        <p className="flex flex-wrap items-center gap-2 text-sm text-ink-600">
+        <p className="flex flex-wrap items-center gap-2 text-base text-ink-700">
           <span className={`${pill} bg-ink-100 text-ink-700 text-sm tabular-nums`}>
             {item.tries} of {item.triesAllowed} {item.triesAllowed === 1 ? "try" : "tries"} used
           </span>
@@ -103,7 +103,7 @@ function ChallengeCard({
       </div>
 
       <figure className="flex flex-col gap-1.5 rounded-2xl bg-primary-50/60 px-4 py-3">
-        <figcaption className="text-sm font-semibold text-primary-900">Note from {item.studentName}</figcaption>
+        <figcaption className="text-base font-semibold text-primary-900">Note from {item.studentName}</figcaption>
         <blockquote className="text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">{item.note}</blockquote>
       </figure>
 
@@ -115,7 +115,7 @@ function ChallengeCard({
           {item.questions.map((q) => (
             <li key={q.id} className="flex flex-col gap-2 rounded-2xl border border-ink-200 px-4 py-3">
               <p className="text-base font-medium break-words text-ink-900">
-                <span className="text-ink-500">{q.position}.</span> {q.prompt}
+                <span className="text-ink-700">{q.position}.</span> {q.prompt}
               </p>
               {q.answer ? (
                 <>
@@ -133,7 +133,7 @@ function ChallengeCard({
                       </span>
                     )}
                     {!q.answer.pass && q.answer.nudge && (
-                      <p className="text-sm text-ink-700">
+                      <p className="text-base text-ink-700">
                         <span className="font-semibold">Nudge shown: </span>
                         {q.answer.nudge}
                       </p>
@@ -141,7 +141,7 @@ function ChallengeCard({
                   </div>
                 </>
               ) : (
-                !noTry && <p className="text-sm text-ink-500">No answer saved.</p>
+                !noTry && <p className="text-base text-ink-700">No answer saved.</p>
               )}
             </li>
           ))}
@@ -171,7 +171,7 @@ function ChallengeCard({
             <span className="sr-only"> to {item.studentName}</span>
           </button>
         </div>
-        <p id={`${headingId}-extra`} className="text-sm text-ink-600">
+        <p id={`${headingId}-extra`} className="text-base text-ink-700">
           One more try: {item.studentName} gets exactly 1 try back, and can send a new note if it doesn’t pass.
         </p>
         <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">

@@ -50,7 +50,7 @@ export function DeleteReadingButton({ action, title }: { action: Action; title: 
               notes to you. It can’t be undone.
             </p>
             <p>Students stay in the class, and their work on other readings is kept.</p>
-            <p className="text-sm text-ink-500">Our database backups keep deleted data for a short time, then it’s gone.</p>
+            <p className="text-base text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
           </div>
           <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">
             {state.error ?? ""}

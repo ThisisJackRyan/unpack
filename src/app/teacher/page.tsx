@@ -23,7 +23,7 @@ export default async function TeacherClassesPage() {
         </h1>
         {classes.length > 0 &&
           (limitReached ? (
-            <p className="text-base text-ink-600">Free plan includes 1 class</p>
+            <p className="text-base text-ink-700">Free plan includes 1 class</p>
           ) : (
             <Link href="/teacher/classes/new" className={primaryButton}>
               New class
@@ -45,7 +45,7 @@ export default async function TeacherClassesPage() {
                   <span className="truncate text-lg font-semibold text-ink-950">
                     {c.name}
                   </span>
-                  <span className="text-base text-ink-600">
+                  <span className="text-base text-ink-700">
                     {gradeLevelLabel(c.gradeLevel)}
                   </span>
                 </span>
@@ -71,7 +71,7 @@ function EmptyState() {
       <h2 className="text-xl font-semibold text-ink-950">
         Create your first class
       </h2>
-      <p className="max-w-sm text-base text-ink-600">
+      <p className="max-w-sm text-base text-ink-700">
         Students join with a short code. No accounts needed.
       </p>
       <Link

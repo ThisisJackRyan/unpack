@@ -22,7 +22,7 @@ export const secondaryButton = `inline-flex min-h-12 items-center justify-center
 export const secondaryButtonLarge = secondaryButton.replace("min-h-12", "min-h-14").replace("text-base", "text-lg").replace("px-6", "px-8");
 
 // The smaller neutral button for a table row (still a 44px tap target).
-export const secondarySmallButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-ink-400 bg-white px-3 text-sm font-semibold text-ink-900 transition-colors hover:bg-ink-50 disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`;
+export const secondarySmallButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-ink-400 bg-white px-3 text-base font-semibold text-ink-900 transition-colors hover:bg-ink-50 disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`;
 
 export const backLink = `inline-flex min-h-12 items-center gap-1 rounded-xl text-base font-semibold text-primary-700 hover:text-primary-900 ${focusRing}`;
 
@@ -47,4 +47,4 @@ export const dangerButton = `inline-flex min-h-12 items-center justify-center ga
 // text and border on white, so the solid red stays for the confirm.
 export const dangerOutlineButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-danger-600 bg-white px-6 text-base font-bold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
 
-export const dangerGhostButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;
+export const dangerGhostButton = `inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-base font-semibold text-danger-700 transition-colors hover:bg-danger-50 hover:text-danger-800 disabled:cursor-not-allowed disabled:opacity-60 ${dangerFocusRing}`;

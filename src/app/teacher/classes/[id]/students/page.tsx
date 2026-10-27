@@ -66,7 +66,7 @@ export default async function ClassProgressPage({ params }: Props) {
         <h1 id="progress-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink-950 focus:outline-none">
           Class progress
         </h1>
-        <p className="text-lg text-ink-600">
+        <p className="text-lg text-ink-700">
           Each student on each published reading. Challenged readings wait for you in{" "}
           <Link
             href={challengesHref}
@@ -83,13 +83,13 @@ export default async function ClassProgressPage({ params }: Props) {
       {status.students.length === 0 ? (
         <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
           <ReadingBuddy className="h-24 w-24" />
-          <p className="text-lg text-ink-600">No students yet. Share the join code, and they’ll show up here.</p>
+          <p className="text-lg text-ink-700">No students yet. Share the join code, and they’ll show up here.</p>
         </div>
       ) : status.readings.length === 0 ? (
         <>
           <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
             <OpenBook className="h-24 w-32" />
-            <p className="text-lg text-ink-600">No published readings yet. Publish one, and progress shows up here.</p>
+            <p className="text-lg text-ink-700">No published readings yet. Publish one, and progress shows up here.</p>
           </div>
           <StudentList status={status} actions={actions} />
         </>
@@ -114,7 +114,7 @@ function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
     return (
       <span className="flex flex-col items-start gap-1.5">
         <NeedsResetBadge size="sm" />
-        <span className="text-sm text-ink-600">{NEEDS_RESET_HELP}</span>
+        <span className="text-base text-ink-700">{NEEDS_RESET_HELP}</span>
         <ResetTriesButton
           action={target.actions.onReset}
           studentId={target.student.id}
@@ -129,7 +129,7 @@ function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
     <span className="flex flex-col items-start gap-1">
       <StudentReadingStatusBadge status={cell.status} size="sm" />
       {cell.status !== "not_started" && (
-        <span className="text-sm text-ink-600 tabular-nums">{triesLabel(cell)}</span>
+        <span className="text-base text-ink-700 tabular-nums">{triesLabel(cell)}</span>
       )}
     </span>
   );
@@ -177,13 +177,13 @@ function ProgressTable({ status, actions }: { status: ClassStatus; actions: Acti
         <caption className="sr-only">Each student’s status on each reading, with tries used</caption>
         <thead>
           <tr className="border-b border-ink-200 bg-ink-50">
-            <th scope="col" className="sticky left-0 bg-ink-50 px-5 py-3 text-sm font-semibold text-ink-600">
+            <th scope="col" className="sticky left-0 bg-ink-50 px-5 py-3 text-base font-semibold text-ink-700">
               Student
             </th>
             {status.readings.map((r) => (
               <th key={r.id} scope="col" className="min-w-40 px-4 py-3 align-bottom">
-                <span className="line-clamp-2 text-sm font-semibold text-ink-900">{r.title}</span>
-                <span className="block text-sm font-normal text-ink-500 tabular-nums">{passedSummary(status, r.id)}</span>
+                <span className="line-clamp-2 text-base font-semibold text-ink-900">{r.title}</span>
+                <span className="block text-base font-normal text-ink-700 tabular-nums">{passedSummary(status, r.id)}</span>
               </th>
             ))}
             <th scope="col" className="px-4 py-3">

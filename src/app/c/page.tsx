@@ -40,7 +40,7 @@ export default async function StudentHomePage() {
         {readings.length === 0 ? (
           <div className={`${card} flex flex-col items-center gap-4 px-6 py-10 text-center`}>
             <OpenBook className="h-24 w-32" />
-            <p className="text-lg text-ink-600">No readings yet. Your teacher will add some soon.</p>
+            <p className="text-lg text-ink-700">No readings yet. Your teacher will add some soon.</p>
           </div>
         ) : (
           <ul className="flex flex-col gap-3">
@@ -51,7 +51,7 @@ export default async function StudentHomePage() {
         )}
       </section>
 
-      <p className="text-lg text-ink-600">
+      <p className="text-lg text-ink-700">
         Not {session.student.firstName}?{" "}
         <Link href="/join" className={textLink}>
           Join with your name
@@ -72,7 +72,7 @@ function ReadingCard({ reading }: { reading: StudentReadingListItem }) {
           <span className="text-xl font-bold break-words text-ink-950">{reading.title}</span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <StudentReadingStatusBadge status={reading.status} />
-            <span className="text-lg text-ink-600">{questionCountLabel(reading.questionCount)}</span>
+            <span className="text-lg text-ink-700">{questionCountLabel(reading.questionCount)}</span>
           </span>
         </span>
         <span

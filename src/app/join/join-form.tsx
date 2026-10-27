@@ -9,8 +9,8 @@ import { TurnstileWidget } from "./turnstile-widget";
 
 const initialState: JoinState = {};
 
-const label = "text-lg font-semibold text-ink-900";
-const hint = "text-base text-ink-600";
+const label = "text-xl font-bold text-ink-950";
+const hint = "text-lg text-ink-700";
 // Red, like every form error (red is for errors and destructive actions).
 const error = "text-base font-medium text-danger-700";
 

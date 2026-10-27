@@ -112,7 +112,7 @@ export default async function ReadingPage({ params }: Props) {
                   Questions
                 </h2>
                 <MetaLine
-                  className="text-base text-ink-600"
+                  className="text-base text-ink-700"
                   parts={[questionCountLabel(reading.questionCount), `Written for ${gradeLabel}`]}
                 />
               </div>
@@ -133,7 +133,7 @@ export default async function ReadingPage({ params }: Props) {
                     </li>
                   ))}
                 </ol>
-                <p className="text-sm text-ink-500">
+                <p className="text-base text-ink-700">
                   Questions are locked once a reading is published.
                 </p>
               </>
@@ -170,7 +170,7 @@ export default async function ReadingPage({ params }: Props) {
           <h2 id="delete-reading-heading" className="text-base font-semibold text-ink-950">
             Delete this reading
           </h2>
-          <p className="text-sm text-ink-600">Removes it for everyone, with every student’s answers and tries.</p>
+          <p className="text-base text-ink-700">Removes it for everyone, with every student’s answers and tries.</p>
         </div>
         <DeleteReadingButton action={deleteReadingAction.bind(null, found.id, reading.id)} title={reading.title} />
       </section>
@@ -220,12 +220,12 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
         <h2 id="student-sets-heading" className="text-xl font-semibold text-ink-950">
           Student questions
         </h2>
-        <p className="text-base text-ink-600">
+        <p className="text-base text-ink-700">
           {sets.length === 1 ? "1 student has a set." : `${sets.length} students have a set.`}
         </p>
       </div>
       {sets.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-600">
+        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-700">
           No student has opened this reading yet. Each student’s questions show up here after they open it.
         </p>
       ) : (
@@ -237,7 +237,7 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
                   className={`flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 hover:bg-ink-50 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden ${focusRing}`}
                 >
                   <span className="min-w-0 text-base font-semibold break-words text-ink-950">{set.name}</span>
-                  <span className="flex shrink-0 items-center gap-3 text-base text-ink-600">
+                  <span className="flex shrink-0 items-center gap-3 text-base text-ink-700">
                     {questionCountLabel(set.questions.length)}
                     <span aria-hidden="true" className="transition-transform group-open:rotate-90">
                       ›
@@ -264,7 +264,7 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
 function Detail({ term, children }: { term: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-sm font-medium text-ink-500">{term}</dt>
+      <dt className="text-base font-medium text-ink-700">{term}</dt>
       <dd className="text-base font-semibold text-ink-950">{children}</dd>
     </div>
   );

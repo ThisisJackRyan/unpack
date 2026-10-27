@@ -44,7 +44,7 @@ export function ChallengeForm({
         <PaperPlane className="h-16 w-20 shrink-0" />
       </div>
       {intro && <p className="text-lg leading-relaxed text-ink-800">{intro}</p>}
-      <label htmlFor="challenge-note" className="text-lg font-semibold text-ink-900">
+      <label htmlFor="challenge-note" className="text-xl font-bold text-ink-950">
         Your note to your teacher
       </label>
       <NoCopyTextarea

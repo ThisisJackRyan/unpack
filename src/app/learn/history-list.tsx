@@ -17,7 +17,7 @@ export function HistoryList({ items }: { items: HistoryItem[] }) {
           >
             <span className="flex min-w-0 flex-col gap-1">
               <span className="text-xl font-bold break-words text-ink-950">{item.title}</span>
-              <span className="text-lg text-ink-600">
+              <span className="text-lg text-ink-700">
                 <time dateTime={item.isoDate}>{item.dateLabel}</time>
                 {item.gradeLabel && (
                   <>
@@ -44,7 +44,7 @@ export function EmptyHistory({ screen }: { screen: EmptyStateScreen }) {
     <div className={`${card} flex flex-col items-center gap-4 px-6 py-14 text-center`}>
       <OpenBook className="h-28 w-36" />
       <h2 className="text-2xl font-bold text-ink-950">{copy.heading}</h2>
-      <p className="max-w-sm text-lg text-ink-600">{copy.body}</p>
+      <p className="max-w-sm text-lg text-ink-700">{copy.body}</p>
       <StartLink className="mt-2" label={copy.button} />
     </div>
   );

@@ -28,7 +28,7 @@ export default async function EditReadingPage({ params }: Props) {
         <h1 className="text-3xl font-semibold tracking-tight text-ink-950">
           {published ? "Edit title" : "Edit reading"}
         </h1>
-        <p className="text-base text-ink-600">
+        <p className="text-base text-ink-700">
           {published
             ? "This reading is published, so only its title can be changed."
             : "Changing the text, grade level, number of questions, or mode clears the questions."}

@@ -54,7 +54,7 @@ export function JoinCodeSettings({
           <p id="code-switch-label" className="text-base font-semibold text-ink-950">
             Join code on
           </p>
-          <p id="code-switch-help" className="text-sm text-ink-600">
+          <p id="code-switch-help" className="text-base text-ink-700">
             Turn it off when everyone’s in. Students who already joined keep their access.
           </p>
         </div>
@@ -85,7 +85,7 @@ export function JoinCodeSettings({
         <div className="flex items-center justify-between gap-6">
           <div className="flex min-w-0 flex-col gap-0.5">
             <p className="text-base font-semibold text-ink-950">New code</p>
-            <p id="new-code-help" className="text-sm text-ink-600">
+            <p id="new-code-help" className="text-base text-ink-700">
               For a code that got shared too widely. The old one stops working right away.
             </p>
           </div>
@@ -135,7 +135,7 @@ export function JoinCodeSettings({
             </div>
           </form>
         )}
-        {newPending && <p className="text-sm text-ink-600">Making a new code…</p>}
+        {newPending && <p className="text-base text-ink-700">Making a new code…</p>}
       </div>
 
       <p

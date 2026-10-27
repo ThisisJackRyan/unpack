@@ -33,7 +33,7 @@ export function ClassSettingsForm({
   return (
     <form action={dispatch} noValidate aria-busy={pending} className="flex flex-col divide-y divide-ink-200">
       <div className="flex flex-col gap-2 py-5 first:pt-0">
-        <label htmlFor="class-name" className="text-base font-semibold text-ink-950">
+        <label htmlFor="class-name" className="text-lg font-semibold text-ink-950">
           Class name
         </label>
         <input
@@ -54,10 +54,10 @@ export function ClassSettingsForm({
       </div>
 
       <div className="flex flex-col gap-2 py-5">
-        <label htmlFor="class-grade" className="text-base font-semibold text-ink-950">
+        <label htmlFor="class-grade" className="text-lg font-semibold text-ink-950">
           Grade level
         </label>
-        <p id="class-grade-help" className="text-sm text-ink-600">
+        <p id="class-grade-help" className="text-base text-ink-700">
           {CLASS_GRADE_HELP}
         </p>
         <select

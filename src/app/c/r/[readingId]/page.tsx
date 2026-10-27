@@ -60,7 +60,7 @@ export default async function StudentReadingPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-2">
-        <MetaLine className="text-lg font-medium text-ink-600" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
+        <MetaLine className="text-lg font-medium text-ink-700" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
         <h1 id="reading-title" className="text-4xl font-bold tracking-tight break-words text-ink-950">
           {reading.title}
         </h1>

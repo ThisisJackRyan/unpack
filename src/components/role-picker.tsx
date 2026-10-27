@@ -114,7 +114,7 @@ export function RolePicker({
                 <span className="h-2 w-2 rounded-full bg-white" />
               </span>
               <span className="pr-10 text-xl font-bold text-ink-950">{c.title}</span>
-              <span id={`role-${c.role}-line`} className="text-lg text-ink-600">
+              <span id={`role-${c.role}-line`} className="text-lg text-ink-700">
                 {c.line}
               </span>
             </label>
@@ -149,7 +149,7 @@ export function RolePicker({
           {/* One note at a time: the error replaces the hint while active.
               The error line stays mounted (empty) so it is announced. */}
           {age.show === "hint" && (
-            <p id={AGE_HINT_ID} className="text-base text-ink-600">
+            <p id={AGE_HINT_ID} className="text-base text-ink-700">
               You need to be 13 or older to read on your own. Younger readers can join a class with a code from their
               teacher.
             </p>

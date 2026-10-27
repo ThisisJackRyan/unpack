@@ -53,7 +53,7 @@ export default async function StudentProgressPage({ params }: Props) {
         <h1 id="student-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight break-words text-ink-950 focus:outline-none">
           {name}
         </h1>
-        <p className="text-lg break-words text-ink-600">{className}</p>
+        <p className="text-lg break-words text-ink-700">{className}</p>
       </div>
 
       <ProgressAnnouncer headingId="student-heading" />
@@ -61,7 +61,7 @@ export default async function StudentProgressPage({ params }: Props) {
       {status.readings.length === 0 ? (
         <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
           <OpenBook className="h-24 w-32" />
-          <p className="text-lg text-ink-600">No published readings yet. Publish one, and progress shows up here.</p>
+          <p className="text-lg text-ink-700">No published readings yet. Publish one, and progress shows up here.</p>
         </div>
       ) : (
         <ul className={`${card} divide-y divide-ink-200`}>
@@ -76,7 +76,7 @@ export default async function StudentProgressPage({ params }: Props) {
                   ) : (
                     <span className="flex items-center gap-3">
                       {cell.status !== "not_started" && (
-                        <span className="text-sm text-ink-600 tabular-nums">{triesLabel(cell)}</span>
+                        <span className="text-base text-ink-700 tabular-nums">{triesLabel(cell)}</span>
                       )}
                       <StudentReadingStatusBadge status={cell.status} size="sm" />
                     </span>

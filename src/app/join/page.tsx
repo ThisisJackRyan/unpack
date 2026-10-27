@@ -50,7 +50,7 @@ export default async function JoinPage() {
                   Join your class
                 </h1>
               )}
-              <p className="text-lg text-ink-600">
+              <p className="text-lg text-ink-700">
                 {session
                   ? `This device will leave ${session.class.name} when you join a different class.`
                   : "Type the code your teacher gave you."}

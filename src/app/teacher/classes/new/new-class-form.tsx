@@ -18,7 +18,7 @@ export function NewClassForm() {
   return (
     <form action={formAction} noValidate className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <label htmlFor="name" className="text-base font-semibold text-ink-900">
+        <label htmlFor="name" className="text-lg font-semibold text-ink-950">
           Class name
         </label>
         <input
@@ -41,7 +41,7 @@ export function NewClassForm() {
       <div className="flex flex-col gap-2">
         <label
           htmlFor="gradeLevel"
-          className="text-base font-semibold text-ink-900"
+          className="text-lg font-semibold text-ink-950"
         >
           Grade level
         </label>

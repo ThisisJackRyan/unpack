@@ -36,7 +36,7 @@ type Props = {
 
 type Running = { intent: QuestionIntent; questionId?: string };
 
-const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
+const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
 const quietButton = `${smallButton} text-ink-700 hover:bg-ink-100 hover:text-ink-950`;
 // primaryButton in red, for confirming a delete.
 const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-danger-700 px-5 text-base font-semibold text-white transition-colors hover:bg-danger-800 ${focusRing}`;
@@ -112,7 +112,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
             Questions
           </h2>
           <MetaLine
-            className="text-base text-ink-600"
+            className="text-base text-ink-700"
             parts={[questionCountLabel(questionCount), `Written for ${gradeLabel}`]}
           />
         </div>
@@ -204,7 +204,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           ) : (
             state.sample && (
               <div className="flex flex-col gap-3">
-                <p className="text-sm font-medium text-ink-600">
+                <p className="text-base font-semibold text-ink-900">
                   Sample only. It isn’t saved, and each student gets their own set.
                 </p>
                 <ol className="flex flex-col gap-3" aria-label="Sample questions">
@@ -228,7 +228,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
       )}
 
       <div className="flex flex-col gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p id="publish-hint" className="text-base text-ink-600">
+        <p id="publish-hint" className="text-base text-ink-700">
           {canPublish
             ? "Publishing shows it to the class and locks the questions."
             : "Write the questions before you publish."}
@@ -346,7 +346,7 @@ function ConfirmButton({
         <h2 id={`${id}-title`} className="text-xl font-semibold text-ink-950">
           {title}
         </h2>
-        <p id={`${id}-body`} className="mt-2 text-base text-ink-600">
+        <p id={`${id}-body`} className="mt-2 text-base text-ink-700">
           {body}
         </p>
         <IntentForm
@@ -440,7 +440,7 @@ function QuestionCard({
             track={track}
             className="flex flex-col gap-2"
           >
-            <label htmlFor={fieldId} className="text-sm font-medium text-ink-500">
+            <label htmlFor={fieldId} className="text-lg font-semibold text-ink-950">
               {ROLE_LABELS[role]}
               <span className="sr-only">, question {question.position}</span>
             </label>
@@ -458,7 +458,7 @@ function QuestionCard({
               className={`block w-full rounded-2xl border-2 border-ink-400 bg-white px-3 py-2 text-base leading-relaxed text-ink-950 aria-invalid:border-danger-600 ${focusRing}`}
             />
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p id={`${fieldId}-count`} className="text-sm text-ink-500 tabular-nums">
+              <p id={`${fieldId}-count`} className="text-base text-ink-700 tabular-nums">
                 {length} / {QUESTION_MAX_LENGTH}
                 <span className="sr-only"> characters</span>
               </p>
@@ -481,7 +481,7 @@ function QuestionCard({
         )}
 
         {error && (
-          <p id={errorId} role="alert" className="text-sm text-danger-700">
+          <p id={errorId} role="alert" className="text-base text-danger-700">
             {error}
           </p>
         )}
@@ -538,7 +538,7 @@ function QuestionCard({
 export function QuestionText({ role, prompt }: { role: QuestionRole; prompt: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-ink-500">{ROLE_LABELS[role]}</span>
+      <span className="text-base font-semibold text-primary-700">{ROLE_LABELS[role]}</span>
       <p className="text-base leading-relaxed break-words text-ink-900">{prompt}</p>
     </div>
   );
@@ -577,7 +577,7 @@ function EmptyState({ title, body, children }: { title: string; body: string; ch
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-10 text-center">
       <h3 className="text-lg font-semibold text-ink-950">{title}</h3>
-      <p className="max-w-md text-base text-ink-600">{body}</p>
+      <p className="max-w-md text-base text-ink-700">{body}</p>
       <div className="mt-2">{children}</div>
     </div>
   );

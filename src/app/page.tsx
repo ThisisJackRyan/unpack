@@ -22,7 +22,7 @@ export default function Home() {
             <h1 className="text-4xl font-bold tracking-tight text-ink-950 sm:text-5xl">
               Read it. Answer in your own words. Show you really tried.
             </h1>
-            <p className="max-w-xl text-lg text-ink-600">
+            <p className="max-w-xl text-lg text-ink-700">
               Paste any article or text and get a few questions about it. Your answers get a quick check for effort,
               with friendly tips when you need another go.
             </p>
@@ -35,7 +35,7 @@ export default function Home() {
               Sign in
             </Link>
           </div>
-          <p className="text-lg text-ink-600">
+          <p className="text-lg text-ink-700">
             Joining a class?{" "}
             <Link href="/join" className={textLink}>
               Enter your class code

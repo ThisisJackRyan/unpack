@@ -65,7 +65,7 @@ export function DeleteStudentButton({ action, studentId, name }: { action: Actio
               questions. It can’t be undone.
             </p>
             <p>If they open unpack again, they’ll need to join with the class code.</p>
-            <p className="text-sm text-ink-500">Our database backups keep deleted data for a short time, then it’s gone.</p>
+            <p className="text-base text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
           </div>
           <p aria-live="polite" className="text-base font-medium text-danger-700 empty:hidden">
             {state.error ?? ""}
