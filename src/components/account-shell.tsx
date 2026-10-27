@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
+import { Logo } from "./logo";
 import { focusRing } from "./ui";
 
 export type ShellLink = { href: string; label: string };
@@ -19,14 +20,9 @@ export function AccountShell({
 }) {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-ink-50 text-lg text-ink-900">
-      <header className="border-b border-ink-200 bg-white">
+      <header className="border-b-2 border-ink-200 bg-white">
         <div className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between gap-4 px-6">
-          <Link
-            href={homeHref}
-            className={`rounded-lg text-xl font-semibold tracking-tight text-ink-950 ${focusRing}`}
-          >
-            unpack
-          </Link>
+          <Logo href={homeHref} />
           <div className="flex items-center gap-1 sm:gap-2">
             {links.length > 0 && (
               <nav aria-label="Main" className="flex items-center gap-1">
@@ -34,7 +30,7 @@ export function AccountShell({
                   <Link
                     key={l.href}
                     href={l.href}
-                    className={`inline-flex min-h-11 items-center rounded-lg px-3 text-base font-medium text-ink-600 transition-colors hover:bg-ink-100 hover:text-ink-950 ${focusRing}`}
+                    className={`inline-flex min-h-11 items-center rounded-xl px-3 text-base font-semibold text-ink-700 transition-colors hover:bg-primary-50 hover:text-primary-800 ${focusRing}`}
                   >
                     {l.label}
                   </Link>

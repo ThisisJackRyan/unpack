@@ -20,7 +20,7 @@ export default async function SettingsPage() {
       <Link href={back.href} className={`${backLink} self-start`}>
         <span aria-hidden="true">←</span> {back.label}
       </Link>
-      <h1 className="text-4xl font-semibold tracking-tight text-ink-950">Settings</h1>
+      <h1 className="text-4xl font-bold tracking-tight text-ink-950">Settings</h1>
       <div className={`${card} flex flex-col gap-6 p-6 sm:p-8`}>
         <RolePicker
           action={switchRoleAction}

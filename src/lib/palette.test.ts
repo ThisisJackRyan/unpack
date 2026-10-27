@@ -84,6 +84,7 @@ const LARGE_PAIRS: [fg: string, bg: string][] = [
   ["ink-400", "ink-50"],
   ["danger-600", "white"],
   ["warning-600", "white"],
+  ["warning-600", "warning-50"],
   // Icons beside words, on their panels.
   ["warning-700", "warning-50"],
   ["primary-700", "primary-50"],

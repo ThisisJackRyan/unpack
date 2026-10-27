@@ -18,7 +18,7 @@ export default async function HistoryPage() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-4xl font-semibold tracking-tight text-ink-950">History</h1>
+        <h1 className="text-4xl font-bold tracking-tight text-ink-950">History</h1>
         {items.length > 0 && <StartLink />}
       </div>
       {items.length === 0 ? <EmptyHistory screen="history" /> : <HistoryList items={items} />}
