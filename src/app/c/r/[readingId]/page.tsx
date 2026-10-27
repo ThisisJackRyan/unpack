@@ -19,6 +19,7 @@ import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
 import { ChallengeForm } from "./challenge-form";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
+import { MetaLine } from "@/components/meta-line";
 import { QuestionSkeletons } from "@/components/question-skeletons";
 
 // A student's first open of a unique per student reading writes their set,
@@ -59,15 +60,7 @@ export default async function StudentReadingPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-2">
-        <p className="text-lg text-zinc-600">
-          {questionCountLabel(reading.questionCount)}
-          {host && (
-            <>
-              <span aria-hidden="true"> · </span>
-              <span className="sr-only">, </span>From <span className="break-all">{host}</span>
-            </>
-          )}
-        </p>
+        <MetaLine className="text-lg text-zinc-600" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
         <h1 id="reading-title" className="text-4xl font-semibold tracking-tight break-words text-zinc-950">
           {reading.title}
         </h1>

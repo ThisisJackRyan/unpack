@@ -10,6 +10,7 @@ import type { StudentSet } from "@/lib/student-sets";
 import { listStudentSets } from "@/lib/student-sets-db";
 import { sourceHost } from "@/lib/validate-reading";
 import { ReadingStatusBadge } from "@/components/reading-status-badge";
+import { MetaLine } from "@/components/meta-line";
 import { backLink, card, focusRing, secondaryButton } from "@/components/ui";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadReading } from "../../loaders";
@@ -110,9 +111,10 @@ export default async function ReadingPage({ params }: Props) {
                 <h2 id="questions-heading" className="text-xl font-semibold text-zinc-950">
                   Questions
                 </h2>
-                <p className="text-base text-zinc-600">
-                  {questionCountLabel(reading.questionCount)} · Written for {gradeLabel}
-                </p>
+                <MetaLine
+                  className="text-base text-zinc-600"
+                  parts={[questionCountLabel(reading.questionCount), `Written for ${gradeLabel}`]}
+                />
               </div>
               {shared && (
                 <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-0.5 text-sm font-medium text-zinc-700">

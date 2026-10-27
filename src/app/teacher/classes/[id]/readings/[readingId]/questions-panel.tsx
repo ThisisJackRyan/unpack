@@ -13,6 +13,7 @@ import { questionRole, type QuestionRole } from "@/lib/ai/prompts";
 import { questionCountLabel } from "@/lib/question-modes";
 import { LAST_QUESTION_MESSAGE } from "@/lib/shared-questions";
 import { LimitNotice } from "@/components/limit-notice";
+import { MetaLine } from "@/components/meta-line";
 import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
 import {
   QUESTION_MAX_LENGTH,
@@ -110,9 +111,10 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           >
             Questions
           </h2>
-          <p className="text-base text-zinc-600">
-            {questionCountLabel(questionCount)} · Written for {gradeLabel}
-          </p>
+          <MetaLine
+            className="text-base text-zinc-600"
+            parts={[questionCountLabel(questionCount), `Written for ${gradeLabel}`]}
+          />
         </div>
         {shared && hasSet && (
           <ConfirmButton

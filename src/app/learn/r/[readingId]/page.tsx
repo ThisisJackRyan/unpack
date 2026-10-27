@@ -8,6 +8,7 @@ import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { QuestionSkeletons } from "@/components/question-skeletons";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
+import { MetaLine } from "@/components/meta-line";
 import { backLink, card, primaryButton, secondaryButton } from "@/components/ui";
 import { requireSelfLearner } from "@/lib/account";
 import { requestRetryClock } from "@/lib/request-time-zone";
@@ -61,18 +62,10 @@ export default async function SelfReadingPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-2">
-        <p className="text-lg text-zinc-600">
-          {gradeLevelLabel(reading.gradeLevel)}
-          <span aria-hidden="true"> · </span>
-          <span className="sr-only">, </span>
-          {questionCountLabel(reading.questionCount)}
-          {host && (
-            <>
-              <span aria-hidden="true"> · </span>
-              <span className="sr-only">, </span>From <span className="break-all">{host}</span>
-            </>
-          )}
-        </p>
+        <MetaLine
+          className="text-lg text-zinc-600"
+          parts={[gradeLevelLabel(reading.gradeLevel), questionCountLabel(reading.questionCount), host && `From ${host}`]}
+        />
         <h1 id="reading-title" className="text-4xl font-semibold tracking-tight break-words text-zinc-950">
           {reading.title}
         </h1>
