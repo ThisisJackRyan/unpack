@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useRef, useState, type FormEvent } from "react";
 import { GRADE_LEVELS, gradeLevelLabel } from "@/lib/grade-levels";
 import {
   QUESTION_MODES,
@@ -12,6 +12,8 @@ import { field, primaryButton, secondaryButton } from "@/components/ui";
 import {
   BODY_TEXT_MAX_LENGTH,
   BODY_TEXT_MIN_LENGTH,
+  BODY_TEXT_TOO_LONG_MESSAGE,
+  normalizeBodyText,
   QUESTION_COUNT_DEFAULT,
   QUESTION_COUNT_MAX,
   QUESTION_COUNT_MIN,
@@ -85,6 +87,37 @@ export function ReadingForm({
   const errors = state.errors ?? {};
   const create = mode === "create";
 
+  // The panels switch with CSS alone; this mirrors the checked source radio
+  // for the pending label and the length check.
+  const [source, setSource] = useState(create ? values.source : "text");
+  const textMode = source === "text";
+
+  // Counted after the same normalizing the server does, so the number
+  // matches the server's limit check.
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [bodyLength, setBodyLength] = useState(
+    () => normalizeBodyText(values.bodyText).length,
+  );
+  const [tooLong, setTooLong] = useState(false);
+  const overLimit = bodyLength > BODY_TEXT_MAX_LENGTH;
+  const bodyError = (tooLong && overLimit && BODY_TEXT_TOO_LONG_MESSAGE) || errors.bodyText;
+
+  // Stops a submit the server would reject for length, before uploading a
+  // large paste. Link mode ignores the text box, so it never blocks there.
+  // Reads the live form, in case the radio or text changed before hydration.
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    const data = new FormData(event.currentTarget);
+    const submitted = create ? String(data.get("source") ?? "") : "text";
+    const length = normalizeBodyText(String(data.get("bodyText") ?? "")).length;
+    setSource(submitted);
+    setBodyLength(length);
+    if (submitted === "text" && length > BODY_TEXT_MAX_LENGTH) {
+      event.preventDefault();
+      setTooLong(true);
+      textareaRef.current?.focus();
+    }
+  }
+
   // In create mode the panels follow the checked source radio with CSS
   // (:has), so switching works before hydration and without JS.
   const linkPanel = "flex flex-col gap-2 group-has-[#source-text:checked]/form:hidden";
@@ -94,7 +127,12 @@ export function ReadingForm({
   const linkOnly = "group-has-[#source-text:checked]/form:hidden";
 
   return (
-    <form action={formAction} noValidate className="group/form flex flex-col gap-8">
+    <form
+      action={formAction}
+      onSubmit={onSubmit}
+      noValidate
+      className="group/form flex flex-col gap-8"
+    >
       <div className="flex flex-col gap-6">
         {create && (
           <>
@@ -112,6 +150,7 @@ export function ReadingForm({
                       name="source"
                       value={s.value}
                       defaultChecked={values.source === s.value}
+                      onChange={(e) => setSource(e.currentTarget.value)}
                       aria-describedby={errors.source ? "source-error" : undefined}
                       className="sr-only"
                     />
@@ -196,21 +235,40 @@ export function ReadingForm({
             {create ? "Reading text" : "Text"}
           </label>
           <textarea
+            ref={textareaRef}
             id="bodyText"
             name="bodyText"
             rows={14}
             defaultValue={values.bodyText}
-            aria-invalid={errors.bodyText ? true : undefined}
-            aria-describedby={describedBy("body-hint", errors.bodyText && "body-error")}
+            onChange={(e) =>
+              setBodyLength(normalizeBodyText(e.currentTarget.value).length)
+            }
+            aria-invalid={bodyError ? true : undefined}
+            aria-describedby={describedBy(
+              "body-hint",
+              "body-count",
+              bodyError && "body-error",
+            )}
             className={`${field} min-h-72 py-3 text-base leading-relaxed`}
           />
-          <p id="body-hint" className={hint}>
-            {sourceHost && <>Saved from {sourceHost}. </>}
-            At least {BODY_TEXT_MIN_LENGTH} characters, up to{" "}
-            {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+            <p id="body-hint" className={hint}>
+              {sourceHost && <>Saved from {sourceHost}. </>}
+              At least {BODY_TEXT_MIN_LENGTH} characters, up to{" "}
+              {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}.
+            </p>
+            <p
+              id="body-count"
+              aria-live="polite"
+              className={`text-sm tabular-nums ${overLimit ? "font-semibold text-red-700" : "text-zinc-500"}`}
+            >
+              {bodyLength.toLocaleString("en-US")} /{" "}
+              {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
+              <span className="sr-only"> characters</span>
+            </p>
+          </div>
           <p id="body-error" aria-live="polite" className={`${errorText} empty:hidden`}>
-            {errors.bodyText}
+            {bodyError}
           </p>
         </div>
       </div>
@@ -308,7 +366,13 @@ export function ReadingForm({
           Cancel
         </Link>
         <button type="submit" disabled={pending} className={primaryButton}>
-          {pending ? "Saving…" : create ? "Save draft" : "Save changes"}
+          {pending
+            ? create && !textMode
+              ? "Getting the article…"
+              : "Saving…"
+            : create
+              ? "Save draft"
+              : "Save changes"}
         </button>
       </div>
     </form>

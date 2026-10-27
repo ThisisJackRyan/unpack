@@ -13,6 +13,9 @@ export const READING_TITLE_MAX_LENGTH = 120;
 export const BODY_TEXT_MIN_LENGTH = 200;
 export const BODY_TEXT_MAX_LENGTH = 20_000;
 
+// Shown by the server and, before submitting, by the form's counter check.
+export const BODY_TEXT_TOO_LONG_MESSAGE = `This is too long. Keep it under ${BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")} characters, or paste a shorter section.`;
+
 export const SOURCE_URL_MAX_LENGTH = 2048;
 
 export const QUESTION_COUNT_MIN = 1;
@@ -147,7 +150,7 @@ function bodyTextError(text: string): string | undefined {
     return `This is too short. Paste at least ${BODY_TEXT_MIN_LENGTH} characters.`;
   }
   if (text.length > BODY_TEXT_MAX_LENGTH) {
-    return `This is too long. Keep it under ${BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")} characters, or paste a shorter section.`;
+    return BODY_TEXT_TOO_LONG_MESSAGE;
   }
   return undefined;
 }
