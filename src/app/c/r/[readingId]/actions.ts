@@ -88,9 +88,18 @@ export async function sendChallengeAction(
     logError("sendChallengeAction: send failed", error, readingId);
     return { error: CHALLENGE_FAILED_MESSAGE };
   }
-  if (result.status === "sent" || result.status === "already_sent" || result.status === "already_passed") {
+  if (
+    result.status === "sent" ||
+    result.status === "already_sent" ||
+    result.status === "already_passed" ||
+    result.status === "decided"
+  ) {
+    // The page shows where things stand (another tab, or the teacher
+    // decided meanwhile).
     refresh(readingId);
     return {};
   }
+  // "busy": a check is still running in another tab. The form stays, with
+  // the note, and asks to wait a minute.
   return { error: challengeMessage(result) };
 }

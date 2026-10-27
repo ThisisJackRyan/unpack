@@ -15,12 +15,15 @@ import {
   RetryIcon,
   Spinner,
 } from "./answer-parts";
-import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH, MAX_TRIES, type AnswerFormState } from "./form-state";
+import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH, type AnswerFormState } from "./form-state";
 
 type Props = {
   action: (state: AnswerFormState, formData: FormData) => Promise<AnswerFormState>;
   questions: StudentQuestion[];
   tryNumber: number;
+  maxTries: number;
+  // The teacher denied the note but gave one more try: exactly 1 left.
+  extraTry: boolean;
   // The last failed try: its answers prefill the boxes, with each one's
   // result and nudge. Students answer every question each try; passed
   // answers stay editable.
@@ -36,7 +39,7 @@ function prefill(questions: StudentQuestion[], previous: AttemptView | null): Re
 // Every question with an answer box, and one button that checks them all.
 // The form submits through a transition (not the form action prop), so
 // React doesn't reset the boxes after a check.
-export function AnswerForm({ action, questions, tryNumber, previous }: Props) {
+export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous }: Props) {
   const [state, dispatch, pending] = useActionState(action, initialState);
   const [values, setValues] = useState(() => prefill(questions, previous));
   // A new try (the page re-renders after a check): start from its answers.
@@ -58,12 +61,24 @@ export function AnswerForm({ action, questions, tryNumber, previous }: Props) {
     <form onSubmit={onSubmit} noValidate aria-busy={pending} className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <span className={`${pill} bg-indigo-50 px-3 py-1 text-base font-semibold text-indigo-800`}>
-          Try {tryNumber} of {MAX_TRIES}
+          {extraTry ? "1 try left" : `Try ${tryNumber} of ${maxTries}`}
         </span>
         <span className="text-base text-zinc-600">Copy and paste are off. Use your own words.</span>
       </div>
 
-      {previous && (
+      {extraTry ? (
+        <div className="flex gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-indigo-950">
+          <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-indigo-700" />
+          <div className="flex flex-col gap-1">
+            <p className="text-lg font-semibold">Your teacher gave you one more try.</p>
+            <p className="text-lg">
+              {previous
+                ? "Read the tips under your answers. Take your time, then check again."
+                : "Take your time with each answer, then check again."}
+            </p>
+          </div>
+        </div>
+      ) : previous && (
         <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950">
           <RetryIcon className="mt-1 h-5 w-5 shrink-0 text-amber-700" />
           <div className="flex flex-col gap-1">

@@ -134,14 +134,16 @@ function QuestionsStage({
           action={submitAnswersAction.bind(null, readingId)}
           questions={questions}
           tryNumber={stage.tryNumber}
+          maxTries={stage.maxTries}
           previous={stage.previous}
+          extraTry={stage.extraTry}
         />
       );
     case "passed":
       return (
         <>
-          <Banner tone="done" title={stage.byTeacher ? "Your teacher passed this one." : "You passed! Nice work."}>
-            {stage.byTeacher ? "This reading is done." : "This reading is done. Here are your answers."}
+          <Banner tone="done" title={stage.byTeacher ? "Your teacher accepted your answers." : "You passed! Nice work."}>
+            {stage.byTeacher ? "This reading is done. Nice work sticking with it!" : "This reading is done. Here are your answers."}
           </Banner>
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults={false} />}
         </>
@@ -149,13 +151,17 @@ function QuestionsStage({
     case "out_of_tries":
       return (
         <>
-          <Banner tone="info" title={`You used all ${MAX_TRIES} tries.`}>
+          <Banner tone="info" title={stage.extraTry ? "That was your extra try." : `You used all ${MAX_TRIES} tries.`}>
             Here is what you wrote last time, with tips.
           </Banner>
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
           <ChallengeForm
             action={sendChallengeAction.bind(null, readingId)}
-            intro={`You tried ${MAX_TRIES} times. If you think you did your best, tell your teacher why. They will read your answers and your note.`}
+            intro={
+              stage.extraTry
+                ? "If you think you did your best, you can send your teacher a new note. They will read your answers and your note."
+                : `You tried ${MAX_TRIES} times. If you think you did your best, tell your teacher why. They will read your answers and your note.`
+            }
           />
         </>
       );
@@ -182,8 +188,8 @@ function QuestionsStage({
               {stage.attempt ? "You can read your answers below while you wait." : "Check back here later."}
             </Banner>
           ) : (
-            <Banner tone="info" title="Your teacher looked at your note.">
-              Ask your teacher what to do next.
+            <Banner tone="info" title="Your teacher read your note.">
+              Thanks for telling them how it went. Ask your teacher if you want to talk about this one.
             </Banner>
           )}
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}

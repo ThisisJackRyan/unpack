@@ -13,7 +13,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 // The student's class home: their published readings, each with the
-// student's status (Not started, In progress, Passed, Challenged). Already-joined
+// student's status (Not started, In progress, Passed, Challenged, Challenge
+// denied). Already-joined
 // students keep access even after the teacher turns the join code off;
 // the code only gates joining.
 export default async function StudentHomePage() {
