@@ -90,7 +90,14 @@ export default async function StudentReadingPage({ params }: Props) {
         {view.kind === "questions" && stage && (
           <>
             <QuestionsStage readingId={reading.id} studentId={session.student.id} questions={view.questions} stage={stage} />
-            {stage.kind !== "answer" && <ClearAnswerDrafts mode="class" readingId={reading.id} ownerId={session.student.id} />}
+            {stage.kind !== "answer" && (
+              <ClearAnswerDrafts
+                mode="class"
+                readingId={reading.id}
+                ownerId={session.student.id}
+                keepNote={stage.kind === "out_of_tries" || stage.kind === "check_limit"}
+              />
+            )}
           </>
         )}
 
@@ -174,6 +181,7 @@ function QuestionsStage({
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
           <ChallengeForm
             action={sendChallengeAction.bind(null, readingId)}
+            draft={{ mode: "class", readingId, ownerId: studentId }}
             intro={
               stage.extraTry
                 ? "If you think you did your best, you can send your teacher a new note. They will read your answers and your note."
@@ -193,7 +201,7 @@ function QuestionsStage({
               : "Send a note to your teacher. They will read your note."}
           </Banner>
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
-          <ChallengeForm action={sendChallengeAction.bind(null, readingId)} />
+          <ChallengeForm action={sendChallengeAction.bind(null, readingId)} draft={{ mode: "class", readingId, ownerId: studentId }} />
         </>
       );
     case "challenged":

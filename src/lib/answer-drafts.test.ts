@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import {
   ANSWER_DRAFT_PREFIX,
   browserDraftStorage,
   clearDrafts,
+  clearNoteDraft,
   draftKey,
   loadDrafts,
+  loadNoteDraft,
+  NOTE_DRAFT_PREFIX,
+  noteDraftKey,
   saveDraft,
+  saveNoteDraft,
   withDrafts,
   type DraftStorage,
 } from "./answer-drafts";
-import { ANSWER_MAX_LENGTH } from "./validate-answers";
+import { ANSWER_MAX_LENGTH, CHALLENGE_NOTE_MAX_LENGTH } from "./validate-answers";
 
 const READING = "00000000-0000-4000-8000-0000000000aa";
 const STUDENT = "00000000-0000-4000-8000-0000000000bb";
@@ -116,5 +122,56 @@ describe("withDrafts", () => {
     assert.deepEqual(withDrafts(prefill, { [Q1]: "typed", [Q2]: "typed 2" }, [Q1]), { [Q1]: "typed", [Q2]: "last try 2" });
     assert.deepEqual(withDrafts(prefill, {}, [Q1, Q2]), prefill);
     assert.deepEqual(withDrafts(prefill, { [Q2]: "" }, [Q1, Q2]), { [Q1]: "last try", [Q2]: "" });
+  });
+});
+
+// F5: the note to the teacher, kept like the answers.
+describe("note drafts", () => {
+  const owner = { mode: "class" as const, readingId: READING, ownerId: STUDENT };
+
+  it("holds ids only in the key and the note text only in the value", () => {
+    assert.equal(noteDraftKey(owner), `${NOTE_DRAFT_PREFIX}class:${READING}:${STUDENT}`);
+    assert.equal(NOTE_DRAFT_PREFIX, "unpack:note:v1:");
+  });
+
+  it("round-trips, keeps a cleared note cleared, and is per student", () => {
+    const s = memoryStorage();
+    assert.equal(loadNoteDraft(s, owner), null);
+    assert.equal(saveNoteDraft(s, owner, "I read it twice."), true);
+    assert.equal(loadNoteDraft(s, owner), "I read it twice.");
+    assert.equal(loadNoteDraft(s, { ...owner, ownerId: OTHER }), null);
+    saveNoteDraft(s, owner, "");
+    assert.equal(loadNoteDraft(s, owner), "");
+    saveNoteDraft(s, owner, "x".repeat(CHALLENGE_NOTE_MAX_LENGTH + 20));
+    assert.equal(loadNoteDraft(s, owner)?.length, CHALLENGE_NOTE_MAX_LENGTH);
+  });
+
+  it("survives clearing the answer drafts, and goes on clearNoteDraft", () => {
+    const s = memoryStorage();
+    saveDraft(s, scope(3), Q1, "idk");
+    saveNoteDraft(s, owner, "Please look.");
+    assert.equal(clearDrafts(s, owner), 1);
+    assert.equal(loadNoteDraft(s, owner), "Please look.");
+    clearNoteDraft(s, owner);
+    assert.equal(loadNoteDraft(s, owner), null);
+    assert.equal(s.map.size, 0);
+  });
+
+  it("tolerates missing or throwing storage", () => {
+    assert.equal(saveNoteDraft(null, owner, "a"), false);
+    assert.equal(loadNoteDraft(null, owner), null);
+    assert.equal(saveNoteDraft(throwingStorage(), owner, "a"), false);
+    assert.equal(loadNoteDraft(throwingStorage(), owner), null);
+    clearNoteDraft(throwingStorage(), owner);
+    clearNoteDraft(null, owner);
+  });
+
+  it("the note form restores, saves on every change, and clears after a send", () => {
+    const source = readFileSync(new URL("../app/c/r/[readingId]/challenge-form.tsx", import.meta.url), "utf8");
+    assert.match(source, /loadNoteDraft\(browserDraftStorage\(\)/);
+    assert.match(source, /saveNoteDraft\(browserDraftStorage\(\)/);
+    assert.match(source, /if \(!next\.error\) clearNoteDraft\(/);
+    const page = readFileSync(new URL("../app/c/r/[readingId]/page.tsx", import.meta.url), "utf8");
+    assert.match(page, /keepNote=\{stage\.kind === "out_of_tries" \|\| stage\.kind === "check_limit"\}/);
   });
 });

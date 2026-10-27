@@ -20,6 +20,7 @@ import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH } from "@/lib/validate-answers";
 import {
   browserDraftStorage,
   clearDrafts,
+  clearNoteDraft,
   loadDrafts,
   saveDraft,
   withDrafts,
@@ -201,11 +202,14 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
   );
 }
 
-// Past answering (passed, out of tries, waiting on the teacher): no draft
-// on this reading is needed any more.
-export function ClearAnswerDrafts({ mode, readingId, ownerId }: DraftOwner) {
+// Past answering (passed, out of tries, waiting on the teacher): no answer
+// draft on this reading is needed any more. The note draft goes too unless
+// the page still shows the note box (`keepNote`).
+export function ClearAnswerDrafts({ mode, readingId, ownerId, keepNote = false }: DraftOwner & { keepNote?: boolean }) {
   useEffect(() => {
-    clearDrafts(browserDraftStorage(), { mode, readingId, ownerId });
-  }, [mode, readingId, ownerId]);
+    const storage = browserDraftStorage();
+    clearDrafts(storage, { mode, readingId, ownerId });
+    if (!keepNote) clearNoteDraft(storage, { mode, readingId, ownerId });
+  }, [mode, readingId, ownerId, keepNote]);
   return null;
 }

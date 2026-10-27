@@ -1,11 +1,12 @@
 "use client";
 
-import { startTransition, useActionState, useState, type FormEvent } from "react";
+import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { PaperPlane } from "@/components/illustrations";
 import { MaxLengthNote } from "@/components/max-length-note";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { primaryButtonLarge } from "@/components/ui";
 import { answerBox, CharacterCount, fieldError, Spinner } from "@/components/answer-parts";
+import { browserDraftStorage, clearNoteDraft, loadNoteDraft, saveNoteDraft, type DraftOwner } from "@/lib/answer-drafts";
 import { CHALLENGE_NOTE_MAX_LENGTH, type ChallengeFormState } from "./form-state";
 
 const initialState: ChallengeFormState = {};
@@ -13,16 +14,32 @@ const initialState: ChallengeFormState = {};
 // After the last failed try, or once every check is used: one short note
 // asking the teacher to look. `intro` explains why it's here, when the
 // banner above doesn't already. Once sent, the page re-renders with the
-// sent state.
+// sent state. The unsent note is kept in the browser (ids-only key, the
+// note text only; see answer-drafts.ts), restored on load, and dropped
+// once it is sent.
 export function ChallengeForm({
   action,
   intro,
+  draft,
 }: {
   action: (state: ChallengeFormState, formData: FormData) => Promise<ChallengeFormState>;
   intro?: string;
+  draft: DraftOwner;
 }) {
-  const [state, dispatch, pending] = useActionState(action, initialState);
+  const { mode, readingId, ownerId } = draft;
+  const [state, dispatch, pending] = useActionState(async (prev: ChallengeFormState, formData: FormData) => {
+    const next = await action(prev, formData);
+    if (!next.error) clearNoteDraft(browserDraftStorage(), { mode, readingId, ownerId });
+    return next;
+  }, initialState);
   const [note, setNote] = useState("");
+
+  // After hydration (localStorage is browser only): the unsent note.
+  useEffect(() => {
+    const saved = loadNoteDraft(browserDraftStorage(), { mode, readingId, ownerId });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a one-time restore from browser storage
+    if (saved !== null) setNote(saved);
+  }, [mode, readingId, ownerId]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -54,7 +71,10 @@ export function ChallengeForm({
         rows={3}
         maxLength={CHALLENGE_NOTE_MAX_LENGTH}
         value={note}
-        onChange={(e) => setNote(e.target.value)}
+        onChange={(e) => {
+          setNote(e.target.value);
+          saveNoteDraft(browserDraftStorage(), { mode, readingId, ownerId }, e.target.value);
+        }}
         readOnly={pending}
         autoComplete="off"
         aria-invalid={state.error ? true : undefined}

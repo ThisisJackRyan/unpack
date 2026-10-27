@@ -1,5 +1,6 @@
-// Unsent answer drafts, kept in the browser (localStorage) so a reload, a
-// closed tab or a dropped connection doesn't lose what a student typed.
+// Unsent answer drafts, and the unsent note to the teacher, kept in the
+// browser (localStorage) so a reload, a closed tab or a dropped connection
+// doesn't lose what a student typed.
 // Keys hold ids only and values hold only the answer text: never a name
 // or anything else about the student. A draft belongs to one try, so a
 // check that saved (the page moves to the next try, or past answering)
@@ -7,7 +8,7 @@
 // guarded: private mode, a blocked or a full localStorage just means no
 // drafts. Pure apart from the storage passed in, so tests cover it.
 
-import { ANSWER_MAX_LENGTH } from "./validate-answers";
+import { ANSWER_MAX_LENGTH, CHALLENGE_NOTE_MAX_LENGTH } from "./validate-answers";
 
 // "class": a student in a class (owner = student id). "self": a
 // self-learner (owner = account id). The owner keeps two students on one
@@ -113,4 +114,49 @@ export function withDrafts(
     if (Object.hasOwn(drafts, id)) next[id] = drafts[id];
   }
   return next;
+}
+
+// The note to the teacher (the challenge note), one per reading and
+// student, in its own key space so clearing the answer drafts (which
+// happens on the very page that shows the note box) leaves it alone. The
+// value is the note text only. Cleared once the note is sent, and when the
+// page no longer offers the note box (sent from another tab, decided, or
+// passed).
+export const NOTE_DRAFT_PREFIX = "unpack:note:v1:";
+
+// unpack:note:v1:<mode>:<reading id>:<owner id>
+export function noteDraftKey(owner: DraftOwner): string {
+  return `${NOTE_DRAFT_PREFIX}${owner.mode}:${owner.readingId}:${owner.ownerId}`;
+}
+
+// False when it couldn't be saved; an empty note is saved too, so a
+// cleared note stays cleared after a reload.
+export function saveNoteDraft(storage: DraftStorage | null, owner: DraftOwner, text: string): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(noteDraftKey(owner), text.slice(0, CHALLENGE_NOTE_MAX_LENGTH));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The saved note, or null when there is none (or it can't be read).
+export function loadNoteDraft(storage: DraftStorage | null, owner: DraftOwner): string | null {
+  if (!storage) return null;
+  try {
+    const text = storage.getItem(noteDraftKey(owner));
+    return text === null ? null : text.slice(0, CHALLENGE_NOTE_MAX_LENGTH);
+  } catch {
+    return null;
+  }
+}
+
+export function clearNoteDraft(storage: DraftStorage | null, owner: DraftOwner): void {
+  if (!storage) return;
+  try {
+    storage.removeItem(noteDraftKey(owner));
+  } catch {
+    // Blocked storage: nothing was saved either.
+  }
 }
