@@ -316,14 +316,17 @@ returning r.id`,
 //    Locks are taken class then readings; question writes never lock the
 //    class, so the two can't deadlock.
 // 3. Clear those drafts' shared questions, while the class still has its
-//    old grade (so "changed" is known).
-// 4. Update the grade. Applied when this returns a row.
+//    old grade (so "changed" is known). Returns each cleared question's
+//    reading, so the caller can say how many drafts were cleared.
+// 4. Update the grade (and the name, when one is given: the class
+//    settings form saves both at once). Applied when this returns a row.
 //
-// Not wired to any page yet: no page edits a class's grade today.
+// Used by the class settings form (updateClassSettings in classes.ts).
 export function classGradeChangeStatements(
   classId: string,
   teacherId: string,
   gradeLevel: GradeLevel,
+  name?: string,
 ): Statement[] {
   const params = [classId, teacherId, gradeLevel];
   const affected = `r.class_id = $1::uuid and r.status = 'draft' and r.grade_level is null
@@ -348,16 +351,43 @@ for update of r`,
       text: `delete from questions q
 using readings r
 where q.reading_id = r.id and q.student_id is null
-  and ${affected}`,
+  and ${affected}
+returning q.reading_id`,
       params,
     },
-    {
-      text: `update classes set grade_level = $3::grade_level
+    name === undefined
+      ? {
+          text: `update classes set grade_level = $3::grade_level
 where id = $1::uuid and teacher_id = $2::uuid
 returning id`,
-      params,
-    },
+          params,
+        }
+      : {
+          text: `update classes set grade_level = $3::grade_level, name = $4::text
+where id = $1::uuid and teacher_id = $2::uuid
+returning id`,
+          params: [...params, name],
+        },
   ];
+}
+
+// How many drafts a grade change would clear, from the clear's results.
+export function clearedDraftCount(results: Record<string, unknown>[][]): number {
+  return new Set((results[2] ?? []).map((r) => String(r.reading_id))).size;
+}
+
+// The drafts a grade change would clear right now: owned, draft, no grade
+// override, and with shared questions saved. For the warning on the class
+// settings form. $1 class, $2 teacher.
+export function draftsClearedByGradeChangeStatement(classId: string, teacherId: string): Statement {
+  return {
+    text: `select count(*)::int as drafts from readings r
+join classes c on c.id = r.class_id
+where r.class_id = $1::uuid and c.teacher_id = $2::uuid
+  and r.status = 'draft' and r.grade_level is null
+  and exists (select 1 from questions q where q.reading_id = r.id and q.student_id is null)`,
+    params: [classId, teacherId],
+  };
 }
 
 // Did editReadingStatements apply, as a draft edit or a published title

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Teacher } from "@/db/schema";
 import type { Statement } from "./link-rate-limit";
-import { atClassLimit, updateClassGrade } from "./classes";
-import { classGradeChangeStatements } from "./shared-questions";
+import { atClassLimit, updateClassGrade, updateClassSettings } from "./classes";
+import { classGradeChangeStatements, clearedDraftCount, draftsClearedByGradeChangeStatement } from "./shared-questions";
 
 function teacher(plan: Teacher["plan"]): Teacher {
   return {
@@ -79,5 +79,43 @@ describe("classGradeChangeStatements", () => {
     assert.equal(await updateClassGrade(CLASS, TEACHER, "6", execute(0)), false);
     assert.equal(await updateClassGrade("nope", TEACHER, "6", execute(1)), false);
     assert.equal(seen.length, 2);
+  });
+});
+
+describe("updateClassSettings", () => {
+  const CLASS = "00000000-0000-4000-8000-00000000000c";
+  const TEACHER = "00000000-0000-4000-8000-00000000000e";
+
+  it("saves the name with the grade, in the same last statement", () => {
+    const statements = classGradeChangeStatements(CLASS, TEACHER, "6", "Room 12");
+    assert.equal(statements.length, 4);
+    const update = statements[3];
+    assert.match(update.text, /^update classes set grade_level = \$3::grade_level, name = \$4::text\nwhere id = \$1::uuid and teacher_id = \$2::uuid\nreturning id$/);
+    assert.deepEqual(update.params, [CLASS, TEACHER, "6", "Room 12"]);
+    assert.equal(update.text.includes("Room 12"), false);
+    assert.match(statements[2].text, /returning q\.reading_id$/);
+  });
+
+  it("counts the cleared drafts, not questions", () => {
+    assert.equal(clearedDraftCount([[], [], [{ reading_id: "a" }, { reading_id: "a" }, { reading_id: "b" }], [{ id: CLASS }]]), 2);
+    assert.equal(clearedDraftCount([[], [], [], [{ id: CLASS }]]), 0);
+  });
+
+  it("is saved with the cleared count, or not_found", async () => {
+    const run = (updated: number, cleared: string[]) => async () => [[], [], cleared.map((reading_id) => ({ reading_id })), Array.from({ length: updated }, () => ({ id: CLASS }))];
+    assert.deepEqual(await updateClassSettings(CLASS, TEACHER, { name: "Room 12", gradeLevel: "6" }, run(1, ["a", "a", "a"])), {
+      status: "saved",
+      clearedDrafts: 1,
+    });
+    assert.deepEqual(await updateClassSettings(CLASS, TEACHER, { name: "Room 12", gradeLevel: "6" }, run(0, [])), { status: "not_found" });
+    assert.deepEqual(await updateClassSettings("nope", TEACHER, { name: "Room 12", gradeLevel: "6" }, run(1, [])), { status: "not_found" });
+  });
+
+  it("counts the drafts a change would clear: owned drafts on the class grade with shared questions", () => {
+    const s = draftsClearedByGradeChangeStatement(CLASS, TEACHER);
+    assert.match(s.text, /r\.status = 'draft' and r\.grade_level is null/);
+    assert.match(s.text, /c\.teacher_id = \$2::uuid/);
+    assert.match(s.text, /q\.student_id is null/);
+    assert.deepEqual(s.params, [CLASS, TEACHER]);
   });
 });
