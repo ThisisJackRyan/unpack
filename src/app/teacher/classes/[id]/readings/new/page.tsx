@@ -4,7 +4,7 @@ import { gradeLevelLabel } from "@/lib/grade-levels";
 import { backLink, card } from "@/components/ui";
 import { loadClass } from "../../loaders";
 import { createReading } from "../actions";
-import { ReadingForm } from "../reading-form";
+import { ReadingForm } from "@/components/reading-form";
 
 type Props = { params: Promise<{ id: string }> };
 

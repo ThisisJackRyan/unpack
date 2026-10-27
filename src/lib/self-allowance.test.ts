@@ -5,6 +5,7 @@ import {
   allowanceFromCreations,
   allowanceFromRow,
   allowanceLimitMessage,
+  allowanceRemainingLabel,
   allowanceState,
   countsAt,
   createOutcome,
@@ -96,6 +97,10 @@ describe("formatNextFree", () => {
 
   it("labels UTC when the zone is a guess", () => {
     assert.equal(formatNextFree(new Date("2026-10-30T09:30:00Z"), now, "UTC", true), "on Friday at 9:30 AM UTC");
+  });
+
+  it("labels what's left", () => {
+    assert.equal(allowanceRemainingLabel(allowanceState(2, null, FREE), FREE), "3 of 5 new readings left this week");
   });
 
   it("builds the calm limit message", () => {

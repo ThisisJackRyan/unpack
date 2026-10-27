@@ -21,7 +21,7 @@ import {
   SOURCE_URL_MAX_LENGTH,
   type ReadingFormState,
   type ReadingFormValues,
-} from "./form-state";
+} from "./reading-form-state";
 
 const label = "text-base font-semibold text-zinc-900";
 const hint = "text-base text-zinc-600";
@@ -60,9 +60,13 @@ type Props = {
     formData: FormData,
   ) => Promise<ReadingFormState>;
   // "create" offers link or text; "edit" edits the saved text directly;
-  // "title" (a published reading) shows only the title.
-  mode: "create" | "edit" | "title";
-  classGradeLabel: string;
+  // "title" (a published reading) shows only the title. "solo" is the
+  // self-learner's new reading: link or text, a reading level they must
+  // choose (no class grade), the number of questions, and no question mode
+  // (a self-learner's questions are always their own).
+  mode: "create" | "edit" | "title" | "solo";
+  // The class grade, for the "Class grade" option (not in solo mode).
+  classGradeLabel?: string;
   cancelHref: string;
   initialValues?: ReadingFormValues;
   // Edit only: where the saved text came from.
@@ -86,7 +90,8 @@ export function ReadingForm({
   });
   const values = state.values ?? initialValues;
   const errors = state.errors ?? {};
-  const create = mode === "create";
+  const solo = mode === "solo";
+  const create = mode === "create" || solo;
   const titleOnly = mode === "title";
 
   // The panels switch with CSS alone; this mirrors the checked source radio
@@ -284,7 +289,7 @@ export function ReadingForm({
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
               <label htmlFor="gradeLevel" className={label}>
-                Grade level
+                {solo ? "Reading level" : "Grade level"}
               </label>
               <select
                 id="gradeLevel"
@@ -293,16 +298,27 @@ export function ReadingForm({
                 key={`grade-${values.gradeLevel}`}
                 defaultValue={values.gradeLevel}
                 aria-invalid={errors.gradeLevel ? true : undefined}
-                aria-describedby={errors.gradeLevel ? "grade-error" : undefined}
+                aria-describedby={describedBy(solo && "grade-hint", errors.gradeLevel && "grade-error")}
                 className={field}
               >
-                <option value="">Class grade ({classGradeLabel})</option>
+                {solo ? (
+                  <option value="" disabled>
+                    Choose a level
+                  </option>
+                ) : (
+                  <option value="">Class grade ({classGradeLabel})</option>
+                )}
                 {GRADE_LEVELS.map((level) => (
                   <option key={level} value={level}>
                     {gradeLevelLabel(level)}
                   </option>
                 ))}
               </select>
+              {solo && (
+                <p id="grade-hint" className={hint}>
+                  Questions are written for this level.
+                </p>
+              )}
               <p id="grade-error" aria-live="polite" className={`${errorText} empty:hidden`}>
                 {errors.gradeLevel}
               </p>
@@ -333,33 +349,35 @@ export function ReadingForm({
             </div>
           </div>
 
-          <fieldset key={`mode-${values.questionMode}`} className="flex flex-col gap-2">
-            <legend className={`${label} mb-2`}>Question mode</legend>
-            <div className={`${track} sm:grid-cols-2`}>
-              {QUESTION_MODES.map((m) => (
-                <label key={m} className={`${option} flex-col justify-center gap-0.5 py-3`}>
-                  <input
-                    type="radio"
-                    name="questionMode"
-                    value={m}
-                    defaultChecked={values.questionMode === m}
-                    aria-describedby={describedBy(
-                      `mode-${m}-hint`,
-                      errors.questionMode && "mode-error",
-                    )}
-                    className="sr-only"
-                  />
-                  <span className="text-base font-semibold">{questionModeLabel(m)}</span>
-                  <span id={`mode-${m}-hint`} className="text-sm text-zinc-600">
-                    {questionModeHint(m)}
-                  </span>
-                </label>
-              ))}
-            </div>
-            <p id="mode-error" aria-live="polite" className={`${errorText} empty:hidden`}>
-              {errors.questionMode}
-            </p>
-          </fieldset>
+          {!solo && (
+            <fieldset key={`mode-${values.questionMode}`} className="flex flex-col gap-2">
+              <legend className={`${label} mb-2`}>Question mode</legend>
+              <div className={`${track} sm:grid-cols-2`}>
+                {QUESTION_MODES.map((m) => (
+                  <label key={m} className={`${option} flex-col justify-center gap-0.5 py-3`}>
+                    <input
+                      type="radio"
+                      name="questionMode"
+                      value={m}
+                      defaultChecked={values.questionMode === m}
+                      aria-describedby={describedBy(
+                        `mode-${m}-hint`,
+                        errors.questionMode && "mode-error",
+                      )}
+                      className="sr-only"
+                    />
+                    <span className="text-base font-semibold">{questionModeLabel(m)}</span>
+                    <span id={`mode-${m}-hint`} className="text-sm text-zinc-600">
+                      {questionModeHint(m)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p id="mode-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+                {errors.questionMode}
+              </p>
+            </fieldset>
+          )}
         </div>
       )}
 
@@ -375,10 +393,14 @@ export function ReadingForm({
           {pending
             ? create && !textMode
               ? "Getting the article…"
-              : "Saving…"
-            : create
-              ? "Save draft"
-              : "Save changes"}
+              : solo
+                ? "Starting…"
+                : "Saving…"
+            : solo
+              ? "Start reading"
+              : create
+                ? "Save draft"
+                : "Save changes"}
         </button>
       </div>
     </form>

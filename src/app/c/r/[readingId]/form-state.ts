@@ -8,12 +8,6 @@ export {
   MAX_TRIES,
 } from "@/lib/validate-answers";
 
-// After a saved check the page re-renders from the database (the new
-// try's results and nudges), so a saved check returns an empty state.
-export type AnswerFormState = {
-  // By question id.
-  errors?: Record<string, string>;
-  message?: string;
-};
+export type { AnswerFormState } from "@/components/answer-form-state";
 
 export type ChallengeFormState = { error?: string };

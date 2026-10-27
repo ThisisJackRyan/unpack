@@ -15,7 +15,8 @@ import {
   RetryIcon,
   Spinner,
 } from "./answer-parts";
-import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH, type AnswerFormState } from "./form-state";
+import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH } from "@/lib/validate-answers";
+import type { AnswerFormState } from "./answer-form-state";
 
 type Props = {
   action: (state: AnswerFormState, formData: FormData) => Promise<AnswerFormState>;

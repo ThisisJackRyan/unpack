@@ -5,7 +5,7 @@ import { sourceHost } from "@/lib/validate-reading";
 import { backLink, card } from "@/components/ui";
 import { loadReading } from "../../../loaders";
 import { updateReading } from "../../actions";
-import { ReadingForm } from "../../reading-form";
+import { ReadingForm } from "@/components/reading-form";
 
 type Props = { params: Promise<{ id: string; readingId: string }> };
 

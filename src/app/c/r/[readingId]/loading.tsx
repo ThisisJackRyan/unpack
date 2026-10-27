@@ -1,4 +1,4 @@
-import { QuestionSkeletons } from "./skeleton";
+import { QuestionSkeletons } from "@/components/question-skeletons";
 
 // Shown while the page loads, which on a student's first open of a unique
 // per student reading includes writing their questions.

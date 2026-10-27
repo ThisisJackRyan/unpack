@@ -114,9 +114,9 @@ export function allowanceLimitMessage(used: number, when: string): string {
   return `You’ve read ${used} this week. Your next one frees up ${when}.`;
 }
 
-// "3 of 5 left this week."
+// "3 of 5 new readings left this week" ("1 of 5 new readings ...").
 export function allowanceRemainingLabel(state: AllowanceState, allowance: ReadingAllowance): string {
-  return `${state.remaining} of ${allowance.readings} left this week`;
+  return `${state.remaining} of ${allowance.readings} new readings left this week`;
 }
 
 export type SelfReadingDraft = {

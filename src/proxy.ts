@@ -1,14 +1,26 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-// Only teacher routes require a Clerk session. Student routes (/join, /c/...,
-// /api/student/...) and the landing page stay public: students have no accounts.
+// Account routes require a Clerk session: the teacher area, the
+// self-learner area (/learn), the first-run choice (/welcome), settings,
+// and /home (which sends each account to its home). Which role may use
+// which area is checked on the server by every page and action (see
+// src/lib/account.ts); this only makes sure someone is signed in.
+// Student routes (/join, /c/..., /api/student/...) and the landing page
+// stay public: students have no accounts.
 // /api/webhooks/clerk stays public too: Clerk calls it with no session, and
 // the route verifies Clerk's signature itself (src/lib/clerk-webhook.ts).
-// Keep it out of isTeacherRoute.
-const isTeacherRoute = createRouteMatcher(["/teacher(.*)", "/api/teacher(.*)"]);
+// Keep it out of isAccountRoute.
+const isAccountRoute = createRouteMatcher([
+  "/teacher(.*)",
+  "/api/teacher(.*)",
+  "/learn(.*)",
+  "/welcome(.*)",
+  "/settings(.*)",
+  "/home(.*)",
+]);
 
 export default clerkMiddleware(async (auth, req) => {
-  if (isTeacherRoute(req)) {
+  if (isAccountRoute(req)) {
     await auth.protect();
   }
 });

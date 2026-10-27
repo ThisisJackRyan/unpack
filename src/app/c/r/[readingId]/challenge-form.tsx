@@ -3,7 +3,7 @@
 import { startTransition, useActionState, useState, type FormEvent } from "react";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { primaryButton } from "@/components/ui";
-import { answerBox, CharacterCount, fieldError, Spinner } from "./answer-parts";
+import { answerBox, CharacterCount, fieldError, Spinner } from "@/components/answer-parts";
 import { CHALLENGE_NOTE_MAX_LENGTH, type ChallengeFormState } from "./form-state";
 
 const initialState: ChallengeFormState = {};

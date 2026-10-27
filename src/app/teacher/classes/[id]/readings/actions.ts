@@ -14,7 +14,7 @@ import {
 import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { validateReadingForm } from "@/lib/validate-reading";
-import type { ReadingFormState } from "./form-state";
+import type { ReadingFormState } from "@/components/reading-form-state";
 
 function readForm(formData: FormData, source: unknown) {
   return validateReadingForm({
