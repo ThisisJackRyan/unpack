@@ -14,7 +14,7 @@ import { requestRetryClock } from "@/lib/request-time-zone";
 import { getPublishedReading, loadStudentReading } from "@/lib/student-readings";
 import { MAX_TRIES } from "@/lib/validate-answers";
 import { sendChallengeAction, submitAnswersAction } from "./actions";
-import { AnswerForm } from "@/components/answer-form";
+import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
 import { ChallengeForm } from "./challenge-form";
@@ -87,7 +87,10 @@ export default async function StudentReadingPage({ params }: Props) {
         </h2>
 
         {view.kind === "questions" && stage && (
-          <QuestionsStage readingId={reading.id} questions={view.questions} stage={stage} />
+          <>
+            <QuestionsStage readingId={reading.id} studentId={session.student.id} questions={view.questions} stage={stage} />
+            {stage.kind !== "answer" && <ClearAnswerDrafts mode="class" readingId={reading.id} ownerId={session.student.id} />}
+          </>
         )}
 
         {view.kind === "pending" && (
@@ -129,10 +132,12 @@ export default async function StudentReadingPage({ params }: Props) {
 
 function QuestionsStage({
   readingId,
+  studentId,
   questions,
   stage,
 }: {
   readingId: string;
+  studentId: string;
   questions: StudentQuestion[];
   stage: AnswerStage;
 }) {
@@ -146,6 +151,7 @@ function QuestionsStage({
           maxTries={stage.maxTries}
           previous={stage.previous}
           extraTry={stage.extraTry}
+          drafts={{ mode: "class", readingId, ownerId: studentId }}
         />
       );
     case "passed":

@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useState, type FormEvent } from "react";
+import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { card, pill, primaryButtonLarge } from "@/components/ui";
 import { passedCountLabel, type AttemptView } from "@/lib/reading-progress";
@@ -16,6 +16,14 @@ import {
   Spinner,
 } from "./answer-parts";
 import { ANSWER_FIELD_PREFIX, ANSWER_MAX_LENGTH } from "@/lib/validate-answers";
+import {
+  browserDraftStorage,
+  clearDrafts,
+  loadDrafts,
+  saveDraft,
+  withDrafts,
+  type DraftOwner,
+} from "@/lib/answer-drafts";
 import type { AnswerFormState } from "./answer-form-state";
 import { LimitNotice } from "./limit-notice";
 
@@ -30,6 +38,8 @@ type Props = {
   // result and nudge. Students answer every question each try; passed
   // answers stay editable.
   previous: AttemptView | null;
+  // Whose unsent drafts these are (ids only, see answer-drafts.ts).
+  drafts: DraftOwner;
 };
 
 const initialState: AnswerFormState = {};
@@ -41,7 +51,7 @@ function prefill(questions: StudentQuestion[], previous: AttemptView | null): Re
 // Every question with an answer box, and one button that checks them all.
 // The form submits through a transition (not the form action prop), so
 // React doesn't reset the boxes after a check.
-export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous }: Props) {
+export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous, drafts }: Props) {
   const [state, dispatch, pending] = useActionState(action, initialState);
   const [values, setValues] = useState(() => prefill(questions, previous));
   // A new try (the page re-renders after a check): start from its answers.
@@ -51,6 +61,21 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     setValues(prefill(questions, previous));
   }
   const errors = state.errors ?? {};
+  const { mode, readingId, ownerId } = drafts;
+  const questionIds = questions.map((q) => q.id).join(",");
+
+  // After hydration (localStorage is browser only): this try's unsent
+  // drafts go over the prefill, and older tries' drafts are dropped (that
+  // check saved).
+  useEffect(() => {
+    const storage = browserDraftStorage();
+    const owner = { mode, readingId, ownerId };
+    clearDrafts(storage, owner, tryNumber);
+    const ids = questionIds.split(",");
+    const saved = loadDrafts(storage, { ...owner, tryNumber }, ids);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a one-time restore from browser storage
+    if (Object.keys(saved).length > 0) setValues((v) => withDrafts(v, saved, ids));
+  }, [mode, readingId, ownerId, tryNumber, questionIds]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -122,6 +147,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
                 onChange={(e) => {
                   const next = e.target.value;
                   setValues((v) => ({ ...v, [q.id]: next }));
+                  saveDraft(browserDraftStorage(), { mode, readingId, ownerId, tryNumber }, q.id, next);
                 }}
                 readOnly={pending}
                 autoComplete="off"
@@ -164,4 +190,13 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
       </div>
     </form>
   );
+}
+
+// Past answering (passed, out of tries, waiting on the teacher): no draft
+// on this reading is needed any more.
+export function ClearAnswerDrafts({ mode, readingId, ownerId }: DraftOwner) {
+  useEffect(() => {
+    clearDrafts(browserDraftStorage(), { mode, readingId, ownerId });
+  }, [mode, readingId, ownerId]);
+  return null;
 }

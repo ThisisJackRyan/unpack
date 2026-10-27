@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AnswerForm } from "@/components/answer-form";
+import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
 import { LimitNotice } from "@/components/limit-notice";
@@ -92,7 +92,10 @@ export default async function SelfReadingPage({ params }: Props) {
         </h2>
 
         {view.kind === "questions" && stage && (
-          <SoloQuestions readingId={reading.id} questions={view.questions} stage={stage} />
+          <>
+            <SoloQuestions readingId={reading.id} accountId={account.id} questions={view.questions} stage={stage} />
+            {stage.kind !== "answer" && <ClearAnswerDrafts mode="self" readingId={reading.id} ownerId={account.id} />}
+          </>
         )}
 
         {view.kind === "pending" && (
@@ -141,10 +144,12 @@ export default async function SelfReadingPage({ params }: Props) {
 
 function SoloQuestions({
   readingId,
+  accountId,
   questions,
   stage,
 }: {
   readingId: string;
+  accountId: string;
   questions: StudentQuestion[];
   stage: SoloStage;
 }) {
@@ -158,6 +163,7 @@ function SoloQuestions({
           maxTries={stage.maxTries}
           previous={stage.previous}
           extraTry={false}
+          drafts={{ mode: "self", readingId, ownerId: accountId }}
         />
       );
     case "passed":

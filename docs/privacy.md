@@ -136,6 +136,10 @@ Until the Clerk account is deleted. Self-learners can't delete single readings i
 - `deleted_clerk_users` rows (a hash only): pruned by later account deletes after 30 days (see above).
 - **Backups:** Neon keeps a restore history (point-in-time restore) for the project's restore window, which depends on the Neon plan and settings. Deleted rows can be recovered from it, and stay in it, until that window passes. Keep the window as short as operations allow.
 
+## Unsent answer drafts (in the browser, added in PR 15)
+
+While a student or a self-learner types an answer, the text is also kept in that browser's local storage on that device, so a reload or a dropped connection doesn't lose it. It stays there, on that device only, until the answers are sent for a check that saves (then that try's drafts are removed), or the reading is done (passed, out of tries, or a note sent to the teacher). It never reaches our server until the student sends it. The storage key holds only ids (`unpack:answers:v1:<class or self>:<reading id>:<student or account id>:t<try>:<question id>`) and the value only the answer text: no name, no class code, nothing else. The student id in the key keeps two students on one shared classroom device from seeing each other's drafts. Where local storage is blocked or full (private browsing, for example), nothing is kept and answering works as before. Clearing the browser's site data removes the drafts.
+
 ## Retry times
 
 Limit notes say when the next try frees up in the visitor's time zone. We read the zone from Vercel's `x-vercel-ip-timezone` request header (derived by Vercel from the IP address) only to format that time on the server; it is never stored or logged. Without it the time is shown in UTC.
