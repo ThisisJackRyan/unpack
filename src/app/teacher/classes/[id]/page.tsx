@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Link from "next/link";
+import { countOpenChallenges } from "@/lib/challenge-queue";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel, questionModeLabel } from "@/lib/question-modes";
 import { listReadings, type ReadingListItem } from "@/lib/readings";
@@ -22,7 +23,10 @@ export default async function ClassDetailPage({ params }: Props) {
   const { id } = await params;
   const found = await loadClass(id);
   const teacher = await getOrCreateTeacher();
-  const readings = await listReadings(found.id, teacher.id);
+  const [readings, openChallenges] = await Promise.all([
+    listReadings(found.id, teacher.id),
+    countOpenChallenges(found.id, teacher.id),
+  ]);
   const newReadingHref = `/teacher/classes/${found.id}/readings/new`;
   const host = (await headers()).get("host");
   const joinUrl = host ? `${host}/join` : "/join";
@@ -41,6 +45,24 @@ export default async function ClassDetailPage({ params }: Props) {
           {gradeLevelLabel(found.gradeLevel)}
         </p>
       </div>
+
+      <nav aria-label="Class tools" className="grid gap-3 sm:grid-cols-2">
+        <ToolLink
+          href={`/teacher/classes/${found.id}/students`}
+          title="Class progress"
+          detail="Each student on each reading"
+        />
+        <ToolLink
+          href={`/teacher/classes/${found.id}/challenges`}
+          title="Challenges"
+          detail={
+            openChallenges === 0
+              ? "Nothing waiting"
+              : `${openChallenges} waiting for you`
+          }
+          count={openChallenges}
+        />
+      </nav>
 
       <section
         aria-labelledby="join-code-heading"
@@ -101,6 +123,43 @@ export default async function ClassDetailPage({ params }: Props) {
         )}
       </section>
     </div>
+  );
+}
+
+function ToolLink({
+  href,
+  title,
+  detail,
+  count,
+}: {
+  href: string;
+  title: string;
+  detail: string;
+  count?: number;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`${card} flex min-h-20 items-center justify-between gap-4 px-5 py-4 transition-colors hover:border-indigo-300 hover:bg-indigo-50/40 ${focusRing}`}
+    >
+      <span className="flex min-w-0 flex-col">
+        <span className="flex items-center gap-2 text-lg font-semibold text-zinc-950">
+          {title}
+          {count !== undefined && count > 0 && (
+            <span
+              aria-hidden="true"
+              className="inline-flex min-w-7 items-center justify-center rounded-full bg-indigo-600 px-2 py-0.5 text-sm font-semibold text-white tabular-nums"
+            >
+              {count}
+            </span>
+          )}
+        </span>
+        <span className="text-base text-zinc-600">{detail}</span>
+      </span>
+      <span aria-hidden="true" className="text-xl text-indigo-600">
+        →
+      </span>
+    </Link>
   );
 }
 
