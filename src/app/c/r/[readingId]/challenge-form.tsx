@@ -4,16 +4,20 @@ import { startTransition, useActionState, useState, type FormEvent } from "react
 import { NoCopyTextarea } from "@/components/no-copy";
 import { primaryButton } from "@/components/ui";
 import { answerBox, CharacterCount, fieldError, Spinner } from "./answer-parts";
-import { CHALLENGE_NOTE_MAX_LENGTH, MAX_TRIES, type ChallengeFormState } from "./form-state";
+import { CHALLENGE_NOTE_MAX_LENGTH, type ChallengeFormState } from "./form-state";
 
 const initialState: ChallengeFormState = {};
 
-// After the last failed try: one short note asking the teacher to look.
-// Once sent, the page re-renders with the sent state.
+// After the last failed try, or once every check is used: one short note
+// asking the teacher to look. `intro` explains why it's here, when the
+// banner above doesn't already. Once sent, the page re-renders with the
+// sent state.
 export function ChallengeForm({
   action,
+  intro,
 }: {
   action: (state: ChallengeFormState, formData: FormData) => Promise<ChallengeFormState>;
+  intro?: string;
 }) {
   const [state, dispatch, pending] = useActionState(action, initialState);
   const [note, setNote] = useState("");
@@ -35,10 +39,7 @@ export function ChallengeForm({
       <h3 id="challenge-heading" className="text-xl font-semibold text-zinc-950">
         Ask your teacher to take a look
       </h3>
-      <p className="text-lg leading-relaxed text-zinc-800">
-        You tried {MAX_TRIES} times. If you think you did your best, tell your teacher why. They will read your answers
-        and your note.
-      </p>
+      {intro && <p className="text-lg leading-relaxed text-zinc-800">{intro}</p>}
       <label htmlFor="challenge-note" className="text-lg font-semibold text-zinc-900">
         Your note to your teacher
       </label>

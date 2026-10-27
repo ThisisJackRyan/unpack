@@ -10,9 +10,10 @@ import {
   type StudentReadingListItem,
 } from "./reading-progress";
 
-// Server-only: a student's attempts and challenge, for the reading page
-// and the class home (see reading-progress.ts for how status is derived).
-// Callers have already scoped the reading to the student's class.
+// Server-only: a student's attempts, challenge, and effort check count,
+// for the reading page and the class home (see reading-progress.ts for how
+// status and the page's stage are derived). Callers have already scoped
+// the reading to the student's class.
 
 export async function loadReadingProgress(
   studentId: string,

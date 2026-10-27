@@ -313,6 +313,65 @@ describe("submitAnswersWith", () => {
     assert.equal(checks[0].outcome, "error");
   });
 
+  it("releases the claim when the commit throws another database error, then fails closed", async () => {
+    const { store, checks, attempts } = fakeStore();
+    const errors: unknown[] = [];
+    const broken: AttemptStore = { ...store, commit: async () => Promise.reject(new Error("connection reset")) };
+    await assert.rejects(
+      submitAnswersWith(STUDENT, READING, ANSWERS, { store: broken, check: fakeChecker().check, newId, onError: (e) => errors.push(e) }),
+      /connection reset/,
+    );
+    // Finished at once (no 90s of "busy"), still counted, no try used.
+    assert.equal(checks.length, 1);
+    assert.deepEqual([checks[0].finished, checks[0].outcome], [true, "error"]);
+    assert.equal(attempts.length, 0);
+    // The action logs the thrown error; nothing extra here.
+    assert.equal(errors.length, 0);
+    const next = await submit(store, fakeChecker().check);
+    assert.equal(next.status === "checked" && next.tryNumber, 1);
+  });
+
+  it("keeps a commit that landed before the error (the release only touches an unfinished claim)", async () => {
+    const { store, checks, attempts } = fakeStore();
+    const landed: AttemptStore = {
+      ...store,
+      commit: async (input) => {
+        await store.commit(input);
+        throw new Error("network error after commit");
+      },
+    };
+    await assert.rejects(submit(landed, fakeChecker().check), /network error after commit/);
+    assert.equal(attempts.length, 1);
+    assert.equal(checks[0].outcome, "pass");
+  });
+
+  it("still fails closed with the commit's error when the release fails too", async () => {
+    const { store, checks } = fakeStore();
+    const errors: unknown[] = [];
+    const broken: AttemptStore = {
+      ...store,
+      commit: async () => Promise.reject(new Error("db down")),
+      release: async () => Promise.reject(new Error("release failed")),
+    };
+    await assert.rejects(
+      submitAnswersWith(STUDENT, READING, ANSWERS, { store: broken, check: fakeChecker().check, newId, onError: (e) => errors.push(e) }),
+      /db down/,
+    );
+    assert.deepEqual(errors.map((e) => (e as Error).message), ["release failed"]);
+    // Left unfinished: it goes stale on its own, and still counts.
+    assert.equal(checks[0].finished, false);
+  });
+
+  it("a commit-time conflict still reports a failed check when the release fails", async () => {
+    const { store } = fakeStore();
+    const conflicted: AttemptStore = {
+      ...store,
+      commit: async () => Promise.reject(Object.assign(new Error("dup"), { code: "23505" })),
+      release: async () => Promise.reject(new Error("release failed")),
+    };
+    assert.deepEqual(await submit(conflicted, fakeChecker().check), { status: "check_failed" });
+  });
+
   it("fails closed: other database errors propagate", async () => {
     const { store } = fakeStore();
     const broken: AttemptStore = {
@@ -346,8 +405,8 @@ describe("messages", () => {
     assert.equal(submitMessage("stale"), ANSWERS_STALE_MESSAGE);
     const all = [ALREADY_PASSED_MESSAGE, OUT_OF_TRIES_MESSAGE, CHECK_BUSY_MESSAGE, TOO_MANY_CHECKS_MESSAGE, CHECK_FAILED_MESSAGE];
     assert.equal(new Set(all).size, all.length);
-    assert.match(TOO_MANY_CHECKS_MESSAGE, /Ask your teacher/);
-    assert.match(CHECK_FAILED_MESSAGE, /didn’t use up a try/);
+    assert.match(TOO_MANY_CHECKS_MESSAGE, /Send a note to your teacher/);
+    assert.match(CHECK_FAILED_MESSAGE, /Wait a minute, then try again\. This didn’t use up a try\./);
   });
 });
 
@@ -499,6 +558,29 @@ describe("postgresAttemptStore", () => {
     });
     await assert.rejects(store.claim(STUDENT, READING, "c1"), /db down/);
     await assert.rejects(store.release(STUDENT, READING, "c1"), /db down/);
+  });
+
+  it("after a commit error, sends the release batch and rethrows (fake executor)", async () => {
+    const calls: Statement[][] = [];
+    const responses: (Record<string, unknown>[][] | Error)[] = [
+      [[{ body_text: "t", grade_level: "4" }], QUESTIONS, [{ tries: 0, passed: false }]],
+      [[{}], [{ id: "c1" }], [{}]],
+      new Error("connection reset"),
+      [[]],
+    ];
+    const execute = async (statements: Statement[]) => {
+      calls.push(statements);
+      const next = responses.shift() ?? [];
+      if (next instanceof Error) throw next;
+      return next;
+    };
+    const store = postgresAttemptStore(execute);
+    await assert.rejects(
+      submitAnswersWith(STUDENT, READING, ANSWERS, { store, check: fakeChecker().check, newId: () => "c1" }),
+      /connection reset/,
+    );
+    assert.equal(calls.length, 4);
+    assert.deepEqual(calls[3], [releaseStatement(STUDENT, READING, "c1")]);
   });
 
   it("releases with outcome error, only an unfinished claim", () => {

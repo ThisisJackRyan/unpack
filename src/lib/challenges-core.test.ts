@@ -7,12 +7,13 @@ import {
   CHALLENGE_SENT_MESSAGE,
   CHALLENGE_UNIQUE_CONSTRAINT,
   challengeDiagnosis,
+  challengeDiagnosisStatement,
   challengeInsertStatement,
   challengeMessage,
   sendChallengeWith,
 } from "./challenges-core";
 import { isUniqueViolation } from "./pg-errors";
-import { MAX_TRIES, NOTE_EMPTY_MESSAGE } from "./validate-answers";
+import { EFFORT_CHECK_LIMIT, MAX_TRIES, NOTE_EMPTY_MESSAGE } from "./validate-answers";
 
 const S = "s1";
 const R = "r1";
@@ -32,16 +33,47 @@ const dup = (constraint = CHALLENGE_UNIQUE_CONSTRAINT) =>
   Object.assign(new Error("duplicate key"), { code: "23505", constraint });
 
 describe("challengeInsertStatement", () => {
-  it("inserts only after 3 failed tries, no pass, in the student's class, without ON CONFLICT", () => {
+  it("inserts only with no pass, in the student's class, after 3 failed tries or at the check limit, without ON CONFLICT", () => {
     const s = challengeInsertStatement(S, R, "note");
     assert.match(s.text, /insert into challenges \(student_id, reading_id, note\)/);
     assert.match(s.text, /r\.status = 'published'/);
-    assert.match(s.text, /result = 'fail'\) >= \$4::int/);
     assert.match(s.text, /and not exists \(\s*select 1 from attempts[\s\S]*result = 'pass'/);
+    // Either rule opens it: one "or", in parentheses, so it can't loosen the
+    // eligibility and no-pass conditions.
+    assert.match(
+      s.text,
+      /and \(\(select count\(\*\) from attempts\s+where [^)]*result = 'fail'\) >= \$4::int or \(select count\(\*\) from effort_checks where student_id = \$1::uuid and reading_id = \$2::uuid\) >= \$5::int\)\s+returning id$/,
+    );
+    assert.equal(s.text.match(/\bor\b/g)?.length, 1);
     assert.doesNotMatch(s.text, /on conflict/i);
-    assert.deepEqual(s.params, [S, R, "note", MAX_TRIES]);
+    assert.deepEqual(s.params, [S, R, "note", MAX_TRIES, EFFORT_CHECK_LIMIT]);
+    for (let i = 1; i <= s.params.length; i++) assert.match(s.text, new RegExp(`\\$${i}::`));
+  });
+
+  it("diagnoses with the fails and checks counts", () => {
+    const d = challengeDiagnosisStatement(S, R);
+    assert.match(d.text, /result = 'fail'\)::int as fails/);
+    assert.match(d.text, /from effort_checks where student_id = \$1::uuid and reading_id = \$2::uuid\)::int as checks/);
+    assert.deepEqual(d.params, [S, R]);
   });
 });
+
+// A fake of the insert's rule (and the unique index), for the flow tests.
+function fakeDb(state: { fails: number; checks: number; passed?: boolean }) {
+  let saved = 0;
+  const ready = () => !state.passed && (state.fails >= MAX_TRIES || state.checks >= EFFORT_CHECK_LIMIT);
+  const execute = async (statements: Statement[]) => {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    if (!statements[0].text.startsWith("insert")) {
+      return [[{ eligible: true, passed: state.passed === true, fails: state.fails, checks: state.checks, sent: saved > 0 }]];
+    }
+    if (!ready()) return [[]];
+    if (saved > 0) throw dup();
+    saved++;
+    return [[{ id: "c1" }]];
+  };
+  return { execute, saved: () => saved };
+}
 
 describe("sendChallengeWith", () => {
   it("sends a cleaned note", async () => {
@@ -67,9 +99,31 @@ describe("sendChallengeWith", () => {
     await assert.rejects(sendChallengeWith(S, R, "n", fakeExecutor([new Error("db down")]).execute), /db down/);
   });
 
+  it("opens at the check limit with fewer than 3 tries, and not below it", async () => {
+    for (const fails of [0, 1, MAX_TRIES - 1]) {
+      const atLimit = fakeDb({ fails, checks: EFFORT_CHECK_LIMIT });
+      assert.deepEqual(await sendChallengeWith(S, R, "n", atLimit.execute), { status: "sent" }, `${fails} fails at the limit`);
+      assert.equal(atLimit.saved(), 1);
+      const below = fakeDb({ fails, checks: EFFORT_CHECK_LIMIT - 1 });
+      assert.deepEqual(await sendChallengeWith(S, R, "n", below.execute), { status: "not_ready" }, `${fails} fails below the limit`);
+      assert.equal(below.saved(), 0);
+    }
+    const passed = fakeDb({ fails: 1, checks: EFFORT_CHECK_LIMIT, passed: true });
+    assert.deepEqual(await sendChallengeWith(S, R, "n", passed.execute), { status: "already_passed" });
+  });
+
+  it("20 parallel sends at the check limit: one sent, the rest already sent", async () => {
+    const db = fakeDb({ fails: 1, checks: EFFORT_CHECK_LIMIT });
+    const results = await Promise.all(Array.from({ length: 20 }, () => sendChallengeWith(S, R, "n", db.execute)));
+    assert.equal(db.saved(), 1);
+    assert.equal(results.filter((r) => r.status === "sent").length, 1);
+    assert.equal(results.filter((r) => r.status === "already_sent").length, 19);
+  });
+
   it("says why nothing was inserted", async () => {
     const run = (row: Record<string, unknown>) => sendChallengeWith(S, R, "n", fakeExecutor([[[]], [[row]]]).execute);
-    assert.deepEqual(await run({ eligible: true, passed: false, fails: 2, sent: false }), { status: "not_ready" });
+    assert.deepEqual(await run({ eligible: true, passed: false, fails: 2, checks: 2, sent: false }), { status: "not_ready" });
+    assert.deepEqual(await run({ eligible: true, passed: false, fails: 0, checks: EFFORT_CHECK_LIMIT - 1, sent: false }), { status: "not_ready" });
     assert.deepEqual(await run({ eligible: true, passed: true, fails: 1, sent: false }), { status: "already_passed" });
     assert.deepEqual(await run({ eligible: true, passed: false, fails: 3, sent: true }), { status: "already_sent" });
     assert.deepEqual(await run({ eligible: false, passed: false, fails: 3, sent: false }), { status: "not_found" });
@@ -89,6 +143,23 @@ describe("sendChallengeWith", () => {
     assert.equal(saved, 1);
     assert.equal(results.filter((r) => r.status === "sent").length, 1);
     assert.equal(results.filter((r) => r.status === "already_sent").length, 19);
+  });
+});
+
+describe("challengeDiagnosis", () => {
+  const base = { eligible: true, passed: false, fails: 0, checks: 0, sent: false };
+
+  it("reads each reason in order", () => {
+    assert.deepEqual(challengeDiagnosis({ ...base, eligible: false, sent: true }), { status: "not_found" });
+    assert.deepEqual(challengeDiagnosis({ ...base, sent: true, passed: true }), { status: "already_sent" });
+    assert.deepEqual(challengeDiagnosis({ ...base, passed: true, checks: EFFORT_CHECK_LIMIT }), { status: "already_passed" });
+    assert.deepEqual(challengeDiagnosis({ ...base, fails: MAX_TRIES - 1, checks: EFFORT_CHECK_LIMIT - 1 }), { status: "not_ready" });
+  });
+
+  it("calls a ready student with nothing saved a failure to retry, not not_ready", () => {
+    // The state changed between the insert and the diagnosis.
+    assert.deepEqual(challengeDiagnosis({ ...base, fails: MAX_TRIES }), { status: "not_found" });
+    assert.deepEqual(challengeDiagnosis({ ...base, fails: 1, checks: EFFORT_CHECK_LIMIT }), { status: "not_found" });
   });
 });
 

@@ -12,6 +12,7 @@
 5. Publish the reading to the class.
 6. Class view: each student shows as Not started, In progress, Passed, or Challenged.
 7. Challenge queue: read the student's answers, the AI's reasons, and the student's note, then Approve (counts as passed) or Deny.
+   - **Not shipped yet:** items 6 and 7 (the class view and the challenge queue with Approve and Deny) come in the next PR. Until then students can send notes but teachers can't see or resolve them, so don't use this with real classes until it lands.
 8. Turn a join code on or off.
 
 **Student (no account)**
@@ -21,7 +22,7 @@
 2. See the class's published readings.
 3. Read in a clean view with copy and paste blocked.
 4. Answer the questions and submit. The AI returns pass or fail per answer, with a short nudge on each fail.
-5. Up to 3 tries. After the 3rd fail, they can submit a challenge note to the teacher.
+5. Up to 3 tries. After the 3rd fail (or once all 6 effort checks are used without a pass), they can submit a challenge note to the teacher.
 6. Passed readings are marked done, showing the passing answers. The class home shows each reading as Not started, In progress, Passed, or Challenged.
 
 **Later (not v1):** saved reading libraries (paid), unlimited classes (paid), billing, the self-learner extension, and export to Google Classroom.
@@ -41,16 +42,16 @@
 | challenges | id, student_id, reading_id, note, status (open/approved/denied), resolved_at. One per student per reading (unique). |
 | effort_checks | id, student_id, reading_id, created_at, finished_at, outcome (pass/fail/error). One row per effort check started: the in-flight claim while unfinished, and the per-student, per-reading check counter. Kept, no answer text. |
 
-Student status for a reading is derived from attempts and challenges: Passed if any attempt passed or a challenge was approved, Challenged if a challenge is open, In progress after any try (or a denied challenge), else Not started.
+Student status for a reading is derived from attempts and challenges: Passed if any attempt passed or a challenge was approved, Challenged if a challenge is open, In progress after any try (or a denied challenge, or once all 6 effort checks are used), else Not started.
 
 ## Key rules
 - An attempt passes only when **every** answer passes the effort check.
 - Try 4 is blocked; only the challenge option appears.
 - Answers: each is trimmed and cleaned (control characters removed), then must be 1 to 1,000 characters. Every question is answered on every try, in one submit; after a failed try, the last answers are filled back in, with each answer's result and nudge.
 - One effort check (one AI call) per attempt covers every answer. At most 1 check runs at a time per student and reading; a second submit meanwhile is told to wait.
-- Effort checks are limited to 6 per student per reading, for all time: the 3 tries plus room for AI failures. If the AI call fails or times out (60 seconds), the try isn't used up, but the check still counts. Past 6, the student is asked to get their teacher.
-- Challenge note: 1 to 500 characters, cleaned like answers. Only after 3 failed tries and no pass, and only one per student per reading.
-- Copy and paste blocking (the reading text and the answer boxes: copy, cut, paste, drag and drop, the context menu, select all, and text selection) is a speed bump, not security. A determined student can get around it; the effort check is the real gate.
+- Effort checks are limited to 6 per student per reading, for all time: the 3 tries plus room for AI failures. If the AI call fails or times out (60 seconds), the try isn't used up, but the check still counts, and the student is asked to wait a minute before trying again. A check whose result couldn't be saved (a database error) also counts without using a try: a save that always fails must not become an endless loop of paid checks. Its claim is finished right away, so the student isn't told "still checking" for 90 seconds. Once 6 checks are used without a pass, the answer form goes away (even with tries left) and the challenge note opens instead.
+- Challenge note: 1 to 500 characters, cleaned like answers. Only with no pass, after 3 failed tries or once 6 effort checks are used, and only one per student per reading.
+- Copy and paste blocking (the reading text and the answer boxes: copy, cut, paste, drag and drop, the context menu, select all, and text selection) is a speed bump, not security. A determined student can get around it; the effort check is the real gate. The trade-off: blocking selection also breaks select-to-read tools (Read&Write, the browser's read-selected-text) and right-click spellcheck in the answer boxes. A teacher setting to turn it off may come later.
 - Shared mode: questions are cached per reading. Per-student mode: each student's set is generated once and cached, and it isn't regenerated on retries.
 - Shared mode: the question count stays the teacher's number. Deleting a question lowers it by 1 (never below 1), and publishing needs exactly that many questions. Changing a draft's text, grade, count, or mode clears its shared questions.
 - Once published, only the title can be edited; the text, grade, question count, mode, and questions stay locked. This applies to both modes.

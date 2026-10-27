@@ -127,10 +127,23 @@ export function AnswerForm({ action, questions, tryNumber, previous }: Props) {
         {state.message}
       </p>
 
-      <button type="submit" disabled={pending} className={`${primaryButton} min-h-14 w-full px-8 text-lg sm:w-auto sm:self-start`}>
-        {pending && <Spinner />}
-        {pending ? "Checking your answers…" : "Check my answers"}
-      </button>
+      {/* Always shown, before the click too, so a student knows not to
+          give up or click again while a check runs (up to the 60s
+          EFFORT_CHECK_DEADLINE_MS). */}
+      <div className="flex flex-col gap-2">
+        <button
+          type="submit"
+          disabled={pending}
+          aria-describedby="check-time"
+          className={`${primaryButton} min-h-14 w-full px-8 text-lg sm:w-auto sm:self-start`}
+        >
+          {pending && <Spinner />}
+          {pending ? "Checking your answers…" : "Check my answers"}
+        </button>
+        <p id="check-time" className="text-base text-zinc-600">
+          This can take up to a minute.
+        </p>
+      </div>
     </form>
   );
 }

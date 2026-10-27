@@ -31,7 +31,18 @@
 //    backstop.
 // 5. On a model error or timeout, finish the claim with no attempt: the try
 //    isn't used up, but the effort_checks row still counts toward
-//    EFFORT_CHECK_LIMIT, so a broken model can't be retried forever.
+//    EFFORT_CHECK_LIMIT, so a broken model can't be retried forever. Once
+//    the limit is reached without a pass, the challenge opens (see
+//    challenges-core.ts), so the limit never strands a student.
+// 6. When the commit throws, finish the claim the same way, best effort,
+//    so the student isn't told "busy" for EFFORT_CLAIM_STALE_SECONDS. The
+//    release only touches an unfinished claim, so if the commit did land
+//    (a network error after COMMIT, say) the saved try stands. The check
+//    still counts toward the limit: the model was paid for, and a commit
+//    that fails every time (a bad row, a schema mismatch) would otherwise
+//    be an unbounded loop of paid checks. At the limit the challenge opens,
+//    so counting it costs the student little. Then the original error
+//    propagates (fail closed).
 //
 // A claim left unfinished (a killed function, say) stops blocking once it
 // is EFFORT_CLAIM_STALE_SECONDS old; it still counts toward the limit. Its
@@ -46,6 +57,7 @@ import { hasPgCode, isUniqueViolation } from "./pg-errors";
 import type { StudentQuestion } from "./student-questions-core";
 import {
   ANSWERS_STALE_MESSAGE,
+  EFFORT_CHECK_LIMIT,
   MAX_TRIES,
   validateAnswers,
   type AnswerEntry,
@@ -53,10 +65,9 @@ import {
   type ValidAnswer,
 } from "./validate-answers";
 
-// Every effort check a student can start on one reading, for all time: the
-// MAX_TRIES tries plus room for 3 model failures (a failed check doesn't
-// use up a try). Past it, the student is asked to get their teacher.
-export const EFFORT_CHECK_LIMIT = 6;
+// Defined in validate-answers.ts (see there); re-exported for callers that
+// think of it as a submit rule.
+export { EFFORT_CHECK_LIMIT };
 
 // Longer than the most a check can take (the deadline ends it, validation
 // retry, SDK retries, and backoff included), plus 30s for the commit and
@@ -69,8 +80,11 @@ const EFFORT_LOCK_SPACE = 3;
 export const ALREADY_PASSED_MESSAGE = "You already passed this one. Nice work!";
 export const OUT_OF_TRIES_MESSAGE = `You’ve used all ${MAX_TRIES} tries on this one.`;
 export const CHECK_BUSY_MESSAGE = "We’re still checking your answers. Wait a moment, then try again.";
-export const TOO_MANY_CHECKS_MESSAGE = "We can’t check this one right now. Ask your teacher for help.";
-export const CHECK_FAILED_MESSAGE = "We couldn’t check your answers just now. Try again. This didn’t use up a try.";
+// The page moves to the note to the teacher (answerStage's check_limit).
+export const TOO_MANY_CHECKS_MESSAGE = "We couldn’t check your answers. Send a note to your teacher.";
+// Calm on purpose: during an outage, quick retries only use up checks.
+export const CHECK_FAILED_MESSAGE =
+  "We couldn’t check your answers just now. Wait a minute, then try again. This didn’t use up a try.";
 
 export type SubmitContext = {
   bodyText: string;
@@ -201,11 +215,18 @@ export async function submitAnswersWith(
       verdicts: results.map((r) => ({ ...r, text: texts.get(r.questionId) ?? "" })),
     });
   } catch (error) {
-    // A unique or check violation rolled the commit back, claim and all;
-    // finish the claim so it stops blocking, then report a failed check.
-    if (!isUniqueViolation(error) && !hasPgCode(error, "23514")) throw error;
-    deps.onError?.(error);
-    await store.release(studentId, readingId, claimId);
+    // Finish the claim so it stops blocking (step 6 above). A unique or
+    // check violation rolled the commit back, claim and all: report a
+    // failed check. Any other error propagates (fail closed).
+    const conflict = isUniqueViolation(error) || hasPgCode(error, "23514");
+    if (conflict) deps.onError?.(error);
+    try {
+      await store.release(studentId, readingId, claimId);
+    } catch (releaseError) {
+      // The claim goes stale on its own; the commit's error matters more.
+      deps.onError?.(releaseError);
+    }
+    if (!conflict) throw error;
     return { status: "check_failed" };
   }
   if (tryNumber === null) return { status: "check_failed" };

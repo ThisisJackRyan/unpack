@@ -19,6 +19,11 @@
 //   ids (missing, extra, doubled).
 // - Challenges: refused before 3 failed tries; --n parallel sends after 3
 //   make exactly 1 row (the rest "already_sent"); the status is Challenged.
+// - The check limit opens the challenge with tries left: a student with 0
+//   tries and EFFORT_CHECK_LIMIT model failures sees the check_limit page
+//   (no answer form), is In progress, and --n parallel sends make exactly
+//   1 row; a student with 1 try and the limit used can send too; a student
+//   with 1 try and one check under the limit is refused ("not_ready").
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-student-answers [flags]
 //
@@ -401,6 +406,59 @@ async function checkChallenges(outOfTries: string) {
   check((await statusOf(outOfTries)) === "challenged", "reading status: challenged");
 }
 
+async function checkCheckLimit() {
+  console.log(`\n== CHECK LIMIT OPENS THE CHALLENGE: ${N} parallel sends ==`);
+  // 0 tries, every check a model failure.
+  const none = await newStudent();
+  for (let i = 0; i < EFFORT_CHECK_LIMIT; i++) await submit(none, "error", { delayMs: 5 });
+  let c = await counts(none);
+  check(c.attempts === 0 && c.checks === EFFORT_CHECK_LIMIT, `0 tries: attempts ${c.attempts}, checks ${c.checks}`);
+  let stage = answerStage(await loadReadingProgress(none, readingId, execute));
+  check(stage.kind === "check_limit" && stage.attempt === null, `0 tries at the limit, page: ${stage.kind}`);
+  check((await statusOf(none)) === "in_progress", "0 tries at the limit, status: in_progress");
+  const refused = await submit(none, "pass");
+  check(refused.status === "too_many_checks", `0 tries at the limit, submit: ${refused.status}`);
+  const settled = await Promise.allSettled(
+    Array.from({ length: N }, (_, i) => sendChallenge(none, readingId, `The checker kept failing. (${i})`, execute)),
+  );
+  const { statuses, thrown } = tally(settled as PromiseSettledResult<ChallengeResult>[]);
+  c = await counts(none);
+  console.log(`results ${JSON.stringify(statuses)}, threw ${thrown.length}, rows ${c.challenges}`);
+  check(
+    statuses.sent === 1 && statuses.already_sent === N - 1 && thrown.length === 0 && c.challenges === 1,
+    `sent ${statuses.sent ?? 0}, already_sent ${statuses.already_sent ?? 0}, errors ${thrown.length}, rows ${c.challenges} (want 1/${N - 1}/0/1)` +
+      (thrown.length ? `: ${[...new Set(thrown)].join("; ").slice(0, 300)}` : ""),
+  );
+  stage = answerStage(await loadReadingProgress(none, readingId, execute));
+  check(stage.kind === "challenged" && stage.status === "open", `after the note, page: ${stage.kind}`);
+  check((await statusOf(none)) === "challenged", "after the note, status: challenged");
+
+  // 1 failed try, then model failures up to the limit.
+  const one = await newStudent();
+  await submit(one, "fail", { delayMs: 5 });
+  for (let i = 1; i < EFFORT_CHECK_LIMIT; i++) await submit(one, "error", { delayMs: 5 });
+  c = await counts(one);
+  stage = answerStage(await loadReadingProgress(one, readingId, execute));
+  check(
+    c.attempts === 1 && c.checks === EFFORT_CHECK_LIMIT && stage.kind === "check_limit" && stage.attempt?.tryNumber === 1,
+    `1 try at the limit: attempts ${c.attempts}, checks ${c.checks}, page ${stage.kind} showing try ${stage.kind === "check_limit" ? stage.attempt?.tryNumber : "-"}`,
+  );
+  const sent = await sendChallenge(one, readingId, "Please look.", execute);
+  check(sent.status === "sent" && (await counts(one)).challenges === 1, `1 try at the limit, send: ${sent.status}`);
+
+  // 1 failed try, one check under the limit.
+  const under = await newStudent();
+  await submit(under, "fail", { delayMs: 5 });
+  for (let i = 2; i < EFFORT_CHECK_LIMIT; i++) await submit(under, "error", { delayMs: 5 });
+  c = await counts(under);
+  stage = answerStage(await loadReadingProgress(under, readingId, execute));
+  const early = await sendChallenge(under, readingId, "Please look.", execute);
+  check(
+    c.checks === EFFORT_CHECK_LIMIT - 1 && stage.kind === "answer" && early.status === "not_ready" && (await counts(under)).challenges === 0,
+    `1 try, ${c.checks} checks: page ${stage.kind}, send ${early.status} (want answer, not_ready)`,
+  );
+}
+
 async function cleanup(): Promise<void> {
   const rows = await sql`
     delete from teachers where clerk_user_id = ${`test_answers_${RUN_ID}`} returning id`;
@@ -423,6 +481,7 @@ async function main(): Promise<void> {
     await checkStaleClaim();
     await checkRefusals();
     await checkChallenges(outOfTries);
+    await checkCheckLimit();
   } finally {
     await cleanup();
   }

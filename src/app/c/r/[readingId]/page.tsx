@@ -36,8 +36,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 // The read view (copy and paste blocked, see src/lib/anti-copy.ts), then
-// the questions: answer boxes and one check for all of them, up to 3 tries,
-// then a note to the teacher. A passed reading shows its passing answers.
+// the questions: answer boxes and one check for all of them, up to 3 tries
+// (and EFFORT_CHECK_LIMIT checks), then a note to the teacher. A passed
+// reading shows its passing answers.
 export default async function StudentReadingPage({ params }: Props) {
   const { readingId } = await params;
   const session = await requireStudentSession();
@@ -152,6 +153,23 @@ function QuestionsStage({
             Here is what you wrote last time, with tips.
           </Banner>
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
+          <ChallengeForm
+            action={sendChallengeAction.bind(null, readingId)}
+            intro={`You tried ${MAX_TRIES} times. If you think you did your best, tell your teacher why. They will read your answers and your note.`}
+          />
+        </>
+      );
+    case "check_limit":
+      // Every check is used (some failed on our side), so answering stops
+      // here, tries left or not; the note is the way forward.
+      return (
+        <>
+          <Banner tone="info" title="We couldn’t check your answers.">
+            {stage.attempt
+              ? "Send a note to your teacher. They will read your answers and your note."
+              : "Send a note to your teacher. They will read your note."}
+          </Banner>
+          {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
           <ChallengeForm action={sendChallengeAction.bind(null, readingId)} />
         </>
       );
@@ -160,7 +178,8 @@ function QuestionsStage({
         <>
           {stage.status === "open" ? (
             <Banner tone="info" title="Sent! Your teacher will take a look.">
-              You can read your answers below while you wait.
+              {/* No saved try when every check failed (the check limit). */}
+              {stage.attempt ? "You can read your answers below while you wait." : "Check back here later."}
             </Banner>
           ) : (
             <Banner tone="info" title="Your teacher looked at your note.">

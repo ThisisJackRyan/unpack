@@ -7,6 +7,14 @@
 // in the schema is the backstop.
 export const MAX_TRIES = 3;
 
+// Every effort check a student can start on one reading, for all time: the
+// MAX_TRIES tries plus room for 3 model failures (a failed check doesn't
+// use up a try). Once it's reached without a pass, answering stops and the
+// challenge opens, however many tries were used. Enforced in
+// submit-answers-core.ts and challenges-core.ts; here so the page's stage
+// logic (reading-progress.ts) can use it too.
+export const EFFORT_CHECK_LIMIT = 6;
+
 // Longest answer, in characters (UTF-16 code units, which is what a
 // textarea's maxLength counts). A few sentences fit easily; a pasted page
 // doesn't. It also bounds what one effort check sends to the model: 10

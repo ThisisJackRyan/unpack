@@ -6,6 +6,12 @@
 // text into a chatbot, paste an answer back), but a determined student can
 // get around it: dev tools, turning off scripts, retyping, a photo of the
 // screen, or another device. The effort check is the real gate.
+//
+// It has a cost for students who need help reading: no selection means
+// select-to-read tools (Read&Write, the browser's read-selected-text) don't
+// work on the reading, and no context menu means no right-click spellcheck
+// in answer boxes. A teacher setting to turn it off may come later (see
+// docs/v1-spec.md).
 
 // Events that are always cancelled, on the reading text and in answer
 // boxes. contextmenu goes too, so a long press or right click offers no

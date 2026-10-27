@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Reading } from "@/db/schema";
 import { isUuid } from "./classes";
@@ -12,27 +12,13 @@ import { perStudentView, sharedView, type StudentReadingView } from "./student-r
 // student's own class and to published readings: a draft, or a reading in
 // another class, is "not found", the same as an id that doesn't exist.
 
-export type StudentReadingItem = Pick<Reading, "id" | "title" | "questionCount">;
-
 export type StudentReading = Pick<
   Reading,
   "id" | "title" | "questionCount" | "questionMode" | "bodyText" | "sourceUrl"
 >;
 
-// The class's published readings, newest first. The class home uses
-// listReadingsWithStatus (reading-progress-db.ts), which adds the
-// student's status to each.
-export function listPublishedReadings(classId: string): Promise<StudentReadingItem[]> {
-  return db
-    .select({
-      id: schema.readings.id,
-      title: schema.readings.title,
-      questionCount: schema.readings.questionCount,
-    })
-    .from(schema.readings)
-    .where(and(eq(schema.readings.classId, classId), eq(schema.readings.status, "published")))
-    .orderBy(desc(schema.readings.createdAt), desc(schema.readings.id));
-}
+// The class's published readings, with the student's status on each, are
+// listReadingsWithStatus (reading-progress-db.ts).
 
 export async function getPublishedReading(
   classId: string,

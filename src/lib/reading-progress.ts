@@ -1,11 +1,12 @@
 // A student's progress on one reading, derived from their attempts and
 // challenge (the v1 spec's rule): Passed if any attempt passed or a
 // challenge was approved, Challenged if a challenge is open, In progress
-// after any try, else Not started. Pure, so tests cover every case; the
-// queries are in reading-progress-db.ts.
+// after any try (or once every effort check is used), else Not started.
+// Pure, so tests cover every case; the queries are in
+// reading-progress-db.ts.
 
 import type { Statement } from "./link-rate-limit";
-import { MAX_TRIES } from "./validate-answers";
+import { EFFORT_CHECK_LIMIT, MAX_TRIES } from "./validate-answers";
 
 export type ChallengeStatus = "open" | "approved" | "denied";
 
@@ -18,14 +19,17 @@ export const STUDENT_READING_STATUS_LABELS: Record<StudentReadingStatus, string>
   challenged: "Challenged",
 };
 
-export type StatusInput = { passed: boolean; tries: number; challenge: ChallengeStatus | null };
+// `checks` is every effort check started, failed ones included.
+export type StatusInput = { passed: boolean; tries: number; checks: number; challenge: ChallengeStatus | null };
 
 // A denied challenge goes back to In progress: the student has used their
-// tries, and the teacher decides what comes next.
+// tries, and the teacher decides what comes next. So does reaching the
+// check limit with no try saved (every check failed): the student has
+// started, and can send a note.
 export function studentReadingStatus(input: StatusInput): StudentReadingStatus {
   if (input.passed || input.challenge === "approved") return "passed";
   if (input.challenge === "open") return "challenged";
-  if (input.tries > 0 || input.challenge === "denied") return "in_progress";
+  if (input.tries > 0 || input.checks >= EFFORT_CHECK_LIMIT || input.challenge === "denied") return "in_progress";
   return "not_started";
 }
 
@@ -41,6 +45,8 @@ export type AttemptView = {
 export type ReadingProgress = {
   attempts: AttemptView[];
   challenge: ChallengeStatus | null;
+  // Effort checks started, failed ones included (see EFFORT_CHECK_LIMIT).
+  checks: number;
 };
 
 // What the reading page shows under the questions.
@@ -53,17 +59,22 @@ export type AnswerStage =
   | { kind: "passed"; attempt: AttemptView | null; byTeacher: boolean }
   // 3 failed tries and no challenge yet: the last try and the note box.
   | { kind: "out_of_tries"; attempt: AttemptView | null }
+  // Every effort check used (model failures count but don't use a try)
+  // with fewer than 3 tries, no pass, and no challenge yet: no answer
+  // form, the last try if there is one, and the note box.
+  | { kind: "check_limit"; attempt: AttemptView | null }
   // A challenge was sent (open or denied).
   | { kind: "challenged"; status: "open" | "denied"; attempt: AttemptView | null };
 
 export function answerStage(progress: ReadingProgress): AnswerStage {
-  const { attempts, challenge } = progress;
+  const { attempts, challenge, checks } = progress;
   const latest = attempts.at(-1) ?? null;
   const passing = attempts.find((a) => a.result === "pass");
   if (passing) return { kind: "passed", attempt: passing, byTeacher: false };
   if (challenge === "approved") return { kind: "passed", attempt: latest, byTeacher: true };
   if (challenge) return { kind: "challenged", status: challenge, attempt: latest };
   if (attempts.length >= MAX_TRIES) return { kind: "out_of_tries", attempt: latest };
+  if (checks >= EFFORT_CHECK_LIMIT) return { kind: "check_limit", attempt: latest };
   return { kind: "answer", tryNumber: attempts.length + 1, previous: latest };
 }
 
@@ -77,6 +88,8 @@ export function stageAnnouncement(stage: AnswerStage): string {
       return stage.status === "open" ? "Sent. Your teacher will take a look." : "Your teacher looked at your note.";
     case "out_of_tries":
       return `That was try ${MAX_TRIES} of ${MAX_TRIES}. You can send a note to your teacher.`;
+    case "check_limit":
+      return "We couldn’t check your answers. You can send a note to your teacher.";
     case "answer":
       return stage.previous
         ? `Not yet. ${passedCountLabel(stage.previous)} Read the tips and try again. This is try ${stage.tryNumber} of ${MAX_TRIES}.`
@@ -115,6 +128,10 @@ order by a.try_number`,
       text: `select status from challenges where student_id = $1::uuid and reading_id = $2::uuid`,
       params: [studentId, readingId],
     },
+    {
+      text: `select count(*)::int as checks from effort_checks where student_id = $1::uuid and reading_id = $2::uuid`,
+      params: [studentId, readingId],
+    },
   ];
 }
 
@@ -140,7 +157,7 @@ export function readingProgress(results: Record<string, unknown>[][]): ReadingPr
   const status = results[1]?.[0]?.status;
   const challenge =
     status === "open" || status === "approved" || status === "denied" ? status : null;
-  return { attempts, challenge };
+  return { attempts, challenge, checks: Number(results[2]?.[0]?.checks ?? 0) };
 }
 
 // The class's published readings, newest first, with this student's
@@ -153,7 +170,8 @@ export function readingListStatement(classId: string, studentId: string): Statem
     where a.reading_id = r.id and a.student_id = $2::uuid and a.result = 'pass'
   ) as passed,
   (select count(*)::int from attempts a where a.reading_id = r.id and a.student_id = $2::uuid) as tries,
-  (select ch.status from challenges ch where ch.reading_id = r.id and ch.student_id = $2::uuid) as challenge
+  (select ch.status from challenges ch where ch.reading_id = r.id and ch.student_id = $2::uuid) as challenge,
+  (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid) as checks
 from readings r
 where r.class_id = $1::uuid and r.status = 'published'
 order by r.created_at desc, r.id desc`,
@@ -178,6 +196,7 @@ export function readingListItems(rows: Record<string, unknown>[]): StudentReadin
       status: studentReadingStatus({
         passed: row.passed === true,
         tries: Number(row.tries ?? 0),
+        checks: Number(row.checks ?? 0),
         challenge: c === "open" || c === "approved" || c === "denied" ? c : null,
       }),
     };

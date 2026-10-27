@@ -58,7 +58,12 @@ export async function submitAnswersAction(
       return { errors: result.errors, message: ANSWERS_FIX_MESSAGE };
     case "already_passed":
     case "out_of_tries":
-      // The page has moved on (another tab, say): show where things stand.
+    case "too_many_checks":
+    case "check_failed":
+      // The page may have moved on (another tab, or that was the last
+      // check): show where things stand. At the check limit that's the note
+      // to the teacher instead of the answer form; otherwise the form stays,
+      // with its answers and this message.
       refresh(readingId);
       return { message: submitMessage(result.status) };
     default:
@@ -66,7 +71,8 @@ export async function submitAnswersAction(
   }
 }
 
-// Sends the note after the last failed try. One per student per reading.
+// Sends the note after the last failed try, or once every check is used.
+// One per student per reading.
 export async function sendChallengeAction(
   readingId: string,
   _prev: ChallengeFormState,
