@@ -1,5 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { ACCOUNT_ROUTE_PATTERNS, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
+import { isQaPath, qaRoutesEnabled } from "@/lib/qa-routes";
 
 // Account routes require a Clerk session: the teacher area, the
 // self-learner area (/learn), the first-run choice (/welcome), settings,
@@ -16,7 +18,7 @@ import { ACCOUNT_ROUTE_PATTERNS, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-r
 // sub-steps): auth-routes.test.ts checks they stay public.
 const isAccountRoute = createRouteMatcher(ACCOUNT_ROUTE_PATTERNS);
 
-export default clerkMiddleware(
+const clerk = clerkMiddleware(
   async (auth, req) => {
     if (isAccountRoute(req)) {
       await auth.protect();
@@ -26,6 +28,16 @@ export default clerkMiddleware(
   // even if NEXT_PUBLIC_CLERK_SIGN_IN_URL isn't set on the deploy.
   { signInUrl: SIGN_IN_PATH, signUpUrl: SIGN_UP_PATH },
 );
+
+// The test-only /qa routes skip Clerk, and only while UNPACK_QA_ROUTES=1
+// (scripts/browser-check-answer-timeout.ts, never a deploy): with the
+// dummy development key that check builds with, Clerk sends every browser
+// page load to its handshake, which fails. Without the env var, /qa goes
+// through Clerk like any public route (and its pages are 404s).
+export default function proxy(req: NextRequest, event: NextFetchEvent) {
+  if (qaRoutesEnabled() && isQaPath(req.nextUrl.pathname)) return NextResponse.next();
+  return clerk(req, event);
+}
 
 export const config = {
   matcher: [
