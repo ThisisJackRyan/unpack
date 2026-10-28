@@ -16,7 +16,7 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { withDeadline } from "./deadline";
 import { readingSaveFailedState } from "./create-guard";
-import { resolveReadingSource } from "./reading-source";
+import { resolveReadingSource, type ReadingSourceLogFields } from "./reading-source";
 import { safeErrorFields } from "./safe-error-fields";
 import { createOutcomeRedirect, type CreateOutcome, type CreateRedirect, type SelfReadingDraft } from "./self-allowance";
 import { validateSoloReadingForm } from "./self-reading-form";
@@ -34,7 +34,7 @@ export type SelfCreateDeps = {
   // The create transaction: the insert and the slot count together.
   createSelfReading: (accountId: string, draft: SelfReadingDraft) => Promise<CreateOutcome>;
   // Safe fields only.
-  log: (message: string, fields: Record<string, unknown>) => void;
+  log: (message: string, fields: ReadingSourceLogFields) => void;
 };
 
 export type SelfCreateResult = { state: ReadingFormState } | { redirect: CreateRedirect };

@@ -9,7 +9,7 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { readingSaveFailedState } from "./create-guard";
 import { withDeadline } from "./deadline";
-import { resolveReadingSource } from "./reading-source";
+import { resolveReadingSource, type ReadingSourceLogFields } from "./reading-source";
 import type { ReadingDraft } from "./readings";
 import { safeErrorFields } from "./safe-error-fields";
 import { validateReadingForm, type ReadingFormInput } from "./validate-reading";
@@ -29,7 +29,7 @@ export type TeacherCreateDeps = {
   // class, nothing inserted).
   insertReading: (classId: string, teacherId: string, draft: ReadingDraft) => Promise<{ id: string } | undefined>;
   // Safe fields only.
-  log: (message: string, fields: Record<string, unknown>) => void;
+  log: (message: string, fields: ReadingSourceLogFields) => void;
 };
 
 export type TeacherCreateResult = { state: ReadingFormState } | { readingId: string; draft: ReadingDraft };

@@ -14,7 +14,7 @@ import {
   type ReadingFormData,
   type ReadingFormErrors,
 } from "./validate-reading";
-import { safeErrorFields } from "./safe-error-fields";
+import { safeErrorFields, type SafeErrorFields } from "./safe-error-fields";
 
 export const LINK_ERRORS: Record<FetchArticleErrorKind, string> = {
   invalid_url: "Enter a full web link, like https://example.com/story.",
@@ -53,7 +53,14 @@ export type ReadingSourceDeps = {
   fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
   // Safe fields only (kind, status, error names), never any part of the
   // link (host, path, query) or the text.
-  log: (message: string, fields: Record<string, unknown>) => void;
+  log: (message: string, fields: ReadingSourceLogFields) => void;
+};
+
+// What the create helpers log: safeErrorFields' output, plus a link
+// fetch's kind and HTTP status. Typed, so a raw error here fails tsc.
+export type ReadingSourceLogFields = SafeErrorFields & {
+  kind?: FetchArticleErrorKind | "http_error";
+  status?: number;
 };
 
 export async function resolveReadingSource(
