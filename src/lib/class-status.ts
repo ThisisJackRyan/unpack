@@ -7,7 +7,7 @@
 import type { Statement } from "./link-rate-limit";
 import { checksAllowedSql, countedCheckSql, latestChallengeSql, limitsFromRow, triesAllowedSql } from "./reading-limits";
 import { latestChallenge, studentReadingStatus, type StudentReadingStatus } from "./reading-progress";
-import { STUDENT_GENERATION_CALL_LIMIT } from "./student-questions-core";
+import { STUDENT_GENERATION_CALL_LIMIT } from "./student-generation-limits";
 
 export type ClassStatusCell = {
   status: StudentReadingStatus;
