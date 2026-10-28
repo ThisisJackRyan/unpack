@@ -6,6 +6,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { db, schema } from "@/db";
 import type { Teacher } from "@/db/schema";
 import { clerkUserOrNull } from "./clerk-user";
+import { ClerkUserNoEmailError } from "./clerk-user-errors";
 import { ACCOUNT_DELETED_PATH, createAccountStatements } from "./deleted-accounts";
 import { roleRedirect, setRoleOutcome, setRoleStatements, type AccountRole, type Area, type SetRoleOutcome } from "./account-role";
 import type { StatementExecutor } from "./link-rate-limit";
@@ -46,7 +47,7 @@ export const getOrCreateAccount = cache(async (): Promise<Account> => {
     user.primaryEmailAddress?.emailAddress ??
     user.emailAddresses[0]?.emailAddress;
   if (!email) {
-    throw new Error(`Clerk user ${user.id} has no email address`);
+    throw new ClerkUserNoEmailError();
   }
   const name =
     [user.firstName, user.lastName].filter(Boolean).join(" ") ||

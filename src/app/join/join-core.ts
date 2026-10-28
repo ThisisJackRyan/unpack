@@ -4,6 +4,7 @@ import { botCheckMessage, TURNSTILE_RESPONSE_FIELD, type JoinBotCheckResult } fr
 import { joinConfigBlock } from "@/lib/join-config";
 import { joinLimitedMessage } from "@/lib/join-rate-limit";
 import { withRetryAt, type RetryClock } from "@/lib/local-time";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { joinOutcomeErrors, type JoinOutcome } from "@/lib/student-join-core";
 import {
   JOIN_DISABLED_MESSAGE,
@@ -79,10 +80,9 @@ export async function joinClassCore(formData: FormData, deps: JoinCoreDeps): Pro
     const ipHash = hashJoinIp(clientIpFromHeaders(header), joinIpHashSecret(env));
     outcome = await deps.joinClass(data, ipHash);
   } catch (error) {
-    // Name, code, and message only: a Postgres error's detail can echo the
-    // row, including the student's name.
-    const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-    logError("joinClassAction: join failed", { name, code, message });
+    // Safe fields only (safe-error-fields.ts): a query error's message can
+    // echo the row, including the student's name.
+    logError("joinClassAction: join failed", safeErrorFields(error));
     return { state: { errors: { form: JOIN_FAILED_MESSAGE }, values } };
   }
 

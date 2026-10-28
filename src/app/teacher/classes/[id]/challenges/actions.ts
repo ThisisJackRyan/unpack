@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { decideChallenge, grantExtraTry, type DecideResult, type GrantResult } from "@/lib/challenge-queue";
 import { DECIDE_FAILED_MESSAGE, parseDecisionChoice } from "@/lib/challenge-queue-core";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import type { DecideState, GrantState } from "./state";
 
@@ -27,10 +28,9 @@ export async function decideChallengeAction(
   try {
     result = await decideChallenge({ challengeId, classId, teacherId: teacher.id, decision, extraTry });
   } catch (error) {
-    // Name, code, and message only: a Postgres error's detail can echo a
-    // row, including a student's note.
-    const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-    console.error("decideChallengeAction: decide failed", { name, code, message, classId });
+    // Safe fields only (safe-error-fields.ts): a query error's message can
+    // echo a row, including a student's note.
+    console.error("decideChallengeAction: decide failed", { ...safeErrorFields(error), classId });
     return { challengeId, error: DECIDE_FAILED_MESSAGE };
   }
   // Decided, or already decided elsewhere: either way the list, the
@@ -61,9 +61,8 @@ export async function giveExtraTryAction(
   try {
     result = await grantExtraTry({ classId, teacherId: teacher.id, studentId, readingId });
   } catch (error) {
-    // Name, code, and message only, as above.
-    const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-    console.error("giveExtraTryAction: grant failed", { name, code, message, classId });
+    // Safe fields only, as above.
+    console.error("giveExtraTryAction: grant failed", { ...safeErrorFields(error), classId });
     return { key, error: DECIDE_FAILED_MESSAGE };
   }
   revalidatePath(`/teacher/classes/${classId}`);

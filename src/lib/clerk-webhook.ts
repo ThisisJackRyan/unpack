@@ -46,6 +46,7 @@
 
 import { accountLockStatement, hashClerkUserId, notDeletedSql, pruneDeletedStatement, recordDeletedStatement } from "./deleted-accounts";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
+import { safeErrorFields } from "./safe-error-fields";
 
 export type ClerkEmail = { id?: string; email_address?: string };
 
@@ -226,9 +227,9 @@ export async function handleClerkWebhookRequest(request: Request, deps: WebhookD
     deps.log("info", "clerk webhook", { type, outcome });
     return plain(200, "OK");
   } catch (error) {
-    // Name and code only: a Postgres error can echo the row (an email).
-    const { name, code } = error as { name?: unknown; code?: unknown };
-    deps.log("error", "clerk webhook: handling failed", { type, name, code });
+    // Safe fields only (safe-error-fields.ts): a query error can echo the
+    // row (an email).
+    deps.log("error", "clerk webhook: handling failed", { type, ...safeErrorFields(error) });
     // 500, so Clerk retries the delivery.
     return plain(500, "Error");
   }

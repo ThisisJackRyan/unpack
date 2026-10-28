@@ -22,6 +22,7 @@
 // is saved then, so run it again.
 import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { studentNameKey } from "@/lib/student-name";
 
 if (!process.env.DATABASE_URL) {
@@ -97,9 +98,8 @@ returning s.id`,
 }
 
 main().catch((error) => {
-  // Name, code, and message only: a constraint error's detail can echo a
-  // row.
-  const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-  console.error("recompute-name-keys failed:", { name, code, message });
+  // Safe fields only (safe-error-fields.ts): a constraint error's message
+  // and detail can echo a row.
+  console.error("recompute-name-keys failed:", safeErrorFields(error));
   process.exit(1);
 });

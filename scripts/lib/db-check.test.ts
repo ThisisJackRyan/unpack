@@ -54,10 +54,17 @@ describe("dbCheckRefusal", () => {
     for (const part of ["s3cret-pass", "owner", "ep-prod-77", "neondb", "neon.tech"]) assert.ok(!message.includes(part), part);
   });
 
-  it("every check script uses the guard first", () => {
+  it("every db:check script uses the guard first", () => {
     const dir = new URL("../", import.meta.url);
-    const scripts = readdirSync(dir).filter((f) => /^check-.*\.ts$/.test(f));
+    // The database checks are the db:check-* package scripts (a check-*.ts
+    // file with no database, like check-uncaught-error-logs.ts, isn't one).
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", dir), "utf8")) as { scripts: Record<string, string> };
+    const scripts = Object.entries(pkg.scripts)
+      .filter(([name]) => name.startsWith("db:check-"))
+      .map(([, command]) => /scripts\/(check-[\w-]+\.ts)$/.exec(command)?.[1] ?? command);
     assert.ok(scripts.length >= 8);
+    const files = readdirSync(dir).filter((f) => /^check-.*\.ts$/.test(f));
+    for (const file of scripts) assert.ok(files.includes(file), file);
     for (const file of scripts) {
       const text = readFileSync(new URL(file, dir), "utf8");
       assert.match(text, /import \{[^}]*prepareDbCheck[^}]*\} from "\.\/lib\/db-check";/, file);

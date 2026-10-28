@@ -10,15 +10,16 @@ export type FetchArticleErrorKind =
   | "extract_failed"
   | "too_long";
 
+// Carries no part of the link (no host, path, or URL): the failure is
+// logged by kind, and by HTTP status for a non-2xx reply.
 export class FetchArticleError extends Error {
   readonly kind: FetchArticleErrorKind;
-  // Host name only, for logs. Never shown to the teacher.
-  readonly host: string | undefined;
+  readonly status: number | undefined;
 
-  constructor(kind: FetchArticleErrorKind, host?: string, options?: ErrorOptions) {
+  constructor(kind: FetchArticleErrorKind, options?: ErrorOptions & { status?: number }) {
     super(`fetch article failed: ${kind}`, options);
     this.name = "FetchArticleError";
     this.kind = kind;
-    this.host = host;
+    this.status = options?.status;
   }
 }

@@ -9,6 +9,7 @@ import {
   type AccountRole,
   type SetRoleOutcome,
 } from "@/lib/account-role";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import type { Under13DeleteResult } from "@/lib/under-13-account";
 
 // Where an under-13 answer sends the user once the account is deleted:
@@ -68,8 +69,7 @@ export async function chooseRoleCore(formData: FormData, deps: ChooseRoleDeps): 
   try {
     outcome = await deps.setAccountRole(account.id, choice.role, choice.confirmAge);
   } catch (error) {
-    const { name, code } = error as { name?: unknown; code?: unknown };
-    logError("chooseRoleAction: save failed", { name, code });
+    logError("chooseRoleAction: save failed", safeErrorFields(error));
     return { state: { errors: { form: ROLE_SAVE_FAILED_MESSAGE }, role: kept } };
   }
   if (outcome.status === "saved" || outcome.status === "already_chosen") return { redirect: homeFor(outcome.role) };

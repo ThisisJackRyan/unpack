@@ -156,7 +156,7 @@ describe("createSelfReadingWith: a failed create uses no weekly slot and no limi
     };
     deps.fetchArticle = async () => {
       order.push("fetch");
-      throw new FetchArticleError("timeout", "example.com");
+      throw new FetchArticleError("timeout");
     };
     const input = linkInput();
     const state = stateOf(await run(input, deps));

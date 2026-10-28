@@ -42,11 +42,13 @@
 // - Either way the caller still sets the cookie and signs the user out.
 //
 // Logs: one fixed tag (UNDER_13_DELETE_TAG) with fixed outcome words and,
-// for a failure, the error's name and code. Never the Clerk id, the email,
-// the name, or the month or year (those are never passed in at all).
+// for a failure, the error's safe fields (safe-error-fields.ts) and
+// status. Never the Clerk id, the email, the name, or the month or year
+// (those are never passed in at all).
 
 import { accountLockStatement, hashClerkUserId, pruneDeletedStatement } from "./deleted-accounts";
 import type { Statement } from "./link-rate-limit";
+import { safeErrorFields, type SafeErrorFields } from "./safe-error-fields";
 
 export const UNDER_13_DELETE_TAG = "under13_account_delete";
 
@@ -104,14 +106,20 @@ export type Under13DeleteDeps = {
 // role first; nothing was deleted.
 export type Under13DeleteResult = "deleted" | "has_role";
 
-function errorFields(error: unknown): { name?: unknown; code?: unknown; status?: unknown } {
-  const { name, code, status } = (error ?? {}) as { name?: unknown; code?: unknown; status?: unknown };
-  return { name, code, status };
+// A Clerk error's HTTP status.
+function statusOf(error: unknown): number | undefined {
+  const { status } = (error ?? {}) as { status?: unknown };
+  return typeof status === "number" ? status : undefined;
+}
+
+// Safe fields only (safe-error-fields.ts), and Clerk's status.
+function errorFields(error: unknown): SafeErrorFields & { status: number | undefined } {
+  return { ...safeErrorFields(error), status: statusOf(error) };
 }
 
 // Clerk says the account doesn't exist (already deleted).
 export function isNotFound(error: unknown): boolean {
-  return errorFields(error).status === 404;
+  return statusOf(error) === 404;
 }
 
 // The confirm write; logged (never thrown) when it fails, so the row just

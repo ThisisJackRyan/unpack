@@ -15,6 +15,7 @@ import {
   GatewayRateLimitError,
 } from "@ai-sdk/gateway";
 import { APICallError, RetryError } from "ai";
+import { safeErrorFields } from "../safe-error-fields";
 
 export type QuestionErrorKind =
   | "not_configured"
@@ -154,20 +155,18 @@ export function questionErrorKind(error: unknown): QuestionErrorKind {
 }
 
 // Fields that are safe to log: no reading text, prompts, answers, names,
-// keys, or tokens. Error messages are left out on purpose: a gateway
-// message can quote the request.
+// keys, or tokens. The error itself goes through safeErrorFields (names,
+// codes, causes, timedOut; never a message: a gateway message can quote
+// the request), and after the SDK's retries, the last try's too.
 export function questionErrorLogFields(error: unknown): Record<string, unknown> {
-  const fields: Record<string, unknown> = {
-    kind: questionErrorKind(error),
-    name: error instanceof Error ? error.name : typeof error,
-  };
+  const fields: Record<string, unknown> = { kind: questionErrorKind(error), ...safeErrorFields(error) };
   if (error instanceof QuestionWriterError) fields.reason = error.reason;
   if (RetryError.isInstance(error)) {
     fields.tries = error.errors.length;
     fields.retryReason = error.reason;
   }
   const last = unwrapRetry(error);
-  if (last !== error) fields.lastName = last instanceof Error ? last.name : typeof last;
+  if (last !== error) fields.last = safeErrorFields(last);
   if (GatewayError.isInstance(last)) {
     fields.status = last.statusCode;
     fields.type = last.type;
@@ -175,8 +174,6 @@ export function questionErrorLogFields(error: unknown): Record<string, unknown> 
   } else if (APICallError.isInstance(last)) {
     fields.status = last.statusCode;
   }
-  const cause = causeChain(last)[1];
-  if (cause instanceof Error) fields.causeName = cause.name;
   return fields;
 }
 

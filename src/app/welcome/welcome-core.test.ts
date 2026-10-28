@@ -121,7 +121,7 @@ describe("chooseRoleCore", () => {
     assert.deepEqual(await chooseRoleCore(form({ role: "teacher" }), failed.deps), {
       state: { errors: { form: ROLE_SAVE_FAILED_MESSAGE }, role: "teacher" },
     });
-    assert.deepEqual(failed.logs, [["chooseRoleAction: save failed", { name: "NeonDbError", code: "57P01" }]]);
+    assert.deepEqual(failed.logs, [["chooseRoleAction: save failed", { name: "NeonDbError", code: "57P01", causes: [], timedOut: false }]]);
   });
 });
 

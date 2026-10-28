@@ -3,13 +3,14 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { requireSelfLearner } from "@/lib/account";
-import { guardCreate, readingSaveFailedState, safeErrorFields } from "@/lib/create-guard";
+import { guardCreate, readingSaveFailedState } from "@/lib/create-guard";
 import { fetchArticle } from "@/lib/fetch-article";
 import { linkFetchRetryAt, recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
 import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { createSelfReadingWith } from "@/lib/self-reading-create";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { createSelfReading, getAllowance } from "@/lib/self-readings";
 import { readingFormInput, readingFormValues } from "@/lib/validate-reading";
 

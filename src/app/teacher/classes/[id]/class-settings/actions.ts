@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { CLASS_SETTINGS_FAILED_MESSAGE, classSettingsSavedMessage } from "@/lib/class-settings";
 import { updateClassSettings } from "@/lib/classes";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { validateCreateClass } from "@/lib/validate-class";
 import type { ClassSettingsState } from "./state";
@@ -26,10 +27,9 @@ export async function saveClassSettingsAction(
     revalidatePath("/teacher");
     return { message: classSettingsSavedMessage(saved.clearedDrafts), values: result.values };
   } catch (error) {
-    // Name, code, and message only: a Postgres error's detail can echo the
-    // row, including the class name.
-    const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-    console.error("saveClassSettingsAction: save failed", { name, code, message, classId });
+    // Safe fields only (safe-error-fields.ts): a query error's message can
+    // echo the row, including the class name.
+    console.error("saveClassSettingsAction: save failed", { ...safeErrorFields(error), classId });
     return { error: CLASS_SETTINGS_FAILED_MESSAGE, values: result.values };
   }
 }

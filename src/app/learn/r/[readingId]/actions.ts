@@ -11,6 +11,7 @@ import { submitSelfAnswers } from "@/lib/self-readings";
 import { CHECK_FAILED_MESSAGE, refreshesPage } from "@/lib/submit-answers-core";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
 
 // Checks every answer at once (one effort check) and saves the try, with
@@ -26,11 +27,9 @@ export async function submitSelfAnswersAction(
   return guardAnswerCheck((preCheck) => checkSelfAnswers(readingId, formData, preCheck), {
     // requireSelfLearner's redirects are errors Next must handle.
     rethrow: unstable_rethrow,
-    onError: (error) => {
-      // Name, code, and message only: an error's detail can echo an answer.
-      const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-      console.error("submitSelfAnswersAction: submit failed", { name, code, message, readingId });
-    },
+    // Safe fields only (safe-error-fields.ts): an error's message can echo
+    // an answer.
+    onError: (error) => console.error("submitSelfAnswersAction: submit failed", { ...safeErrorFields(error), readingId }),
   });
 }
 
