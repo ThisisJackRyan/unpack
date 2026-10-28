@@ -102,7 +102,7 @@ describe("readingFormFallback", () => {
 
   it("the copy: curly apostrophes, no em dash", () => {
     for (const text of [CREATE_NO_REPLY_MESSAGE, APP_UPDATED_MESSAGE, SUBMIT_FAILED_MESSAGE]) {
-      assert.doesNotMatch(text, /'|—/);
+      assert.doesNotMatch(text, /'|\u2014/);
     }
   });
 });
