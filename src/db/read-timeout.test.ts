@@ -153,6 +153,56 @@ describe("isPlainReadSql", () => {
   });
 });
 
+describe("isPlainReadSql: a -- comment ends at \\n or \\r", () => {
+  const cases: [string, boolean][] = [
+    ["select 1 --x\r, pg_advisory_lock(1)", false],
+    ["select 1 --x\r\n, pg_advisory_lock(1)", false],
+    ["with --x\r d as (delete from t returning 1) select 1", false],
+    ["with --x\r\n d as (delete from t returning 1) select 1", false],
+    ["select 1 --x\r; select pg_sleep(1)", false],
+    ["select 1 --x\r\n; select pg_sleep(1)", false],
+    ["select 1 --x\r\n", true],
+    ["select 1 --x\r", true],
+    ["select a --comment\r\nfrom t", true],
+    ["select a --comment\rfrom t", true],
+    ["select 1 -- trailing", true],
+  ];
+  for (const [sql, expected] of cases) {
+    it(`${expected ? "read" : "not a read"}: ${JSON.stringify(sql)}`, () => assert.equal(isPlainReadSql(sql), expected));
+  }
+});
+
+describe("isPlainReadSql: a column list counts only for a CTE in a WITH list, or after as", () => {
+  const cases: [string, boolean][] = [
+    // A function's column definition list: the call is still a call.
+    ["select * from dblink('host=x', 'delete from t returning 1') as (n int)", false],
+    ["select * from dblink('host=x', 'delete from t returning 1') as t(n int)", false],
+    ["select * from t, dblink('a','b') as (n int)", false],
+    ["select * from t join dblink('a','b') as (n int) on true", false],
+    ["select dblink('a','b') as (n int)", false],
+    ["select 1, dblink('a','b') as (n int)", false],
+    ["select * from (select * from dblink('a','b') as (n int)) s", false],
+    ["with d as (select 1) select * from dblink('a','b') as (n int)", false],
+    ["with d(x) as (select 1) select * from dblink('a','b') as (n int)", false],
+    ["with d as (select 1), e as (select 2) select * from d, dblink('a','b') as (n int)", false],
+    ["with d as (select dblink('a','b') as (n int)) select 1", false],
+    ["with d as materialized (select 1) select * from dblink('a','b') as materialized (n int)", false],
+    // CTE column lists, and an alias's.
+    ["with t(n) as (select 1) select n from t", true],
+    ["with recursive t(n) as (select 1 union all select n + 1 from t where n < 3) select n from t", true],
+    ["with a(x) as (select 1), b(y) as (select x from a) select y from b", true],
+    ["with a as (select 1), b(y) as (select 2) select y from b", true],
+    ["with t(n) as materialized (select 1) select n from t", true],
+    ["with t(n) as not materialized (select 1) select n from t", true],
+    ["select * from (with t(n) as (select 1) select n from t) s", true],
+    ['with "t"(n) as (select 1) select n from "t"', true],
+    ["select * from t as p(a, b)", true],
+  ];
+  for (const [sql, expected] of cases) {
+    it(`${expected ? "read" : "not a read"}: ${JSON.stringify(sql)}`, () => assert.equal(isPlainReadSql(sql), expected));
+  }
+});
+
 // The SQL the app really sends: its own query functions, run on the real
 // driver (src/db/index.ts) with a fetch that records each request body and
 // answers with no rows, so no database is needed. Each case lists the

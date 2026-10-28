@@ -36,8 +36,12 @@
 //   SAFE_FUNCTIONS, or a keyword that takes parens (PAREN_KEYWORDS: in,
 //   exists, lateral, filter, ...). An unknown function, a schema-qualified
 //   call (pg_catalog.foo(...)) or a quoted name called as a function
-//   ("pg_advisory_lock"(1)) is not a read.
-// Dollar quoting, E'' and U& strings, $ inside a name, non-ASCII names
+//   ("pg_advisory_lock"(1)) is not a read. A column list is not a call:
+//   an alias's ("as p(a, b)"), or a CTE's ("with t(n) as (...)", found by
+//   walking each WITH list, so only a name in CTE position counts). The
+//   same shape elsewhere, "dblink(...) as (n int)" in FROM, is a function
+//   call with a column definition list, so not a read.
+// A "--" comment ends at "\n" or "\r", as in Postgres. Dollar quoting, E'' and U& strings, $ inside a name, non-ASCII names
 // and unterminated strings or comments are left unparsed: not a read.
 //
 // So there is no list of functions with side effects (nextval, advisory
@@ -141,8 +145,9 @@ function stripSql(sql: string): string | null {
     const c = sql[i];
     const next = sql[i + 1];
     if (c === "-" && next === "-") {
-      const end = sql.indexOf("\n", i);
-      i = end === -1 ? sql.length : end + 1;
+      // Postgres ends a line comment at "\n" or "\r" (so "\r\n" too).
+      const end = sql.slice(i).search(/[\n\r]/);
+      i = end === -1 ? sql.length : i + end + 1;
       out += " ";
     } else if (c === "/" && next === "*") {
       // Postgres block comments nest.
@@ -202,30 +207,73 @@ function stripSql(sql: string): string | null {
 
 // Whether every "name (" in the stripped statement is allowed: a function
 // on SAFE_FUNCTIONS, a keyword on PAREN_KEYWORDS, or the column list of an
-// alias ("as p(a, b)") or of a CTE ("t(n) as (...)"), which call nothing.
-// A qualified name (pg_catalog.foo, or a type's modifier after ::) is not.
+// alias ("as p(a, b)") or of a CTE ("with t(n) as (...)"), which call
+// nothing. A qualified name (pg_catalog.foo, or a type's modifier after ::)
+// is not.
 function callsAllowed(body: string): boolean {
+  const cteLists = cteColumnLists(body);
   for (const match of body.matchAll(/(\w+)\s*\(/g)) {
     const name = match[1];
     const before = body.slice(0, match.index).trimEnd();
     if (before.endsWith(".") || before.endsWith(":")) return false;
     if (SAFE_FUNCTIONS.has(name) || PAREN_KEYWORDS.has(name)) continue;
-    if (/\bas$/.test(before) || isCteColumnList(body, match.index + match[0].length)) continue;
+    if (/\bas$/.test(before) || cteLists.has(match.index + match[0].length - 1)) continue;
     return false;
   }
   return true;
 }
 
-// Whether the list opened just before `from` closes into "as (" (or "as
-// [not] materialized ("): a CTE's column list, never a call.
-function isCteColumnList(body: string, from: number): boolean {
-  let depth = 1;
-  let i = from;
-  for (; i < body.length && depth > 0; i += 1) {
+// The index of the ")" matching the "(" at `open`, or -1.
+function closingParen(body: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < body.length; i += 1) {
     if (body[i] === "(") depth += 1;
-    else if (body[i] === ")") depth -= 1;
+    else if (body[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
   }
-  return depth === 0 && /^\s*as\s+(not\s+)?(materialized\s*)?\(/.test(body.slice(i));
+  return -1;
+}
+
+// The index of every "(" that opens a CTE's column list or body: "t(n)"
+// and "(...)" in "with [recursive] t(n) as [not] [materialized] (...)",
+// for the first CTE after each "with" (nested ones included) and each
+// later one after a "," in the same list. Only that shape: "f(...) as
+// (n int)" in a FROM clause is a function's column definition list, so the
+// call in it still counts. Anything unexpected ends the walk of that list.
+function cteColumnLists(body: string): Set<number> {
+  const lists = new Set<number>();
+  for (const withMatch of body.matchAll(/\bwith\b/g)) {
+    let i = withMatch.index + withMatch[0].length;
+    const token = (pattern: RegExp): RegExpExecArray | null => {
+      pattern.lastIndex = i;
+      const found = pattern.exec(body);
+      if (found) i = pattern.lastIndex;
+      return found;
+    };
+    token(/\s*recursive\b/y);
+    for (;;) {
+      if (!token(/\s*\w+/y)) break;
+      let list = -1;
+      if (token(/\s*\(/y)) {
+        list = i - 1;
+        const close = closingParen(body, list);
+        if (close === -1) break;
+        i = close + 1;
+      }
+      if (!token(/\s*as\s*(not\s+)?(materialized\s*)?\(/y)) break;
+      if (list !== -1) lists.add(list);
+      // The body's own "(", which follows "materialized" in "as not
+      // materialized (".
+      lists.add(i - 1);
+      const close = closingParen(body, i - 1);
+      if (close === -1) break;
+      i = close + 1;
+      if (!token(/\s*,/y)) break;
+    }
+  }
+  return lists;
 }
 
 // Whether one SQL statement is a plain read (see the top of this file).
