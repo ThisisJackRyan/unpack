@@ -14,7 +14,7 @@ import {
   saveReadingEdit,
   type ReadingDraft,
 } from "@/lib/readings";
-import { safeErrorFields } from "@/lib/safe-error-fields";
+import { safeErrorFields, type SafeErrorFields } from "@/lib/safe-error-fields";
 import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { validateReadingForm } from "@/lib/validate-reading";
@@ -35,8 +35,8 @@ function readForm(formData: FormData, source: unknown) {
 
 // Safe fields only (safe-error-fields.ts): a query error's message can
 // echo the row, including the reading text.
-function logDbError(where: string, error: unknown) {
-  console.error(where, safeErrorFields(error));
+function logDbError(where: string, fields: SafeErrorFields) {
+  console.error(where, fields);
 }
 
 export async function createReading(
@@ -82,7 +82,7 @@ export async function createReading(
     }
     readingId = created.id;
   } catch (error) {
-    logDbError("createReading: insertReading failed", error);
+    logDbError("createReading: insertReading failed", safeErrorFields(error));
     return {
       errors: { form: SAVE_READING_FAILED_MESSAGE },
       values,
@@ -107,7 +107,7 @@ export async function updateReading(
   try {
     found = await getReadingForTeacher(classId, readingId, teacher.id);
   } catch (error) {
-    logDbError("updateReading: getReadingForTeacher failed", error);
+    logDbError("updateReading: getReadingForTeacher failed", safeErrorFields(error));
     return { errors: { form: "We couldn’t save your changes. Please try again." } };
   }
   if (!found) return { errors: { form: "We couldn’t find this reading." } };
@@ -162,7 +162,7 @@ export async function updateReading(
       };
     }
   } catch (error) {
-    logDbError("updateReading: saveReadingEdit failed", error);
+    logDbError("updateReading: saveReadingEdit failed", safeErrorFields(error));
     return {
       errors: { form: "We couldn’t save your changes. Please try again." },
       values,

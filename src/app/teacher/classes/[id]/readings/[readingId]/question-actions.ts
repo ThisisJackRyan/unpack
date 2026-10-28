@@ -16,7 +16,7 @@ import { QUESTION_GENERATION_LIMITED_MESSAGE } from "@/lib/question-rate-limit";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { getReadingForTeacher } from "@/lib/readings";
-import { safeErrorFields } from "@/lib/safe-error-fields";
+import { safeErrorFields, type SafeErrorFields } from "@/lib/safe-error-fields";
 import {
   checkPublish,
   LAST_QUESTION_MESSAGE,
@@ -48,8 +48,8 @@ const SAVE_FAILED_MESSAGE = "We couldn’t save that. Please try again.";
 
 // Safe fields only (safe-error-fields.ts): a query error's message can
 // echo the row, including the reading text or a question.
-function logDbError(where: string, error: unknown, readingId: string) {
-  console.error(where, { ...safeErrorFields(error), readingId });
+function logDbError(where: string, fields: SafeErrorFields, readingId: string) {
+  console.error(where, { ...fields, readingId });
 }
 
 // One action for every button on the questions panel, so the panel has one
@@ -137,7 +137,7 @@ export async function questionAction(
     try {
       allowed = await recordQuestionGeneration(teacher.id);
     } catch (error) {
-      logDbError("questionAction: recordQuestionGeneration failed", error, readingId);
+      logDbError("questionAction: recordQuestionGeneration failed", safeErrorFields(error), readingId);
       return fail(QUESTION_ERROR_MESSAGES.failed);
     }
     if (!allowed) {
@@ -195,7 +195,7 @@ export async function questionAction(
     if (!(await saveQuestionSet(ref, fingerprint, written, mode))) return refused();
     return done("Questions written.");
   } catch (error) {
-    logDbError(`questionAction: ${intent satisfies QuestionIntent} failed`, error, readingId);
+    logDbError(`questionAction: ${intent satisfies QuestionIntent} failed`, safeErrorFields(error), readingId);
     return fail(SAVE_FAILED_MESSAGE);
   }
 }

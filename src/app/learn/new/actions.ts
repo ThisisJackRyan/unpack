@@ -9,15 +9,15 @@ import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { resolveReadingSource, SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
-import { safeErrorFields } from "@/lib/safe-error-fields";
+import { safeErrorFields, type SafeErrorFields } from "@/lib/safe-error-fields";
 import { createOutcomeRedirect, type CreateOutcome } from "@/lib/self-allowance";
 import { validateSoloReadingForm } from "@/lib/self-reading-form";
 import { createSelfReading, getAllowance } from "@/lib/self-readings";
 
 // Safe fields only (safe-error-fields.ts): a query error's message can
 // echo the row, including the reading text.
-function logDbError(where: string, error: unknown) {
-  console.error(where, safeErrorFields(error));
+function logDbError(where: string, fields: SafeErrorFields) {
+  console.error(where, fields);
 }
 
 // Starts a self-learner reading: the teacher form's validation and link
@@ -45,7 +45,7 @@ export async function createSelfReadingAction(_prev: ReadingFormState, formData:
   try {
     remaining = (await getAllowance(account.id)).remaining;
   } catch (error) {
-    logDbError("createSelfReadingAction: getAllowance failed", error);
+    logDbError("createSelfReadingAction: getAllowance failed", safeErrorFields(error));
     return { errors: { form: SAVE_READING_FAILED_MESSAGE }, values };
   }
   if (remaining === 0) redirect("/learn/new", RedirectType.replace);
@@ -68,7 +68,7 @@ export async function createSelfReadingAction(_prev: ReadingFormState, formData:
       questionCount: data.questionCount,
     });
   } catch (error) {
-    logDbError("createSelfReadingAction: createSelfReading failed", error);
+    logDbError("createSelfReadingAction: createSelfReading failed", safeErrorFields(error));
     return { errors: { form: SAVE_READING_FAILED_MESSAGE }, values };
   }
   const next = createOutcomeRedirect(outcome);
