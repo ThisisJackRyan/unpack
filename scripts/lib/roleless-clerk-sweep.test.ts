@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { hashClerkUserId } from "@/lib/deleted-accounts";
 import type { RolelessDeleteOutcome } from "@/lib/under-13-account";
@@ -10,15 +11,18 @@ import {
   MIN_AGE_FLOOR_DAYS,
   NO_ROW_SHARE_MAX,
   NO_ROW_SHARE_MIN_AGED,
+  candidatesDigest,
   clerkKeyType,
   describeDatabaseUrl,
   environmentRefusal,
+  kindTotalsLine,
   olderThan,
   parseOptions,
   pickCandidates,
   runSweep,
   sweepLookupStatements,
   sweepShapeRefusal,
+  type Candidate,
   type Environment,
   type ListedRow,
   type Options,
@@ -376,6 +380,25 @@ describe("pickCandidates", () => {
   });
 });
 
+describe("dry run summary", () => {
+  const candidate = (id: string, kind: Candidate["kind"]): Candidate => ({ id, hash: hashClerkUserId(id), kind, lastSeenAt: 0 });
+
+  it("totals every kind, zeros included", () => {
+    assert.equal(
+      kindTotalsLine([candidate("a", "no_row"), candidate("b", "no_row"), candidate("c", "no_role")]),
+      "By kind: 2 no app row, 1 row with no role, 0 delete pending.",
+    );
+  });
+
+  it("digests the sorted ids: order free, changes with the set, ids only", () => {
+    const ab = candidatesDigest([candidate("user_a", "no_row"), candidate("user_b", "pending")]);
+    assert.match(ab, /^[0-9a-f]{12}$/);
+    assert.equal(candidatesDigest([candidate("user_b", "no_role"), candidate("user_a", "no_row")]), ab);
+    assert.notEqual(candidatesDigest([candidate("user_a", "no_row"), candidate("user_c", "no_row")]), ab);
+    assert.equal(ab, createHash("sha256").update("user_a\nuser_b").digest("hex").slice(0, 12));
+  });
+});
+
 describe("listClerkUsers (shared paging)", () => {
   it("reads only the id and the three times; listClerkUserIds still returns ids only", async () => {
     const clerk = fakeClerk([clerkUser("user_1", 1), clerkUser("user_2", 10, { activeDays: 3 }), clerkUser("user_3", 1)]);
@@ -417,6 +440,8 @@ describe("runSweep", () => {
       `  user_none  (${hashClerkUserId("user_none").slice(0, 12)})  no app row, last seen 30 days ago`,
       `  user_null  (${hashClerkUserId("user_null").slice(0, 12)})  row with no role, last seen 20 days ago`,
       `  user_pending  (${hashClerkUserId("user_pending").slice(0, 12)})  delete pending, last seen 8 days ago`,
+      "By kind: 1 no app row, 1 row with no role, 1 delete pending.",
+      `Id digest: ${candidatesDigest([{ id: "user_pending" }, { id: "user_none" }, { id: "user_null" }] as Candidate[])} (sha256 of the sorted Clerk ids, first 12 characters).`,
       "Dry run: nothing deleted. --apply would delete up to 3 of these, oldest first (--limit=25).",
       "To apply, check the list above, then run with the same DATABASE_URL and CLERK_SECRET_KEY:",
       "  pnpm ops:sweep-roleless-clerk-users --apply --expect-db=localhost/unpack_test --expect-instance=ins_test123 --min-age-days=7 --limit=25 --expect-count=3",
