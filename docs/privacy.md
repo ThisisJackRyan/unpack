@@ -59,6 +59,8 @@ id, student_id, reading_id, created_at, finished_at, outcome (pass/fail/error/gi
 
 id, student_id, reading_id, round, **note** (the student's note, up to 500 characters), status, resolved_at, resolved_by (the teacher), tries_allowed, checks_allowed, created_at. Cascade from `students` and `readings`.
 
+A teacher's **Give one more try** on the queue's "Out of tries, no note yet" row (PR 18) also writes a `challenges` row, with an **empty note** (`''`; the student wrote nothing): the next round, status denied, resolved_at and resolved_by (that teacher) set, tries_allowed set to the tries used plus 1 and checks_allowed to the checks used plus 2 (one more try and its checks), the same grant as "Deny, give one more try". It holds no text from anyone, is never shown (only an open round shows its note), and is kept and deleted like any other challenge row.
+
 ### `join_attempts` (join rate limits)
 
 id, key_kind (ip/code), key_hash, created_at. For an IP, key_hash is an HMAC-SHA256 of the address with a server secret (`JOIN_IP_HASH_SECRET`); the raw IP is never stored. For a code, a SHA-256 of the typed code. **Not linked to any student**: no student id, no name. Rows are deleted by the next join after the 10-minute window, so after a quiet period they can stay longer, until someone joins.
@@ -150,6 +152,7 @@ Until the Clerk account is deleted. Self-learners can't delete single readings i
 - **A teacher can delete one student** from the Class progress page (Delete, then confirm "Delete {name}"). It deletes, in one transaction, the student row (ending their session), their own question sets and generation rows, their call counts, tries, answers, effort checks, and notes to the teacher. Nothing of any other student changes.
 - `join_attempts` rows: pruned by later joins after 10 minutes (see above).
 - `deleted_clerk_users` rows (a hash only): pruned by later account deletes 30 days after Clerk's delete is confirmed; a row still pending is kept until it is (see above).
+- **Accounts that never chose a role** (signed in, but stopped before picking teacher or self-learner on `/welcome`): the Clerk account (with its email) and, if there is one, the `teachers` row with no role (name and email) are deleted by an ops sweep (`pnpm ops:sweep-roleless-clerk-users`, run by hand) **7 days after the account was created and last used** (last signed in or active, as Clerk records it; the sweep reads only those times and the id from Clerk). It deletes our row first, then the Clerk account. What we keep afterwards is only the Clerk id's hash in `deleted_clerk_users`, as for any deleted account (so a late "created" event can't bring the row back), pruned 30 days after Clerk's delete is confirmed. The sweep prints only Clerk ids and hash prefixes, never an email or a name. Until a sweep runs, such an account stays as it is.
 - **Backups:** Neon keeps a restore history (point-in-time restore) for the project's restore window, which depends on the Neon plan and settings. Deleted rows can be recovered from it, and stay in it, until that window passes. Keep the window as short as operations allow.
 
 ## Unsent answer drafts (in the browser, added in PR 15)
