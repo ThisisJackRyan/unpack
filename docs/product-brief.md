@@ -6,7 +6,7 @@ Students read an article, then answer a short AI-generated questionnaire, and th
 ## Who it's for
 - **Paying customer:** teachers, starting with individual teachers rather than districts.
 - **Users:** students from about 2nd/3rd grade and up. No student accounts: they enter a class code and their name.
-- **Self-learners (PR 13):** people 13 or older reading for themselves. They sign in with Clerk, choose "I’m reading for myself", and use the same read, answer, and effort check loop on anything they paste, with 5 new readings per rolling 7 days free (a reading whose questions never get written doesn't use one). No class, no teacher, no challenge. A paid self-learner plan is TBD.
+- **Self-learners (PR 13):** people 13 or older reading for themselves. They sign in with Clerk, choose "I’m reading for myself", and use the same read, answer, and effort check loop on anything they paste, with 5 new readings per rolling 7 days free (a reading whose question write fails doesn't use one; a reading that waits out a limit keeps its slot and gets its questions after the wait). No class, no teacher, no challenge. A paid self-learner plan is TBD.
 - **Later:** a browser extension (deferred).
 
 ## Core loop

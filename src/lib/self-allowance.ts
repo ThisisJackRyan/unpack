@@ -10,10 +10,14 @@
 // is ever added, count from a separate creation log instead, or a delete
 // would hand a slot back.
 //
-// A reading whose questions never get written doesn't use a slot: when
-// question writing fails (or can't start: not set up, or the account's
-// question limit), the reading's slot is released (slot_released_at set,
-// only while it has no questions and no live claim), so it stops counting.
+// A reading whose question write fails doesn't use a slot: when a write
+// was attempted (claimed and counted toward the question limit) and
+// failed, the reading's slot is released (slot_released_at set, only
+// while it has no questions), so it stops counting. An open that doesn't
+// write (not set up, the account's question limit, another tab's claim)
+// keeps the slot, so an account at its question limit can't create, open,
+// and repeat past the allowance; that reading gets its questions later on
+// the slot it kept.
 // Its Try again takes the slot back in the claim itself, under the same
 // account lock and only while a slot is free (see selfClaimStatements in
 // self-questions-core.ts); a reading with questions always holds its slot.

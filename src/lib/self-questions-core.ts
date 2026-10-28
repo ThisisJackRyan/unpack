@@ -28,15 +28,21 @@
 //    the account's limit, so retries are bounded.
 //
 // The weekly allowance slot (see self-allowance.ts): a reading whose
-// questions never get written gives its slot back. The release in step 5
-// also sets slot_released_at while the reading has no questions, and so
-// does an open that can't start a write (not set up, or the account's
-// question limit). The claim in step 2 takes the slot back (clears
-// slot_released_at) in the same statement, only while the account has a
-// free slot (or the reading is already older than the window), under the
-// account lock the create takes, so creates and Try agains together never
-// hold more than the allowance. No free slot: "limit_reached", and the
-// page shows when the next one frees up.
+// question write was attempted and failed gives its slot back. Only the
+// release in step 5 sets slot_released_at (while the reading has no
+// questions), and only after a claimed write threw. An open that doesn't
+// call the model keeps the slot: not set up, the account's question limit,
+// another tab's live claim, not found. Such a reading still gets its
+// questions on a later open, with the slot it holds. Releasing there would
+// let an account at its question limit create, open (rate_limited, slot
+// back) and repeat without end; a release after a write is bounded by the
+// question limit, since every claim counts toward it. The claim in step 2
+// takes a released slot back (clears slot_released_at) in the same
+// statement, only while the account has a free slot (or the reading is
+// already older than the window), under the account lock the create
+// takes, so creates and Try agains together never hold more than the
+// allowance. No free slot: "limit_reached", and the page shows when the
+// next one frees up.
 
 import type { QuestionErrorKind, QuestionModel } from "./ai/questions";
 import { questionErrorKind, questionErrorLogFields, writeQuestionSet } from "./ai/questions";
@@ -77,11 +83,9 @@ export type SelfQuestionStore = {
   loadContext(accountId: string, readingId: string): Promise<SelfReadingContext | null>;
   readQuestions(accountId: string, readingId: string): Promise<StudentQuestion[]>;
   claim(accountId: string, readingId: string, token: string, allowance: ReadingAllowance): Promise<SelfClaimOutcome>;
-  // Clears this token's claim, and releases the reading's slot if it has
-  // no questions.
+  // After this token's write failed: clears its claim, and releases the
+  // reading's slot if it has no questions.
   release(accountId: string, readingId: string, token: string): Promise<void>;
-  // Releases the slot of a reading with no questions and no live claim.
-  releaseSlot(accountId: string, readingId: string): Promise<void>;
   // Where the allowance stands, for the limit_reached message.
   allowanceState(accountId: string, allowance: ReadingAllowance): Promise<AllowanceState>;
   // After "rate_limited": when the next question write frees up, if the
@@ -110,7 +114,8 @@ export type SelfQuestionDeps = {
   write: SelfQuestionWriter;
   newToken: () => string;
   // False without AI Gateway credentials: fail before claiming, so nothing
-  // is counted (and the reading's slot is released).
+  // is counted. The reading keeps its slot (no model call was made) and
+  // gets its questions once question writing is set up.
   configured?: boolean;
   // The account's plan allowance; the free plan by default.
   allowance?: ReadingAllowance;
@@ -150,17 +155,15 @@ export async function getOrCreateSelfQuestionsWith(
   const cached = await store.readQuestions(accountId, readingId);
   if (cached.length > 0) return { status: "ready", questions: cached };
 
-  if (deps.configured === false) {
-    await store.releaseSlot(accountId, readingId);
-    return { status: "error", kind: "not_configured" };
-  }
+  if (deps.configured === false) return { status: "error", kind: "not_configured" };
 
   const allowance = deps.allowance ?? allowanceFor(selfLearnerPlan());
   const token = deps.newToken();
   const claim = await store.claim(accountId, readingId, token, allowance);
   if (claim === "not_found") return { status: claim };
+  // The reading keeps its slot: no model call, and it gets its questions
+  // after the wait.
   if (claim === "rate_limited") {
-    await store.releaseSlot(accountId, readingId);
     // Only for the message: if it can't be read, a relative time.
     return { status: claim, retryAt: (await store.rateLimitedUntil?.(accountId).catch(() => null)) ?? null };
   }
@@ -172,6 +175,7 @@ export async function getOrCreateSelfQuestionsWith(
     prompts = await deps.write(context);
   } catch (error) {
     deps.onError?.(questionErrorLogFields(error));
+    // The only place a slot is released: a write was attempted and failed.
     await store.release(accountId, readingId, token);
     return { status: "error", kind: questionErrorKind(error) };
   }
@@ -339,8 +343,8 @@ export function selfClaimOutcome(results: Record<string, unknown>[][]): SelfClai
   return "pending";
 }
 
-// Clears this token's claim and, while the reading has no questions,
-// releases its slot.
+// After this token's write failed: clears its claim and, while the
+// reading has no questions, releases its slot.
 export function selfReleaseStatement(accountId: string, readingId: string, token: string): Statement {
   return {
     text: `update self_readings set questions_claim_token = null, questions_claimed_at = null,
@@ -350,18 +354,6 @@ export function selfReleaseStatement(accountId: string, readingId: string, token
   end
 where id = $2::uuid and account_id = $1::uuid and questions_claim_token = $3::uuid`,
     params: [accountId, readingId, token],
-  };
-}
-
-// Releases the slot of a reading with no questions and no live claim
-// (an open that couldn't start a write). $3 stale seconds.
-export function selfReleaseSlotStatement(accountId: string, readingId: string): Statement {
-  return {
-    text: `update self_readings set slot_released_at = now()
-where id = $2::uuid and account_id = $1::uuid and slot_released_at is null
-  and not exists (select 1 from self_questions q where q.reading_id = self_readings.id)
-  and (questions_claim_token is null or questions_claimed_at < now() - make_interval(secs => $3::int))`,
-    params: [accountId, readingId, CLAIM_STALE_SECONDS],
   };
 }
 
@@ -404,9 +396,6 @@ export function postgresSelfQuestionStore(execute: StatementExecutor): SelfQuest
     },
     async release(accountId, readingId, token) {
       await one(selfReleaseStatement(accountId, readingId, token));
-    },
-    async releaseSlot(accountId, readingId) {
-      await one(selfReleaseSlotStatement(accountId, readingId));
     },
     async allowanceState(accountId, allowance) {
       const [row] = await one(allowanceStatement(accountId, allowance));

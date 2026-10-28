@@ -15,7 +15,6 @@ import {
   selfQuestionsView,
   selfQuestionWriter,
   SELF_QUESTIONS_LIMITED_MESSAGE,
-  selfReleaseSlotStatement,
   selfReleaseStatement,
   type SelfQuestionStore,
 } from "./self-questions-core";
@@ -30,9 +29,17 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
 
 // In-memory store: one reading owned by ACCOUNT, claim and commit atomic.
 // slotFree says whether a released reading could take a slot back.
+// releases counts release calls (the only way a slot is given back).
 function fakeStore(options: { limit?: number; slotFree?: boolean } = {}) {
-  const state = { questions: [] as string[], token: null as string | null, generations: 0, writes: 0, released: false };
-  const limit = options.limit ?? QUESTION_GENERATION_LIMIT;
+  const state = {
+    questions: [] as string[],
+    token: null as string | null,
+    generations: 0,
+    writes: 0,
+    released: false,
+    releases: 0,
+    limit: options.limit ?? QUESTION_GENERATION_LIMIT,
+  };
   const store: SelfQuestionStore = {
     async loadContext(accountId) {
       await tick();
@@ -48,7 +55,7 @@ function fakeStore(options: { limit?: number; slotFree?: boolean } = {}) {
       if (state.questions.length > 0) return "ready";
       if (state.token) return "pending";
       if (state.released && options.slotFree === false) return "limit_reached";
-      if (state.generations >= limit) return "rate_limited";
+      if (state.generations >= state.limit) return "rate_limited";
       state.generations++;
       state.token = token;
       state.released = false;
@@ -56,14 +63,11 @@ function fakeStore(options: { limit?: number; slotFree?: boolean } = {}) {
     },
     async release(_a, _r, token) {
       await tick();
+      state.releases++;
       if (state.token === token) {
         state.token = null;
         if (state.questions.length === 0) state.released = true;
       }
-    },
-    async releaseSlot() {
-      await tick();
-      if (!state.token && state.questions.length === 0) state.released = true;
     },
     async allowanceState() {
       return { used: 5, remaining: 0, nextFreeAt: new Date("2026-10-30T09:00:00Z") };
@@ -157,27 +161,77 @@ describe("getOrCreateSelfQuestionsWith", () => {
     assert.equal(selfQuestionsView(result).kind, "limit_reached");
   });
 
-  it("at the account's generation limit: rate_limited, no model call", async () => {
+  it("at the account's generation limit: rate_limited, no model call, and the reading keeps its slot", async () => {
     const { store, state } = fakeStore({ limit: 0 });
-    const result = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, {
-      store,
-      write: async () => {
-        state.writes++;
-        return PROMPTS;
-      },
-      newToken,
-    });
-    assert.deepEqual(result, { status: "rate_limited", retryAt: null });
+    const write = async () => {
+      state.writes++;
+      return PROMPTS;
+    };
+    for (let i = 0; i < 3; i++) {
+      const result = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write, newToken });
+      assert.deepEqual(result, { status: "rate_limited", retryAt: null });
+    }
     assert.equal(state.writes, 0);
-    assert.equal(state.released, true, "an open that can't write gives the slot back");
+    assert.equal(state.releases, 0);
+    assert.equal(state.released, false, "a refused open keeps the slot, so create, open, repeat can't cycle slots");
+    // After the wait, Try again writes the set with the slot it kept.
+    state.limit = QUESTION_GENERATION_LIMIT;
+    const later = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write, newToken });
+    assert.equal(later.status, "ready");
+    assert.equal(state.writes, 1);
+    assert.equal(state.released, false);
   });
 
-  it("without a key: an error before any claim", async () => {
+  it("without a key: not_configured before any claim, and the reading keeps its slot", async () => {
     const { store, state } = fakeStore();
     const result = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write: async () => PROMPTS, newToken, configured: false });
     assert.deepEqual(result, { status: "error", kind: "not_configured" });
     assert.equal(state.generations, 0);
-    assert.equal(state.released, true, "not set up gives the slot back");
+    assert.equal(state.releases, 0);
+    assert.equal(state.released, false, "no model call was made, so nothing is given back");
+    // Once set up, the next open writes the set with the slot it kept.
+    const later = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write: async () => PROMPTS, newToken });
+    assert.equal(later.status, "ready");
+    assert.equal(state.released, false);
+  });
+
+  it("another tab's live claim is pending and keeps the slot", async () => {
+    const { store, state } = fakeStore();
+    state.token = "other-tab";
+    const result = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, { store, write: async () => PROMPTS, newToken });
+    assert.equal(result.status, "pending");
+    assert.equal(state.releases, 0);
+    assert.equal(state.released, false);
+  });
+
+  it("not_found keeps every slot and calls nothing", async () => {
+    const { store, state } = fakeStore();
+    await getOrCreateSelfQuestionsWith(OTHER, READING, { store, write: async () => PROMPTS, newToken, configured: false });
+    await getOrCreateSelfQuestionsWith(OTHER, READING, { store, write: async () => PROMPTS, newToken });
+    assert.equal(state.releases, 0);
+    assert.equal(state.released, false);
+  });
+
+  it("an attempted write that fails releases the slot, whatever the kind (a 402 or a provider outage too)", async () => {
+    for (const [kind, reason] of [
+      ["not_configured", "402"],
+      ["busy", "529"],
+      ["timeout", "deadline"],
+      ["failed", "500"],
+    ] as const) {
+      const { store, state } = fakeStore();
+      const result = await getOrCreateSelfQuestionsWith(ACCOUNT, READING, {
+        store,
+        write: async () => {
+          throw new QuestionWriterError(kind, reason);
+        },
+        newToken,
+      });
+      assert.deepEqual(result, { status: "error", kind });
+      assert.equal(state.generations, 1, `${kind}: the attempt counted toward the question limit`);
+      assert.equal(state.releases, 1);
+      assert.equal(state.released, true, `${kind}: the slot is given back`);
+    }
   });
 });
 
@@ -231,11 +285,7 @@ describe("self question statements", () => {
     const release = selfReleaseStatement(ACCOUNT, READING, "t1");
     assert.match(release.text, /when exists \(select 1 from self_questions q where q\.reading_id = self_readings\.id\) then slot_released_at/);
     assert.match(release.text, /else coalesce\(slot_released_at, now\(\)\)/);
-    const slot = selfReleaseSlotStatement(ACCOUNT, READING);
-    assert.match(slot.text, /^update self_readings set slot_released_at = now\(\)/);
-    assert.match(slot.text, /not exists \(select 1 from self_questions q/);
-    assert.match(slot.text, /questions_claim_token is null or questions_claimed_at < now\(\) - make_interval\(secs => \$3::int\)/);
-    assert.deepEqual(slot.params, [ACCOUNT, READING, CLAIM_STALE_SECONDS]);
+    assert.match(release.text, /questions_claim_token = \$3::uuid$/, "only the token whose write failed");
   });
 
   it("selfClaimOutcome says why", () => {

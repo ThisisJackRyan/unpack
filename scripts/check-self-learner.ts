@@ -13,6 +13,13 @@
 //     them; a second self-learner can't either. All not_found or empty,
 //     with nothing written.
 // (c) Allowance: --creates concurrent creates leave exactly 5 in the window.
+// (c3) Refused opens keep the slot (PR 16 review A1): an account at its
+//     question limit (QUESTION_GENERATION_LIMIT generations in the
+//     window) creates and opens readings over and over; every open is
+//     rate_limited with no model call and keeps its slot, so the account
+//     stops at the allowance (no 6th reading) instead of cycling slots.
+//     After the wait, a kept reading gets its questions on the slot it
+//     held, with no second slot.
 // (d) The window rolls: backdated to 7 days minus a minute it still
 //     blocks; with the oldest just past 7 days, exactly one more fits.
 // (e) Solo flow: 3 failed tries, then moved on (a 4th is out_of_tries),
@@ -54,6 +61,7 @@ import {
   EFFORT_GIVEN_BACK_WINDOW_MINUTES,
 } from "@/lib/submit-answers-core";
 import { allowanceFor } from "@/lib/self-allowance";
+import { QUESTION_GENERATION_LIMIT } from "@/lib/question-rate-limit";
 import {
   createSelfReading,
   getAllowance,
@@ -84,7 +92,7 @@ const SUBMITS = intFlag("submits", 10);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
-const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_c", "test_self_teacher", "test_self_gone", "test_self_kept"];
+const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_c", "test_self_d", "test_self_teacher", "test_self_gone", "test_self_kept"];
 const FREE = allowanceFor("free");
 
 const sql = getSql();
@@ -369,6 +377,59 @@ async function checkFailedGenerations() {
     where r.account_id = ${cId} and r.slot_released_at is not null
       and exists (select 1 from self_questions q where q.reading_id = r.id)`);
   check(withQuestions.n === 0, `no reading with questions is ever marked released (${withQuestions.n})`);
+}
+
+// PR 16 review A1: an open refused by the question limit used to give the
+// slot back, so an account at the limit could create, open and repeat
+// past the allowance. Now a refused open keeps the slot.
+async function checkRateLimitedKeepsSlot() {
+  console.log("\n== (c3) RATE-LIMITED OPENS KEEP THEIR SLOT ==");
+  const dId = await newAccount("test_self_d", "self_learner");
+  const draft = (i: number) => ({ title: `Loop ${i}`, bodyText: BODY, sourceUrl: null, gradeLevel: "5" as const, questionCount: 3 });
+  // At the question limit: the limiter's own rows, inside its window.
+  await sql`
+    insert into question_generation_attempts (teacher_id)
+    select ${dId}::uuid from generate_series(1, ${QUESTION_GENERATION_LIMIT}::int)`;
+  let writes = 0;
+  const counting = async (): Promise<string[]> => {
+    writes++;
+    return PROMPTS;
+  };
+  const created: string[] = [];
+  const opens: string[] = [];
+  const creates: string[] = [];
+  for (let i = 0; i < FREE.readings + 3; i++) {
+    const made = await createSelfReading(dId, draft(i));
+    creates.push(made.status);
+    if (made.status !== "created") continue;
+    created.push(made.id);
+    opens.push((await getOrCreateSelfQuestions(dId, made.id, { write: counting })).status);
+  }
+  const released = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings where account_id = ${dId} and slot_released_at is not null`);
+  check(
+    opens.length === FREE.readings && opens.every((s) => s === "rate_limited") && writes === 0,
+    `${opens.length} opens at the question limit: all rate_limited, ${writes} model calls (${opens.join(", ")})`,
+  );
+  check(released.n === 0, `...and every one kept its slot (${released.n} released)`);
+  check(
+    created.length === FREE.readings && creates.slice(FREE.readings).every((s) => s === "limit_reached"),
+    `create, open, repeat ${FREE.readings + 3} times stops at ${created.length} readings (${creates.join(", ")})`,
+  );
+  const rows = await one<{ n: number }>(sql`select count(*)::int as n from self_readings where account_id = ${dId}`);
+  const state = await getAllowance(dId);
+  check(rows.n === FREE.readings && state.remaining === 0, `${rows.n} rows, ${state.remaining} slots left: the allowance wasn't regained`);
+
+  // The wait passes: a kept reading gets its questions on its own slot.
+  await sql`delete from question_generation_attempts where teacher_id = ${dId}`;
+  const later = await getOrCreateSelfQuestions(dId, created[0], { write: counting });
+  const held = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings
+    where account_id = ${dId} and slot_released_at is null and created_at > now() - interval '7 days'`);
+  check(
+    later.status === "ready" && writes === 1 && held.n === FREE.readings,
+    `after the wait, Try again: ${later.status}, ${writes} model call, ${held.n} slots held (no second slot)`,
+  );
 }
 
 async function checkSoloFlow() {
@@ -674,6 +735,7 @@ async function main(): Promise<void> {
     await checkIsolation();
     await checkAllowance();
     await checkFailedGenerations();
+    await checkRateLimitedKeepsSlot();
     await checkSoloFlow();
     await checkLockedAnswers();
     await checkGivenBackChecks();

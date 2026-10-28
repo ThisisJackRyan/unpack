@@ -98,7 +98,7 @@ The name and email in this row come from Clerk, as for teachers.
 
 ### `self_readings` (one row per reading a self-learner starts)
 
-id, account_id, title, source_url (if they pasted a link), body_text (the text they pasted or we fetched), grade_level (the level they picked), question_count, status (in progress, passed, moved on), finished_at, questions_claim_token and questions_claimed_at (a random UUID and a time, while their questions are being written), slot_released_at (PR 15: set when their questions failed to be written, so the reading doesn't use one of their 5), created_at. created_at also counts toward the 5 per 7 days allowance, so rows aren't deleted by the self-learner. Cascade from `teachers`.
+id, account_id, title, source_url (if they pasted a link), body_text (the text they pasted or we fetched), grade_level (the level they picked), question_count, status (in progress, passed, moved on), finished_at, questions_claim_token and questions_claimed_at (a random UUID and a time, while their questions are being written), slot_released_at (PR 15: set when writing their questions was tried and failed, so the reading doesn't use one of their 5; not set when it was never tried, for example while they wait out the question limit), created_at. created_at also counts toward the 5 per 7 days allowance, so rows aren't deleted by the self-learner. Cascade from `teachers`.
 
 ### `self_questions`
 

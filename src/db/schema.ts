@@ -513,9 +513,10 @@ export const deletedClerkUsers = pgTable(
 // One row per reading a self-learner starts. Rows are never deleted by the
 // self-learner (only with the account), so the 5-per-7-days allowance
 // counts these rows by created_at (see src/lib/self-allowance.ts), except
-// those whose slot was given back: slot_released_at is set when question
-// writing failed and the reading still has no questions, and cleared when
-// a later Try again takes the slot back.
+// those whose slot was given back: slot_released_at is set when a question
+// write was attempted and failed and the reading still has no questions
+// (never when no write was attempted, as at the question limit), and
+// cleared when a later Try again takes the slot back.
 // questions_claim_token / questions_claimed_at: the claim that makes the
 // question set generate at most once at a time (see
 // src/lib/self-questions-core.ts).
