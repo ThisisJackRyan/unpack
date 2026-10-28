@@ -55,10 +55,12 @@ function spies(opts: { ageGated?: boolean; local?: RolelessDeleteOutcome; save?:
 }
 
 describe("chooseRoleCore", () => {
-  it("an under-13 answer sets the cookie, deletes the account (local, then Clerk, by its id), and signs out to /join", async () => {
+  it("an under-13 answer sets the cookie, deletes the account (local, then Clerk, by its id), and redirects to /join", async () => {
     const { deps, calls, logs } = spies();
     const result = await chooseRoleCore(form({ role: "self_learner", ...UNDER }), deps);
-    assert.deepEqual(result, { state: { ageGate: true, signOutTo: "/join" } });
+    // A redirect, not a state: a returned state would make Next render
+    // /welcome again for the deleted account in the same response.
+    assert.deepEqual(result, { redirect: "/join" });
     assert.equal(UNDER_13_EXIT_PATH, "/join");
     assert.deepEqual(calls.order, ["cookie", "local", "clerk"]);
     assert.deepEqual(calls.local, [CLERK_ID]);
