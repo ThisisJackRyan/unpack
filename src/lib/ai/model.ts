@@ -50,8 +50,13 @@ export type ModelReply = {
 };
 
 // The signal is the overall deadline. The SDK checks it before each try
-// and wakes from its backoff sleep when it fires.
-export type ModelCall = (request: ModelRequest, options: { signal: AbortSignal }) => Promise<ModelReply>;
+// and wakes from its backoff sleep when it fires. onRequest, if given, is
+// called for each HTTP request the call makes (SDK retries included), for
+// the questions.generate log; fakes may ignore it.
+export type ModelCall = (
+  request: ModelRequest,
+  options: { signal: AbortSignal; onRequest?: () => void },
+) => Promise<ModelReply>;
 
 export type QuestionModel = { model: string; create: ModelCall };
 

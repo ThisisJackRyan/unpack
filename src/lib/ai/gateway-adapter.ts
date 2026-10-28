@@ -53,12 +53,24 @@ export function anthropicOptions(request: ModelRequest) {
   } satisfies AnthropicLanguageModelOptions;
 }
 
+// Counts each request, then sends it.
+export function countingFetch(onRequest: () => void, base: Fetch = globalThis.fetch): Fetch {
+  return (input, init) => {
+    onRequest();
+    return base(input, init);
+  };
+}
+
 export function createGatewayCall(options: GatewayCallOptions): ModelCall {
-  const provider = createGateway({
-    apiKey: options.apiKey ?? "",
-    fetch: withRequestTimeout(options.timeoutMs, options.fetch),
-  });
-  return async (request, { signal }): Promise<ModelReply> => {
+  const fetch = withRequestTimeout(options.timeoutMs, options.fetch);
+  const shared = createGateway({ apiKey: options.apiKey ?? "", fetch });
+  return async (request, { signal, onRequest }): Promise<ModelReply> => {
+    // A provider of its own when the caller counts requests, so concurrent
+    // calls never share a counter. Building one is cheap: no request is
+    // made until the call.
+    const provider = onRequest
+      ? createGateway({ apiKey: options.apiKey ?? "", fetch: countingFetch(onRequest, fetch) })
+      : shared;
     const { tool: spec } = request;
     const result = await generateText({
       model: provider(request.model),

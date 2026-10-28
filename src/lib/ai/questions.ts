@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import type { GradeLevel } from "../grade-levels";
-import { QuestionWriterError } from "./errors";
+import { questionErrorKind, QuestionWriterError, type QuestionErrorKind } from "./errors";
 import { isRefusal, wasCutOff, type ModelReply, type ModelRequest, type QuestionModel, type ToolSpec } from "./model";
 import {
   QUESTION_MAX_LENGTH,
@@ -151,11 +151,23 @@ export function buildQuestionRequest(
   };
 }
 
+// How a write went, for the questions.generate log (timing-log.ts):
+// "ok", "invalid" (no usable output after every attempt), or the error's
+// kind. attempts counts model calls started (QUESTION_WRITE_ATTEMPTS at
+// most); httpRequests counts HTTP requests to the gateway, SDK retries
+// included, when the model reports them (0 otherwise).
+export type WriteOutcome = "ok" | "invalid" | QuestionErrorKind;
+export type WriteReport = { outcome: WriteOutcome; durationMs: number; attempts: number; httpRequests: number };
+
 export type WriteOptions = {
   // Tests pass a short deadline; the app uses QUESTION_WRITE_DEADLINE_MS.
   deadlineMs?: number;
   // "solo" for a self-learner's reading; class readings leave it out.
   audience?: PromptAudience;
+  // Called once when the write ends, with or without questions.
+  onReport?: (report: WriteReport) => void;
+  // Monotonic milliseconds for durationMs; tests pass a fake.
+  now?: () => number;
 };
 
 // Settles with the call, or rejects as soon as the signal fires, so the
@@ -184,19 +196,38 @@ async function writeValidated(
   avoid: string[],
   options: WriteOptions,
 ): Promise<string[]> {
+  const now = options.now ?? (() => performance.now());
+  const started = now();
+  let attempts = 0;
+  let httpRequests = 0;
+  const report = (outcome: WriteOutcome) =>
+    options.onReport?.({ outcome, durationMs: Math.round(now() - started), attempts, httpRequests });
   const signal = AbortSignal.timeout(options.deadlineMs ?? QUESTION_WRITE_DEADLINE_MS);
   let problem: string | undefined;
-  for (let attempt = 0; attempt < QUESTION_WRITE_ATTEMPTS; attempt++) {
-    signal.throwIfAborted();
-    const text = problem ? prompt + retryNote(problem) : prompt;
-    const response = await untilAborted(
-      model.create(buildQuestionRequest(model.model, text, options.audience), { signal }),
-      signal,
-    );
-    const parsed = parseQuestionsResponse(response, count, avoid);
-    if (parsed.ok) return parsed.questions;
-    problem = parsed.problem;
+  try {
+    for (let attempt = 0; attempt < QUESTION_WRITE_ATTEMPTS; attempt++) {
+      signal.throwIfAborted();
+      attempts++;
+      const text = problem ? prompt + retryNote(problem) : prompt;
+      const response = await untilAborted(
+        model.create(buildQuestionRequest(model.model, text, options.audience), {
+          signal,
+          onRequest: () => httpRequests++,
+        }),
+        signal,
+      );
+      const parsed = parseQuestionsResponse(response, count, avoid);
+      if (parsed.ok) {
+        report("ok");
+        return parsed.questions;
+      }
+      problem = parsed.problem;
+    }
+  } catch (error) {
+    report(questionErrorKind(error));
+    throw error;
   }
+  report("invalid");
   throw new QuestionWriterError("failed", `invalid output: ${problem}`);
 }
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LimitNotice } from "@/components/limit-notice";
@@ -20,6 +21,7 @@ import type { StudentQuestion } from "@/lib/student-questions-core";
 import { PENDING_MAX_REFRESHES, readingParagraphs, sourceHost } from "@/lib/student-reading-view";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { getPublishedReading, loadStudentReading } from "@/lib/student-readings";
+import { elapsedMs, instanceAgeMs, logPageReady, monotonicNow, pageRequestKind } from "@/lib/timing-log";
 import { MAX_TRIES } from "@/lib/validate-answers";
 import { sendChallengeAction, submitAnswersAction } from "./actions";
 import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
@@ -56,14 +58,29 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // (and EFFORT_CHECK_LIMIT checks), then a note to the teacher. A passed
 // reading shows its passing answers.
 export default async function StudentReadingPage({ params }: Props) {
+  const started = monotonicNow();
   const { readingId } = await params;
   const session = await requireStudentSession();
-  const { reading, view } = await loadStudentReading(session, readingId, {}, await requestRetryClock());
-  if (!reading) notFound();
+  const { reading, view, timing } = await loadStudentReading(session, readingId, {}, await requestRetryClock());
+  const logReady = async () =>
+    logPageReady({
+      readingId: reading?.id,
+      mode: reading?.questionMode,
+      path: "class",
+      ...timing,
+      totalMs: elapsedMs(started),
+      request: pageRequestKind(await headers()),
+      instanceAgeMs: instanceAgeMs(),
+    });
+  if (!reading) {
+    await logReady();
+    notFound();
+  }
 
   const host = sourceHost(reading.sourceUrl);
   const stage =
     view.kind === "questions" ? answerStage(await loadReadingProgress(session.student.id, reading.id)) : null;
+  await logReady();
 
   return (
     <div className="flex flex-col gap-8">

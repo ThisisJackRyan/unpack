@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
@@ -16,9 +17,18 @@ import { gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel } from "@/lib/question-modes";
 import { soloAnnouncement, soloStage, type SoloStage } from "@/lib/self-answers-core";
 import { selfQuestionsView } from "@/lib/self-questions-core";
-import { getOrCreateSelfQuestions, getSelfReading, loadSelfProgress } from "@/lib/self-readings";
+import { getSelfQuestionsTimed, getSelfReading, loadSelfProgress } from "@/lib/self-readings";
 import type { StudentQuestion } from "@/lib/student-questions-core";
 import { PENDING_MAX_REFRESHES, readingParagraphs, sourceHost } from "@/lib/student-reading-view";
+import {
+  elapsedMs,
+  instanceAgeMs,
+  logPageReady,
+  monotonicNow,
+  pageReadySource,
+  pageRequestKind,
+  type PageReadySource,
+} from "@/lib/timing-log";
 import { MAX_TRIES } from "@/lib/validate-answers";
 import { AllowanceLimit } from "../../allowance";
 import { submitSelfAnswersAction } from "./actions";
@@ -44,16 +54,36 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // the nudges and move on. No note to a teacher, no challenge. Owner only:
 // another account's reading is a 404.
 export default async function SelfReadingPage({ params }: Props) {
+  const started = monotonicNow();
   const { readingId } = await params;
   const account = await requireSelfLearner();
   const reading = await getSelfReading(account.id, readingId);
-  if (!reading) notFound();
+  const logReady = async (source: PageReadySource, questionsMs: number) =>
+    logPageReady({
+      readingId: reading?.id,
+      mode: "self",
+      path: "self",
+      source,
+      questionsMs,
+      totalMs: elapsedMs(started),
+      request: pageRequestKind(await headers()),
+      instanceAgeMs: instanceAgeMs(),
+    });
+  if (!reading) {
+    await logReady("not_found", 0);
+    notFound();
+  }
 
-  const result = await getOrCreateSelfQuestions(account.id, reading.id);
+  const { result, generated, questionsMs } = await getSelfQuestionsTimed(account.id, reading.id);
   const clock = await requestRetryClock();
   const view = selfQuestionsView(result, clock);
-  if (view.kind === "not_found") notFound();
+  const source = pageReadySource(view, "self", generated);
+  if (view.kind === "not_found") {
+    await logReady(source, questionsMs);
+    notFound();
+  }
   const stage = view.kind === "questions" ? soloStage(await loadSelfProgress(account.id, reading.id)) : null;
+  await logReady(source, questionsMs);
   const host = sourceHost(reading.sourceUrl);
 
   return (
