@@ -74,14 +74,29 @@ function isErrorLike(value: unknown): value is Error {
   );
 }
 
+const DRIZZLE_ENTITY_KIND = Symbol.for("drizzle:entityKind");
+
+// By class, or by the shape its constructor gives it: a production build
+// can bundle drizzle more than once (the instrumentation hook gets its own
+// copy), so instanceof fails, and the class name is minified.
+function isDrizzleQueryError(value: Error): boolean {
+  if (value instanceof DrizzleQueryError) return true;
+  const { query, params, message } = value as Error & { query?: unknown; params?: unknown };
+  return typeof query === "string" && Array.isArray(params) && typeof message === "string" && message.startsWith("Failed query: ");
+}
+
 // The name rule on its own, for callers that log one level by name.
 export function safeErrorName(value: unknown): string {
   if (!isErrorLike(value)) return value === null ? "null" : typeof value;
   // DrizzleQueryError never sets its name, so it would read "Error".
-  if (value instanceof DrizzleQueryError) return "DrizzleQueryError";
+  if (isDrizzleQueryError(value)) return "DrizzleQueryError";
   const own = value.name;
-  const ctor = (value as { constructor?: { name?: unknown } }).constructor?.name;
-  if (own === "Error" && typeof ctor === "string" && NAME_PATTERN.test(ctor)) return ctor;
+  const ctor = (value as unknown as { constructor?: Record<string | symbol, unknown> }).constructor;
+  // Drizzle's other errors carry their kind on the class, across copies.
+  const kind = ctor?.[DRIZZLE_ENTITY_KIND];
+  if (own === "Error" && typeof kind === "string" && NAME_PATTERN.test(kind)) return kind;
+  const ctorName = ctor?.name;
+  if (own === "Error" && typeof ctorName === "string" && NAME_PATTERN.test(ctorName)) return ctorName;
   if (typeof own === "string" && NAME_PATTERN.test(own)) return own;
   return "Error";
 }

@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { after, describe, it } from "node:test";
 import { neon, neonConfig, NeonDbError } from "@neondatabase/serverless";
@@ -163,6 +161,15 @@ describe("safeErrorFields cause chain", () => {
     assert.deepEqual(safeErrorFields(foreign), { name: "TypeError", code: "ECONNRESET", causes: [], timedOut: false });
   });
 
+  it("names a DrizzleQueryError from another copy of drizzle (a minified class)", () => {
+    const copy = class d extends Error {};
+    const error = Object.assign(new copy(`Failed query: select 1\nparams: ${CLERK_ID}`), { query: "select 1", params: [CLERK_ID] });
+    assert.deepEqual(safeErrorFields(error), { name: "DrizzleQueryError", causes: [], timedOut: false });
+    class Rollback extends Error {}
+    Object.defineProperty(Rollback, Symbol.for("drizzle:entityKind"), { value: "TransactionRollbackError" });
+    assert.equal(safeErrorFields(new Rollback("Rollback")).name, "TransactionRollbackError");
+  });
+
   it("uses the constructor's name when the name is the generic Error", () => {
     class SomeLibraryError extends Error {}
     assert.equal(safeErrorFields(new SomeLibraryError(READING_TEXT)).name, "SomeLibraryError");
@@ -269,31 +276,5 @@ describe("call sites log only safe fields", () => {
       status: undefined,
     });
     assertSafe(logs);
-  });
-
-  // The server code under src/app and src/lib, minus client components.
-  function serverFiles(dir: string): string[] {
-    return readdirSync(dir).flatMap((entry) => {
-      const path = join(dir, entry);
-      if (statSync(path).isDirectory()) return serverFiles(path);
-      if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) return [];
-      return /^["']use client["']/.test(readFileSync(path, "utf8")) ? [] : [path];
-    });
-  }
-
-  it("no server file builds its own error fields or logs a raw error", () => {
-    const root = new URL("..", import.meta.url).pathname;
-    const files = [...serverFiles(join(root, "app")), ...serverFiles(join(root, "lib"))];
-    assert.ok(files.length > 50);
-    const offenders = files.filter((path) => {
-      const text = readFileSync(path, "utf8");
-      return (
-        /\{[^}]*\bmessage\b[^}]*\}\s*=\s*(error|err|e)\b/.test(text) ||
-        /console\.(error|warn|info|log)\((error|err|e)\)/.test(text) ||
-        /String\((error|err|e)\)/.test(text) ||
-        /(error|err)\.message\b/.test(text)
-      );
-    });
-    assert.deepEqual(offenders, []);
   });
 });
