@@ -31,3 +31,24 @@ describe("the trimmed note on the teacher's edit form", () => {
     assert.match(read("components/trimmed-note.tsx"), /<p\s+id=\{id\}\s+role="note"/);
   });
 });
+
+describe("the trimmed note's text and where it shows", () => {
+  test("it says what happened and what to do for a different part", () => {
+    assert.match(
+      read("components/trimmed-note.tsx"),
+      /"This article was long, so we kept the first part\. To use a different part, paste that section as text instead\."/,
+    );
+  });
+
+  test("the teacher's reading page and the self-learner's reading page show it, from the flag", () => {
+    assert.match(read("app/teacher/classes/[id]/readings/[readingId]/page.tsx"), /\{reading\.bodyTrimmed && <TrimmedNote \/>\}/);
+    assert.match(read("app/learn/r/[readingId]/page.tsx"), /\{reading\.bodyTrimmed && <TrimmedNote className="mb-6" \/>\}/);
+  });
+
+  test("class students never see it", () => {
+    const page = read("app/c/r/[readingId]/page.tsx");
+    assert.equal(page.includes("TrimmedNote"), false);
+    assert.equal(page.includes("bodyTrimmed"), false);
+    assert.equal(page.includes("TRIMMED_NOTE_MESSAGE"), false);
+  });
+});

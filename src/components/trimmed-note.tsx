@@ -1,8 +1,10 @@
-export const TRIMMED_NOTE_MESSAGE = "This article was long, so we kept the first part.";
+// What happened, and what to do for a different part.
+export const TRIMMED_NOTE_MESSAGE =
+  "This article was long, so we kept the first part. To use a different part, paste that section as text instead.";
 
 // Above the text of a linked article that was cut to the length limit
 // (readings.body_trimmed). A heads-up, not an error: soft amber (never
-// red), one line, not dismissible. role="note", so a screen reader reads
+// red), short, not dismissible. role="note", so a screen reader reads
 // it with the text instead of announcing it; the icon is decorative. The
 // id lets a text box point at it (aria-describedby).
 export function TrimmedNote({ id, className = "" }: { id?: string; className?: string }) {
