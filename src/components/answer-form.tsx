@@ -57,10 +57,11 @@ function prefill(questions: StudentQuestion[], previous: AttemptView | null): Re
 // Every question with an answer box, and one button that checks them all.
 // The form submits through a transition (not the form action prop), so
 // React doesn't reset the boxes after a check. A check request that fails
-// outright shows a message here, not the page's error boundary (see
+// outright, or doesn't answer within CLIENT_CHECK_TIMEOUT_MS, shows a
+// message here, not the page's error boundary or an endless spinner (see
 // withCheckFallback).
 export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous, drafts }: Props) {
-  const [state, dispatch, pending] = useActionState(withCheckFallback(action, unstable_rethrow), initialState);
+  const [result, dispatch, pending] = useActionState(withCheckFallback(action, unstable_rethrow), initialState);
   const [values, setValues] = useState(() => prefill(questions, previous));
   // A new try (the page re-renders after a check): start from its answers.
   const [shownTry, setShownTry] = useState(tryNumber);
@@ -68,6 +69,11 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     setShownTry(tryNumber);
     setValues(prefill(questions, previous));
   }
+  // The try the last submit was for. A check that landed after the form
+  // stopped waiting re-renders the page with a new try: the old submit's
+  // message ("We couldn't hear back") no longer applies.
+  const [submittedTry, setSubmittedTry] = useState(tryNumber);
+  const state = submittedTry === tryNumber ? result : initialState;
   const errors = state.errors ?? {};
   const { mode, readingId, ownerId } = drafts;
   const locked = lockedQuestionIds(previous);
@@ -98,6 +104,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     // A pass swaps this form for the result in place: the celebration
     // takes this mark and scrolls into view.
     markJustChecked(browserSessionStore(), readingId);
+    setSubmittedTry(tryNumber);
     startTransition(() => dispatch(data));
   }
 
