@@ -15,9 +15,11 @@ import {
   writeQuestionSet,
   writeReplacementQuestion,
   type QuestionModel,
+  type WriteReport,
 } from "./questions";
 import { QUESTION_EFFORT, QUESTION_MAX_TOKENS, QUESTION_WRITE_DEADLINE_MS } from "./settings";
 import { gatewayErrors, retried } from "./test-fixtures";
+import { questionsGenerateReporter } from "../timing-log";
 
 const BODY = "Mia found a fox in the snow. ".repeat(20);
 
@@ -457,6 +459,125 @@ describe("questionErrorKind", () => {
       status: 500,
       type: "response_error",
       causeName: "TimeoutError",
+    });
+  });
+});
+
+describe("write report (the questions.generate log)", () => {
+  const input = { bodyText: BODY, gradeLevel: "4" as const, count: 3 };
+
+  // A fake clock: each read moves 250ms on.
+  function steppingClock() {
+    let t = 1_000;
+    return () => (t += 250);
+  }
+
+  function collect() {
+    const reports: WriteReport[] = [];
+    return { reports, options: { onReport: (r: WriteReport) => reports.push(r), now: steppingClock() } };
+  }
+
+  it("ok on the first attempt: one report, one attempt, the clock's duration", async () => {
+    const { model } = fakeModel([message([toolUse({ questions: THREE })])]);
+    const { reports, options } = collect();
+    await writeQuestionSet(model, input, options);
+    assert.deepEqual(reports, [{ outcome: "ok", durationMs: 250, attempts: 1, httpRequests: 0 }]);
+  });
+
+  it("ok after invalid output: two attempts", async () => {
+    const { model } = fakeModel([message([]), message([toolUse({ questions: THREE })])]);
+    const { reports, options } = collect();
+    await writeQuestionSet(model, input, options);
+    assert.deepEqual(reports, [{ outcome: "ok", durationMs: 250, attempts: 2, httpRequests: 0 }]);
+  });
+
+  it("invalid output twice: invalid, two attempts, and the write still throws", async () => {
+    const { model } = fakeModel([message([]), message([toolUse({ questions: ["One?"] })])]);
+    const { reports, options } = collect();
+    await assert.rejects(writeQuestionSet(model, input, options), QuestionWriterError);
+    assert.deepEqual(reports, [{ outcome: "invalid", durationMs: 250, attempts: 2, httpRequests: 0 }]);
+  });
+
+  it("a gateway error: its kind, one attempt", async () => {
+    const { model } = fakeModel([retried(gatewayErrors.rateLimited())]);
+    const { reports, options } = collect();
+    await assert.rejects(writeReplacementQuestion(model, { ...input, position: 1, current: THREE }, options));
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].outcome, "busy");
+    assert.equal(reports[0].attempts, 1);
+  });
+
+  it("counts the HTTP requests a model reports", async () => {
+    const model: QuestionModel = {
+      model: "claude-sonnet-5-5",
+      create: async (_params, { onRequest }) => {
+        onRequest?.();
+        onRequest?.();
+        return message([toolUse({ questions: THREE })]);
+      },
+    };
+    const { reports, options } = collect();
+    await writeQuestionSet(model, input, options);
+    assert.equal(reports[0].httpRequests, 2);
+  });
+
+  it("a throwing reporter doesn't fail a good write or report it twice", async () => {
+    const { model } = fakeModel([message([toolUse({ questions: THREE })])]);
+    const outcomes: string[] = [];
+    const onReport = (r: WriteReport) => {
+      outcomes.push(r.outcome);
+      throw new Error("reporter broke");
+    };
+    assert.deepEqual(await writeQuestionSet(model, input, { onReport }), THREE);
+    assert.deepEqual(outcomes, ["ok"]);
+  });
+
+  it("a throwing reporter doesn't replace the write's own error", async () => {
+    const { model } = fakeModel([retried(gatewayErrors.rateLimited())]);
+    const outcomes: string[] = [];
+    const onReport = (r: WriteReport) => {
+      outcomes.push(r.outcome);
+      throw new Error("reporter broke");
+    };
+    await assert.rejects(writeQuestionSet(model, input, { onReport }), (error) => questionErrorKind(error) === "busy");
+    assert.deepEqual(outcomes, ["busy"]);
+  });
+
+  it("the real reporter's line never carries an error's text, only the allowed keys", async () => {
+    const { model } = fakeModel([new Error(`upstream echoed the request: ${BODY}`)]);
+    const lines: string[] = [];
+    const onReport = questionsGenerateReporter(
+      { readingId: "6f1c2a52-3c0e-4b8e-9b7a-2f0d1e4c5a6b", mode: "per_student" },
+      (line) => lines.push(line),
+    );
+    await assert.rejects(writeQuestionSet(model, input, { onReport, now: steppingClock() }));
+    assert.equal(lines.length, 1);
+    assert.ok(!lines[0].includes("Mia found a fox"));
+    assert.deepEqual(Object.keys(JSON.parse(lines[0])).sort(), [
+      "attempts",
+      "durationMs",
+      "event",
+      "mode",
+      "outcome",
+      "readingId",
+    ]);
+  });
+
+  describe("timeout", () => {
+    let keepAlive: ReturnType<typeof setInterval>;
+    beforeEach(() => {
+      keepAlive = setInterval(() => {}, 1_000);
+    });
+    afterEach(() => clearInterval(keepAlive));
+
+    it("the deadline: timeout, reported once", async () => {
+      const { model } = hangingModel();
+      const reports: WriteReport[] = [];
+      await assert.rejects(writeQuestionSet(model, input, { deadlineMs: 20, onReport: (r) => reports.push(r) }));
+      assert.equal(reports.length, 1);
+      assert.equal(reports[0].outcome, "timeout");
+      assert.equal(reports[0].attempts, 1);
+      assert.ok(reports[0].durationMs >= 15);
     });
   });
 });

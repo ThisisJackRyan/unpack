@@ -6,6 +6,7 @@ import { getQuestionModel, isQuestionWritingConfigured } from "./ai/client";
 import { writeQuestionSet } from "./ai/questions";
 import { logModelError } from "./ai/errors";
 import { isUuid } from "./classes";
+import { questionsGenerateReporter } from "./timing-log";
 import type { GradeLevel } from "./grade-levels";
 import { dateFromRow } from "./local-time";
 import {
@@ -88,26 +89,33 @@ export function postgresStudentQuestionStore(
 // Reports each reply the model sends, so the throttle counts a write only
 // if the model answered (see failureCounts). getQuestionModel throws
 // before any call without AI Gateway credentials, so that never counts.
-const modelWriter: StudentQuestionWriter = (context, hooks) => {
-  const model = getQuestionModel();
-  return writeQuestionSet(
-    {
-      model: model.model,
-      create: async (params, options) => {
-        const reply = await model.create(params, options);
-        hooks.onModelResponse();
-        return reply;
+// Each write logs questions.generate (timing-log.ts).
+function modelWriter(readingId: string): StudentQuestionWriter {
+  return (context, hooks) => {
+    const model = getQuestionModel();
+    return writeQuestionSet(
+      {
+        model: model.model,
+        create: async (params, options) => {
+          const reply = await model.create(params, options);
+          hooks.onModelResponse();
+          return reply;
+        },
       },
-    },
-    { bodyText: context.bodyText, gradeLevel: context.gradeLevel, count: context.questionCount },
-  );
-};
+      { bodyText: context.bodyText, gradeLevel: context.gradeLevel, count: context.questionCount },
+      { onReport: questionsGenerateReporter({ readingId, mode: "per_student" }) },
+    );
+  };
+}
 
 export type GetStudentQuestionsOptions = {
   // For scripts/check-student-questions.ts: a mock model, so the check
   // never calls the model. The app passes nothing.
   write?: StudentQuestionWriter;
   store?: StudentQuestionStore;
+  // Called when this request starts writing the set (for the
+  // questions.page_ready log's "generated").
+  onWrite?: () => void;
 };
 
 // Returns the student's cached set, or writes and caches it once. See
@@ -122,9 +130,13 @@ export async function getOrCreateStudentQuestions(
   options: GetStudentQuestionsOptions = {},
 ): Promise<StudentQuestionsResult> {
   if (!isUuid(readingId) || !isUuid(studentId)) return { status: "not_found" };
+  const write = options.write ?? modelWriter(readingId);
   return getOrCreateStudentQuestionsWith(readingId, studentId, {
     store: options.store ?? postgresStudentQuestionStore(),
-    write: options.write ?? modelWriter,
+    write: (context, hooks) => {
+      options.onWrite?.();
+      return write(context, hooks);
+    },
     newToken: randomUUID,
     // An injected writer (the DB checks) needs no key.
     configured: options.write ? true : isQuestionWritingConfigured(),

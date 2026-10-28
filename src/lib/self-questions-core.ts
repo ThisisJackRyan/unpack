@@ -44,7 +44,7 @@
 // allowance. No free slot: "limit_reached", and the page shows when the
 // next one frees up.
 
-import type { QuestionErrorKind, QuestionModel } from "./ai/questions";
+import type { QuestionErrorKind, QuestionModel, WriteReport } from "./ai/questions";
 import { questionErrorKind, questionErrorLogFields, writeQuestionSet } from "./ai/questions";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
@@ -100,12 +100,16 @@ export type SelfQuestionWriter = (context: SelfReadingContext) => Promise<string
 // The model writer: the reading's level and count, with the solo system
 // prompt (the reader chose the reading; no teacher or students). getModel
 // runs per write, so the app reads its config only when it writes.
-export function selfQuestionWriter(getModel: () => QuestionModel): SelfQuestionWriter {
+// onReport gets the write's report (the questions.generate log).
+export function selfQuestionWriter(
+  getModel: () => QuestionModel,
+  onReport?: (report: WriteReport) => void,
+): SelfQuestionWriter {
   return (context) =>
     writeQuestionSet(
       getModel(),
       { bodyText: context.bodyText, gradeLevel: context.gradeLevel, count: context.questionCount },
-      { audience: "solo" },
+      { audience: "solo", onReport },
     );
 }
 

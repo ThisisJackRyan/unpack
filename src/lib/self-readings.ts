@@ -35,6 +35,7 @@ import {
   type SelfQuestionsResult,
 } from "./self-questions-core";
 import { submitAnswersWith, type EffortChecker, type SubmitResult } from "./submit-answers-core";
+import { elapsedMs, monotonicNow, questionsGenerateReporter, type Clock } from "./timing-log";
 import type { AnswerEntry } from "./validate-answers";
 
 // Server-only: the self-learner flow against Postgres. Every function takes
@@ -105,8 +106,10 @@ from self_readings where id = $2::uuid and account_id = $1::uuid`,
 }
 
 // The real writer: the configured model, at the reading's level and count,
-// with the solo prompt.
-const modelWriter = selfQuestionWriter(getQuestionModel);
+// with the solo prompt. Each write logs questions.generate (timing-log.ts).
+function modelWriter(readingId: string): SelfQuestionWriter {
+  return selfQuestionWriter(getQuestionModel, questionsGenerateReporter({ readingId, mode: "self" }));
+}
 
 export type SelfOptions = {
   // For scripts/check-self-learner.ts: fakes, so the check never calls
@@ -116,6 +119,9 @@ export type SelfOptions = {
   execute?: StatementExecutor;
   // The answer action's pre-check deadline (see answer-check-guard.ts).
   preCheck?: AbortSignal;
+  // Called when this request starts writing the set (for the
+  // questions.page_ready log's "generated").
+  onWrite?: () => void;
 };
 
 export async function getOrCreateSelfQuestions(
@@ -124,13 +130,31 @@ export async function getOrCreateSelfQuestions(
   options: SelfOptions = {},
 ): Promise<SelfQuestionsResult> {
   if (!isUuid(readingId)) return { status: "not_found" };
+  const write = options.write ?? modelWriter(readingId);
   return getOrCreateSelfQuestionsWith(accountId, readingId, {
     store: postgresSelfQuestionStore(options.execute ?? neonExecutor),
-    write: options.write ?? modelWriter,
+    write: (context) => {
+      options.onWrite?.();
+      return write(context);
+    },
     newToken: randomUUID,
     configured: options.write ? true : isQuestionWritingConfigured(),
     onError: (fields) => logModelError("getOrCreateSelfQuestions: write failed", { ...fields, readingId }),
   });
+}
+
+// getOrCreateSelfQuestions for the reading page, with what the
+// questions.page_ready log needs: whether this request wrote the set, and
+// how long resolving the questions took.
+export async function getSelfQuestionsTimed(
+  accountId: string,
+  readingId: string,
+  now: Clock = monotonicNow,
+): Promise<{ result: SelfQuestionsResult; generated: boolean; questionsMs: number }> {
+  const started = now();
+  let generated = false;
+  const result = await getOrCreateSelfQuestions(accountId, readingId, { onWrite: () => (generated = true) });
+  return { result, generated, questionsMs: elapsedMs(started, now) };
 }
 
 const modelChecker = selfEffortChecker(getEffortCheckModel);
