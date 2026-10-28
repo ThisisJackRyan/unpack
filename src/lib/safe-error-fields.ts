@@ -8,18 +8,23 @@
 // - name: the error's name (or its constructor's, when the name is the
 //   generic "Error"), or the value's type for a non-Error. Identifier-like
 //   names only.
-// - code: a short uppercase code (a SQLSTATE like "23505" or "57P01", a
-//   Node code like "ETIMEDOUT" or "UND_ERR_SOCKET") or a finite integer
-//   (an HTTP status), when there is one. Anything else (lowercase, mixed
-//   case, an id-shaped value) is dropped.
+// - code: a SQLSTATE, a Node or undici code, or a small integer (see
+//   isSafeCode). Anything else (lowercase, mixed case, a phone number,
+//   an id- or key-shaped value) is dropped.
 // - causes: name and code of each error under it, nearest first, through
 //   `cause` (drizzle, the AI SDK, fetch) or `sourceError` (Neon), at most
 //   MAX_CAUSES deep, and cycle safe.
 // - timedOut: true when any level is an abort or a timeout.
-// - message: only for the app's own errors in MESSAGE_ALLOWED, whose
-//   messages are fixed strings with no user input.
+// - message: only for the app's own errors in MESSAGE_ALLOWED, and only
+//   when the message is exactly one of FIXED_ERROR_MESSAGES.
 // Never SQL, params, detail, hint, where, stacks, or the error stringified.
 // Callers add their own ids (classId, readingId: app uuids).
+//
+// It never throws: callers log from catch blocks, and Next logs from its
+// own error handling. A getter or proxy trap that throws (on name, code,
+// cause, a revoked Proxy) gives that level the name UNLOGGABLE_NAME, and
+// anything worse gives the minimal record { name: UNLOGGABLE_NAME,
+// causes: [], timedOut: false }.
 
 import { DrizzleQueryError } from "drizzle-orm";
 import { DbReadTimeoutError } from "../db/read-timeout";
@@ -38,9 +43,39 @@ export type SafeErrorFields = SafeErrorLevel & {
 
 export const MAX_CAUSES = 4;
 
-// Messages built only from fixed text and enums. QuestionWriterError and
-// EffortCheckError are left out: their reason can quote a schema problem
-// in the model's output.
+// The name of a value whose getters or proxy traps threw while it was
+// being read.
+export const UNLOGGABLE_NAME = "UnloggableError";
+
+// The only error messages a log may print: fixed text with no user
+// input, matched exactly (never by prefix or pattern), here and in
+// safe-console.ts's error lines. Each is spelled out, so a change to a
+// class's message drops it from the logs until it is listed here.
+export const FIXED_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // A missing AI Gateway key.
+  "AI_GATEWAY_API_KEY is not set",
+  // DeadlineError (deadline.ts).
+  "pre-check deadline passed",
+  // DbReadTimeoutError (db/read-timeout.ts).
+  "database read timed out",
+  // JoinCodeExhaustedError (join-code.ts, MAX_ATTEMPTS 5).
+  "Could not generate a unique join code in 5 attempts",
+  // ClerkUserNoEmailError (clerk-user-errors.ts).
+  "Clerk user has no email address",
+  // FetchArticleError (fetch-errors.ts): one per FetchArticleErrorKind.
+  "fetch article failed: invalid_url",
+  "fetch article failed: blocked",
+  "fetch article failed: timeout",
+  "fetch article failed: too_large",
+  "fetch article failed: not_html",
+  "fetch article failed: http_error",
+  "fetch article failed: extract_failed",
+  "fetch article failed: too_long",
+]);
+
+// The classes whose message safeErrorFields keeps, when it is one of
+// FIXED_ERROR_MESSAGES. QuestionWriterError and EffortCheckError are left
+// out: their reason can quote a schema problem in the model's output.
 const MESSAGE_ALLOWED = [
   DeadlineError,
   DbReadTimeoutError,
@@ -50,7 +85,36 @@ const MESSAGE_ALLOWED = [
 ];
 
 const NAME_PATTERN = /^[A-Za-z_$][\w$.]{0,79}$/;
-const CODE_PATTERN = /^[A-Z0-9_]{1,40}$/;
+// The code rule. A code is kept when it is:
+// - an integer from 0 to 9999 (an HTTP status, an exit code), never a
+//   longer number such as a phone number;
+// - a SQLSTATE: exactly five digits or uppercase letters ("23505",
+//   "57014", "40P01", "22P02");
+// - or a named code under 40 characters ("ECONNRESET",
+//   "UND_ERR_CONNECT_TIMEOUT", "ERR_HTTP2_STREAM_ERROR"): words of
+//   uppercase letters joined by underscores, the first starting with a
+//   letter. Digits only at a word's end (after its letters) or as a whole
+//   word, at most MAX_CODE_DIGITS of them, and no word longer than
+//   MAX_CODE_WORD letters. That drops a key or token: a digit between
+//   letters ("AKIAIOSFODNN7EXAMPLE"), a long run of letters, or many
+//   digits. An AWS key id prefix (AKIA, ASIA) on anything long is
+//   dropped too.
+const MAX_CODE_INTEGER = 9999;
+const MAX_CODE_LENGTH = 39;
+const MAX_CODE_DIGITS = 4;
+const MAX_CODE_WORD = 20;
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+const NAMED_CODE_PATTERN = /^[A-Z]+[0-9]*(_([A-Z]+[0-9]*|[0-9]+))*$/;
+const KEY_ID_PATTERN = /^(AKIA|ASIA)[A-Z0-9]{12,}$/;
+
+export function isSafeCode(code: unknown): code is string | number {
+  if (typeof code === "number") return Number.isInteger(code) && code >= 0 && code <= MAX_CODE_INTEGER;
+  if (typeof code !== "string") return false;
+  if (SQLSTATE_PATTERN.test(code)) return true;
+  if (code.length > MAX_CODE_LENGTH || !NAMED_CODE_PATTERN.test(code) || KEY_ID_PATTERN.test(code)) return false;
+  if ((code.match(/[0-9]/g)?.length ?? 0) > MAX_CODE_DIGITS) return false;
+  return code.split("_").every((word) => word.replace(/[0-9]+$/, "").length <= MAX_CODE_WORD);
+}
 
 const TIMEOUT_NAMES = new Set([
   "AbortError",
@@ -96,6 +160,14 @@ function isDrizzleQueryError(value: Error): boolean {
 
 // The name rule on its own, for callers that log one level by name.
 export function safeErrorName(value: unknown): string {
+  try {
+    return nameOf(value);
+  } catch {
+    return UNLOGGABLE_NAME;
+  }
+}
+
+function nameOf(value: unknown): string {
   if (!isErrorLike(value)) return value === null ? "null" : typeof value;
   // DrizzleQueryError never sets its name, so it would read "Error".
   if (isDrizzleQueryError(value)) return "DrizzleQueryError";
@@ -112,9 +184,12 @@ export function safeErrorName(value: unknown): string {
 
 function codeOf(value: unknown): string | number | undefined {
   if (value === null || typeof value !== "object") return undefined;
-  const { code } = value as { code?: unknown };
-  if (typeof code === "number" && Number.isInteger(code)) return code;
-  if (typeof code === "string" && CODE_PATTERN.test(code)) return code;
+  try {
+    const { code } = value as { code?: unknown };
+    if (isSafeCode(code)) return code;
+  } catch {
+    // A throwing getter or trap: no code.
+  }
   return undefined;
 }
 
@@ -126,29 +201,54 @@ function levelOf(value: unknown): SafeErrorLevel {
 function isTimeout(value: unknown, level: SafeErrorLevel): boolean {
   if (TIMEOUT_NAMES.has(level.name)) return true;
   if (level.code !== undefined && TIMEOUT_CODES.has(level.code)) return true;
-  return value instanceof FetchArticleError && value.kind === "timeout";
+  try {
+    return value instanceof FetchArticleError && value.kind === "timeout";
+  } catch {
+    return false;
+  }
 }
 
 function nextOf(value: unknown): unknown {
   if (value === null || typeof value !== "object") return undefined;
-  const { cause, sourceError } = value as { cause?: unknown; sourceError?: unknown };
-  return cause ?? sourceError;
+  try {
+    const { cause, sourceError } = value as { cause?: unknown; sourceError?: unknown };
+    return cause ?? sourceError;
+  } catch {
+    // A throwing getter or trap: the chain ends here.
+    return undefined;
+  }
+}
+
+// An allow-listed message, or none (also when reading it throws).
+function allowedMessage(error: unknown): string | undefined {
+  try {
+    if (!MESSAGE_ALLOWED.some((allowed) => error instanceof allowed)) return undefined;
+    const { message } = error as Error;
+    return typeof message === "string" && FIXED_ERROR_MESSAGES.has(message) ? message : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function safeErrorFields(error: unknown): SafeErrorFields {
-  const top = levelOf(error);
-  let timedOut = isTimeout(error, top);
-  const causes: SafeErrorLevel[] = [];
-  const seen = new Set<unknown>([error]);
-  let current = nextOf(error);
-  while (current != null && causes.length < MAX_CAUSES && !seen.has(current)) {
-    seen.add(current);
-    const level = levelOf(current);
-    causes.push(level);
-    timedOut ||= isTimeout(current, level);
-    current = nextOf(current);
+  try {
+    const top = levelOf(error);
+    let timedOut = isTimeout(error, top);
+    const causes: SafeErrorLevel[] = [];
+    const seen = new Set<unknown>([error]);
+    let current = nextOf(error);
+    while (current != null && causes.length < MAX_CAUSES && !seen.has(current)) {
+      seen.add(current);
+      const level = levelOf(current);
+      causes.push(level);
+      timedOut ||= isTimeout(current, level);
+      current = nextOf(current);
+    }
+    const fields: SafeErrorFields = { ...top, causes, timedOut };
+    const message = allowedMessage(error);
+    if (message !== undefined) fields.message = message;
+    return fields;
+  } catch {
+    return { name: UNLOGGABLE_NAME, causes: [], timedOut: false };
   }
-  const fields: SafeErrorFields = { ...top, causes, timedOut };
-  if (MESSAGE_ALLOWED.some((allowed) => error instanceof allowed)) fields.message = (error as Error).message;
-  return fields;
 }

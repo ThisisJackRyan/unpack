@@ -11,7 +11,7 @@ Setup, checks, migrations, ops scripts and deploys for unpack. For what the prod
 
 ## Local development
 
-Requires Node.js and [pnpm](https://pnpm.io).
+Requires Node.js 22.18 or later (`engines` in `package.json`; `pnpm check:uncaught-error-logs` runs a TypeScript file with plain `node`, which needs it) and [pnpm](https://pnpm.io).
 
 ```bash
 pnpm install   # install dependencies

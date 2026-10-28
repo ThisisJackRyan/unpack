@@ -10,7 +10,7 @@
 
 ---
 
-Assigning a reading is easy. Knowing whether anyone actually read it is not. Quizzes get skimmed, summaries get copied, and "did you do the reading?" gets a nod.
+Assigning a reading is easy. Knowing whether anyone actually read it is not. Quizzes get skimmed, and “did you do the reading?” gets a nod.
 
 unpack fixes that. Students read the text, then answer a few questions written for that exact passage. They only move on once they've genuinely tried.
 

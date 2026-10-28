@@ -70,7 +70,7 @@ export const teachers = pgTable(
     // backfilled to teacher.
     role: accountRoleEnum("role"),
     // When the account confirmed it is 13 or older, the first time it chose
-    // self-learner. No birthdate is ever asked for or stored.
+    // self-learner. The birth month and year are asked but never stored.
     ageConfirmedAt: timestamp("age_confirmed_at", { withTimezone: true }),
   },
   (t) => [

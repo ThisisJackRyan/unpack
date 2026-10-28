@@ -92,6 +92,11 @@ import {
   type QuestionErrorKind,
 } from "./ai/questions";
 import { QUESTION_WRITE_DEADLINE_MS } from "./ai/settings";
+import {
+  STUDENT_GENERATION_CALL_LIMIT,
+  STUDENT_GENERATION_WINDOW_LIMIT,
+  STUDENT_GENERATION_WINDOW_MINUTES,
+} from "./student-generation-limits";
 
 // Longer than the most a winner's model call can take (the write deadline
 // ends it, attempts, retries, and backoff included), plus 30s for the
@@ -109,14 +114,9 @@ export const STUDENT_SETS_RAISED_LIMIT = 300;
 // What the student reading page shows on "limit_reached".
 export const STUDENT_SETS_LIMITED_MESSAGE = "Ask your teacher for help with this one.";
 
-// The "Try again" throttle (see the top of this file). A set normally
-// takes 1 call (the SDK's own retries happen inside it), so 3 calls in 10
-// minutes is room for two failures in a row (given back or not), and 6
-// answered calls in all bound what one student can cost on one reading
-// however long the model keeps failing.
-export const STUDENT_GENERATION_WINDOW_LIMIT = 3;
-export const STUDENT_GENERATION_WINDOW_MINUTES = 10;
-export const STUDENT_GENERATION_CALL_LIMIT = 6;
+// The "Try again" throttle (see the top of this file), in
+// student-generation-limits.ts.
+export { STUDENT_GENERATION_CALL_LIMIT, STUDENT_GENERATION_WINDOW_LIMIT, STUDENT_GENERATION_WINDOW_MINUTES };
 
 // What the student reading page shows on "throttled" (an amber note),
 // then when the next call frees up (throttledUntilStatement and
@@ -232,7 +232,7 @@ export type StudentQuestionDeps = {
   // the model.
   configured?: boolean;
   // Logs safe fields only (never the text, prompts, or names).
-  onError?: (fields: Record<string, unknown>) => void;
+  onErrorFields?: (fields: Record<string, unknown>) => void;
 };
 
 // Whether a failed write counts toward the lifetime "Try again" limit
@@ -305,7 +305,7 @@ export async function getOrCreateStudentQuestionsWith(
   } catch (error) {
     const kind = questionErrorKind(error);
     const counted = failureCounts(error, modelResponded);
-    deps.onError?.({ ...questionErrorLogFields(error), counted });
+    deps.onErrorFields?.({ ...questionErrorLogFields(error), counted });
     await store.release(readingId, studentId, token, !counted);
     return { status: "error", kind, message: QUESTION_ERROR_MESSAGES[kind] };
   }

@@ -10,7 +10,7 @@
 // a missing session still goes to sign-in. Like withCheckFallback
 // (answer-form-state.ts), minus the time limit.
 
-import { isAppUpdatedError } from "./answer-form-state";
+import { isAppUpdatedError, rejectionLogFields } from "./answer-form-state";
 
 // app_updated: the server no longer has this action (APP_UPDATED_MESSAGE
 // fits). no_reply: anything else; whether the server did the work is
@@ -31,14 +31,11 @@ export function withRejectionFallback<S>(
       return await action(state, formData);
     } catch (error) {
       rethrow(error);
-      // The kind and the error's name only: never the form data, the
-      // error's message, or its stack. This runs in the browser, where
-      // safe-error-fields.ts (server only: drizzle, node:crypto) isn't
-      // bundled.
-      console.error("form action rejected", {
-        kind: rejectionKind(error),
-        name: error instanceof Error ? error.name : typeof error,
-      });
+      // The kind and the error's name only (rejectionLogFields): never the
+      // form data, the error's message, or its stack. This runs in the
+      // browser, where safe-error-fields.ts (server only: drizzle,
+      // node:crypto) isn't bundled.
+      console.error("form action rejected", rejectionLogFields(error));
       return fallback(rejectionKind(error), formData, state);
     }
   };

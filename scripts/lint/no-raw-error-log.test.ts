@@ -26,6 +26,33 @@ tester.run("no-raw-error-log", rule, {
     `try { f(); } catch (e) { const { kind } = e; console.error(kind); }`,
     // Not a caught error: a parameter (the runtime wrapper covers these).
     `function onError(error) { console.error(error); }`,
+    // Promise handlers and callbacks, through the safe helper.
+    `p.catch((e) => console.error("x", safeErrorFields(e)));`,
+    `p.then((value) => console.log(value), (err) => logError("x", safeErrorFields(err)));`,
+    `p.then((value) => console.log(value));`,
+    `run({ onError: (error) => console.error("x", safeErrorFields(error)) });`,
+    `run({ onFailure(error) { console.error("x", { kind: error.kind }); } });`,
+    // A producer that passes safe fields names its callback so.
+    `run({ onErrorFields: (fields) => logModelError("x", { ...fields, readingId }) });`,
+    `run({ onFailureFields: (fields) => console.error("x", fields) });`,
+    `run({ "onErrorFields": (e) => console.error("x", e) });`,
+    { code: `<Check onFailureFields={(f) => console.error(f)} />`, languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } } },
+    // Not a callback key.
+    `run({ [onError]: (e) => console.error(e) });`,
+    `process.on("uncaughtException", (err) => console.error("x", safeErrorFields(err)));`,
+    `emitter.on("data", (chunk) => console.log(chunk));`,
+    // A local helper that makes it safe, or reads a safe field.
+    `function fields(error) { return { ...safeErrorFields(error), status: statusOf(error) }; }
+     function statusOf(error) { const { status } = error ?? {}; return typeof status === "number" ? status : undefined; }
+     try { f(); } catch (e) { console.error("x", fields(e)); }`,
+    `const kindOf = (error) => error.kind; try { f(); } catch (e) { console.error(kindOf(e)); }`,
+    // Returned, then only a safe field read from the result.
+    `function attempt() { try { return { ok: true }; } catch (e) { return { ok: false, error: e }; } }
+     const r = attempt(); console.error("x", { ok: r.ok, status: r.error?.status, fields: safeErrorFields(r.error) });`,
+    // An aliased console with a safe value, and a write of fixed text.
+    `const log = console.error; try { f(); } catch (e) { log("x", safeErrorFields(e)); }`,
+    `try { f(); } catch (e) { process.stderr.write("failed\\n"); }`,
+    `try { f(); } catch (e) { throw new Error("wrapped", { cause: e }); }`,
   ],
   invalid: [
     { code: `try { f(); } catch (e) { console.error(e); }`, errors: raw() },
@@ -62,6 +89,63 @@ tester.run("no-raw-error-log", rule, {
     { code: `try { f(); } catch (e) { setTimeout(() => console.error(e)); }`, errors: raw() },
     // Two separate leaks, two reports.
     { code: `try { f(); } catch (e) { console.error(e); console.warn(e.message); }`, errors: raw(2) },
+    // Promise rejection handlers.
+    { code: `p.catch((e) => console.error(e));`, errors: raw() },
+    { code: `p.catch(function (reason) { console.warn("x", reason.message); });`, errors: raw() },
+    { code: `p.then(undefined, (err) => console.error("x", { err }));`, errors: raw() },
+    { code: `p.then(ok, (err) => logError("x", String(err)));`, errors: raw() },
+    { code: `const r = await p.catch((e) => e); console.error(r);`, errors: raw() },
+    // onError and onFailure callbacks, as properties, methods, and JSX.
+    { code: `run({ onError: (error) => console.error("x", error) });`, errors: raw() },
+    { code: `run({ onFailure(e) { console.error(e.stack); } });`, errors: raw() },
+    { code: `run({ onError: (fields, extra) => console.error(fields), onFailure: (cause) => console.error(cause) });`, errors: raw(2) },
+    // Whatever the parameter is called: the producer decides what it gets.
+    { code: `run({ onError: (fields) => console.error("x", fields) });`, errors: raw() },
+    { code: `run({ onFailure: (errFields) => console.error("x", errFields) });`, errors: raw() },
+    { code: `run({ onError: (fields) => logModelError("x", { ...fields, readingId }) });`, errors: raw() },
+    // Quoted and computed literal keys.
+    { code: `run({ "onError": (e) => console.error(e) });`, errors: raw() },
+    { code: `run({ 'onFailure': function (e) { console.warn(e.message); } });`, errors: raw() },
+    { code: `run({ ["onError"]: (e) => console.error(e) });`, errors: raw() },
+    { code: "run({ [`onFailure`]: (e) => console.error(e) });", errors: raw() },
+    { code: `<Script onError={(e) => console.error(e)} />`, errors: raw(), languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } } },
+    // Error event listeners.
+    { code: `process.on("unhandledRejection", (reason) => console.error(reason));`, errors: raw() },
+    { code: `window.addEventListener("error", (event) => console.error(event));`, errors: raw() },
+    // Closures and local helpers.
+    { code: `try { f(); } catch (e) { const get = () => e; console.error(get()); }`, errors: raw() },
+    { code: `function same(x) { return x; } try { f(); } catch (e) { console.error(same(e)); }`, errors: raw() },
+    { code: `const same = (x) => x; try { f(); } catch (e) { console.error("x", { error: same(e) }); }`, errors: raw() },
+    { code: `function report(err) { console.error("failed", err); } try { f(); } catch (e) { report(e); }`, errors: raw() },
+    { code: `const report = (where, err) => console.error(where, err.message); try { f(); } catch (e) { report("x", e); }`, errors: raw() },
+    {
+      code: `function outer(err) { return inner(err); } function inner(x) { return { x }; } try { f(); } catch (e) { console.error(outer(e)); }`,
+      errors: raw(),
+    },
+    { code: `function attempt() { try { g(); } catch (e) { return e; } } console.error(attempt());`, errors: raw() },
+    { code: `try { f(); } catch (e) { setTimeout(() => { const m = e.message; console.error(m); }); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { console.error(({ e }).e); }`, errors: raw() },
+    // Aliased console and stdio sinks.
+    { code: `const log = console.error; try { f(); } catch (e) { log(e); }`, errors: raw() },
+    { code: `const c = console; try { f(); } catch (e) { c.warn("x", e); }`, errors: raw() },
+    { code: `const { error } = console; try { f(); } catch (e) { error(e); }`, errors: raw() },
+    { code: `const { error: shout } = console; try { f(); } catch (e) { shout(e.message); }`, errors: raw() },
+    { code: `const say = console.log.bind(console); try { f(); } catch (e) { say(e); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { globalThis.console.error(e); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { console["error"](e); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { process.stderr.write(String(e)); }`, errors: raw() },
+    { code: "try { f(); } catch (e) { process.stdout.write(`${e.message}\\n`); }", errors: raw() },
+    { code: `const out = process.stderr; try { f(); } catch (e) { out.write(e.stack); }`, errors: raw() },
+    // Wrapped or copied.
+    { code: `try { f(); } catch (e) { console.error(new Error("wrapped", { cause: e })); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { const w = new Error("wrapped", { cause: e }); console.error(w); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { console.error(Object.assign({}, e)); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { const copy = {}; Object.assign(copy, e); console.error(copy); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { console.error(structuredClone(e)); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { console.error(Object.entries(e)); }`, errors: raw() },
+    { code: `try { f(); } catch (e) { const fields = { at: "x" }; fields.error = e; console.error(fields); }`, errors: raw() },
+    { code: `const errors = []; try { f(); } catch (e) { errors.push(e); } console.error(errors);`, errors: raw() },
+    { code: `try { f(); } catch (e) { console.error(new Map([["e", e]])); }`, errors: raw() },
   ],
 });
 

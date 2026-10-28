@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import { EFFORT_CHECK_DEADLINE_MS } from "@/lib/ai/settings";
 import { PRE_CHECK_DEADLINE_MS } from "@/lib/answer-check-guard";
@@ -19,6 +20,7 @@ import {
   typedAnswer,
   isNextRedirect,
   NO_REPLY_STATE,
+  rejectionLogFields,
   submitCheck,
   TIMED_OUT_STATE,
   withCheckFallback,
@@ -88,7 +90,7 @@ describe("withCheckFallback", () => {
       // No stale field errors, and nothing about the answers: the form
       // keeps them, as it does after any check that saved no try.
       assert.equal("errors" in state, false);
-      assert.deepEqual(logged.mock.calls.at(-1)?.arguments, [failure]);
+      assert.deepEqual(logged.mock.calls.at(-1)?.arguments, ["answer check rejected", { kind: "no_reply", name: failure.name }]);
     }
     assert.deepEqual(NO_REPLY_STATE, {
       message: "We couldn’t hear back. Your answers are still here. Reload the page to see if they were checked.",
@@ -238,6 +240,92 @@ describe("isAppUpdatedError", () => {
     }
   });
 });
+
+describe("rejectionLogFields", () => {
+  const PERSONAL = "FAKE answer text and fake@example.invalid";
+
+  it("is the kind and an identifier-like name, never the message or stack", () => {
+    assert.deepEqual(rejectionLogFields(new TypeError(PERSONAL)), { kind: "no_reply", name: "TypeError" });
+    assert.deepEqual(rejectionLogFields(new UnrecognizedActionError('Server Action "abc" was not found on the server.')), {
+      kind: "app_updated",
+      name: "UnrecognizedActionError",
+    });
+    // A name that isn't identifier-like is dropped.
+    assert.deepEqual(rejectionLogFields(Object.assign(new Error("x"), { name: PERSONAL })), { kind: "no_reply", name: "Error" });
+    assert.deepEqual(rejectionLogFields(PERSONAL), { kind: "no_reply", name: "string" });
+    assert.deepEqual(rejectionLogFields(null), { kind: "no_reply", name: "null" });
+    assert.deepEqual(rejectionLogFields({ message: PERSONAL }), { kind: "no_reply", name: "object" });
+    for (const value of [new Error(PERSONAL), Object.assign(new Error("x"), { name: PERSONAL }), PERSONAL]) {
+      assert.doesNotMatch(JSON.stringify(rejectionLogFields(value)), /FAKE|example/);
+    }
+  });
+
+  it("never throws, even when the error's getters do", () => {
+    const hostile = new Error("x");
+    Object.defineProperty(hostile, "name", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    assert.deepEqual(rejectionLogFields(hostile), { kind: "no_reply", name: "object" });
+  });
+
+  it("no browser file reaches the server's safe-error-fields.ts or safe-console.ts, directly or through other imports", () => {
+    const roots = ["src/components/answer-form-state.ts", "src/components/action-fallback.ts", ...useClientFiles("src")];
+    const server = ["src/lib/safe-error-fields.ts", "src/lib/safe-console.ts"];
+    const reached = importGraph(roots);
+    // The walk follows imports: from answer-form-state.ts it gets to
+    // validate-answers.ts, and from a server file to the server helpers.
+    assert.ok(reached.has("src/lib/validate-answers.ts"));
+    assert.ok(roots.includes("src/app/c/error.tsx"));
+    assert.ok(importGraph(["src/lib/ai/errors.ts"]).has("src/lib/safe-error-fields.ts"));
+    assert.ok(reached.has("src/app/teacher/classes/new/actions.ts"));
+    for (const file of server) assert.equal(reached.has(file), false, `${file} is reached from a browser file`);
+  });
+});
+
+// Every file under dir whose first statement is "use client".
+function useClientFiles(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, encoding: "utf8" })
+    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+    .map((name) => join(dir, name))
+    .filter((file) => /^\s*["']use client["']/.test(readFileSync(file, "utf8")));
+}
+
+// The files reached from roots through static imports and re-exports
+// (relative and @/ paths, .ts, .tsx, or an index), skipping type-only
+// ones, which never reach the bundle. Packages aren't followed, nor are a
+// "use server" file's imports: the browser gets only a reference to each
+// server action, never the file.
+function importGraph(roots: string[]): Set<string> {
+  const SPECIFIER = /^\s*(?:import|export)\s+(?!type\b)(?:[^;]*?\sfrom\s*)?["']([^"']+)["']/gm;
+  const DYNAMIC = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const seen = new Set<string>();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const file = queue.pop() as string;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const text = readFileSync(file, "utf8");
+    if (/^\s*["']use server["']/.test(text)) continue;
+    for (const match of [...text.matchAll(SPECIFIER), ...text.matchAll(DYNAMIC)]) {
+      const resolved = resolveImport(file, match[1]);
+      if (resolved) queue.push(resolved);
+    }
+  }
+  return seen;
+}
+
+function resolveImport(from: string, specifier: string): string | null {
+  let base: string;
+  if (specifier.startsWith("@/")) base = join("src", specifier.slice(2));
+  else if (specifier.startsWith(".")) base = join(dirname(from), specifier);
+  else return null;
+  const candidates = [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")];
+  const found = candidates.find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
+  assert.ok(found, `${specifier} from ${from} not found`);
+  return found;
+}
 
 describe("isNextRedirect", () => {
   it("matches Next's redirect digest only", () => {
