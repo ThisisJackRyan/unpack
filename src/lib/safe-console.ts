@@ -18,15 +18,24 @@
 // - the same, nested in plain objects and arrays, MAX_DEPTH deep (cycle
 //   safe); a plain object or array deeper than that becomes
 //   { redacted: "TooDeep" };
-// - any other object (a Map, a Set, a Date, a URL, a class instance) with
-//   its class name only, { redacted: "Map", size: 2 } or
-//   { redacted: "Box" }: its contents are never printed;
+// - any other object (a Map, a Set, a Date, a URL, a class instance, a
+//   Proxy, a plain object with its own [util.inspect.custom]) with its
+//   class name only, { redacted: "Map", size: 2 } or { redacted: "Box" }:
+//   its contents are never printed, and its inspect.custom never called;
+// - everything else util.inspect would print of a plain object or array,
+//   walked by Reflect.ownKeys: an array's own non-index properties (a
+//   RegExp match's input and groups) are dropped, as are an object's
+//   non-enumerable ones; keys are redacted as text; a symbol whose
+//   description isn't a plain name, as a key or a value, becomes
+//   Symbol([redacted]); a function with own properties past the usual
+//   ones, or a name that isn't a plain name, becomes
+//   { redacted: "Function" };
 // - text, by redactLogText: an error dump, a database message that can
 //   echo a row, or an error line ("TypeError: ...") whose message isn't
 //   one of FIXED_ERROR_MESSAGES becomes REDACTED_TEXT, and a URL, an
 //   email, an IP, or a token-shaped value inside other text becomes
 //   REDACTED_PART.
-// Other arguments (numbers, booleans, functions) are passed through.
+// Other arguments (numbers, booleans, plain functions) are passed through.
 //
 // It never throws: a getter or proxy trap that throws, or a toString that
 // throws when Node formats the line, gives a fixed { redacted:
@@ -37,6 +46,7 @@
 // guard for a caught error is the lint rule (unpack/no-raw-error-log),
 // which keeps raw errors, and text taken from them, away from log calls.
 
+import { types } from "node:util";
 import { FIXED_ERROR_MESSAGES, safeErrorFields } from "./safe-error-fields";
 
 export const CONSOLE_METHODS = ["error", "warn", "log", "info", "debug", "trace", "dir", "assert"] as const;
@@ -67,6 +77,15 @@ export const MAX_DEPTH = 5;
 // code). Never a redirect's or not-found's digest, which hold a path.
 const DIGEST_PATTERN = /^[A-Za-z0-9_@-]{1,64}$/;
 const CLASS_NAME_PATTERN = /^[A-Za-z_$][\w$]{0,79}$/;
+// A symbol description printed as it is: a dotted name with no digits
+// (Symbol.toStringTag, nodejs.util.inspect.custom). Anything else prints
+// as Symbol([redacted]).
+const SYMBOL_DESCRIPTION_PATTERN = /^[A-Za-z_$][A-Za-z_$.]{0,79}$/;
+const INSPECT_CUSTOM = Symbol.for("nodejs.util.inspect.custom");
+// The own keys every function has; util.inspect prints any other after
+// [Function: name].
+const FUNCTION_KEYS = new Set<PropertyKey>(["length", "name", "prototype", "arguments", "caller"]);
+const INDEX_PATTERN = /^(0|[1-9]\d*)$/;
 
 // The whole text is an error dump.
 const DUMP_PATTERNS = [
@@ -166,6 +185,41 @@ function isPlainContainer(value: object): boolean {
   return proto === Object.prototype || proto === null;
 }
 
+// A plain container util.inspect would print some other way: a Proxy
+// (inspect prints its target, past any trap) or one with its own
+// inspect.custom (never called here). Both become redactedObject.
+function isOpaqueContainer(value: object): boolean {
+  return types.isProxy(value) || Object.prototype.hasOwnProperty.call(value, INSPECT_CUSTOM);
+}
+
+// An own key util.inspect prints for this container, and the copy keeps:
+// an array's indices, an object's enumerable keys.
+function isCopiedKey(container: object, key: PropertyKey): boolean {
+  if (Array.isArray(container)) return typeof key === "string" && INDEX_PATTERN.test(key) && Number(key) < container.length;
+  return Reflect.getOwnPropertyDescriptor(container, key)?.enumerable === true;
+}
+
+function safeSymbol(symbol: symbol): symbol {
+  const { description } = symbol;
+  return description === undefined || SYMBOL_DESCRIPTION_PATTERN.test(description) ? symbol : Symbol(REDACTED_PART);
+}
+
+function safeKey(key: string | symbol): string | symbol {
+  return typeof key === "symbol" ? safeSymbol(key) : redactLogText(key);
+}
+
+// A function util.inspect prints as [Function: name] (or [class name])
+// and nothing more: no own properties past the usual ones, and a plain
+// name. Not a Proxy, whose target inspect would print instead.
+function isPlainFunction(fn: object): boolean {
+  if (types.isProxy(fn)) return false;
+  if (!Reflect.ownKeys(fn).every((key) => FUNCTION_KEYS.has(key))) return false;
+  const name = Reflect.getOwnPropertyDescriptor(fn, "name")?.value;
+  if (name === undefined || name === "") return true;
+  // fn.bind(...) is named "bound fn".
+  return typeof name === "string" && CLASS_NAME_PATTERN.test(name.replace(/^(bound )+/, ""));
+}
+
 // safeErrorFields' own output (or a log line built on it): already safe,
 // even with a fixed app message.
 function isSafeFields(value: Record<string, unknown>): boolean {
@@ -225,13 +279,22 @@ export function errorLogFields(error: unknown): Record<string, unknown> {
 // through. Unsure (a getter threw) counts as yes.
 function needsSanitizing(value: unknown, depth: number, seen: Set<object>): boolean {
   if (typeof value === "string") return redactLogText(value) !== value;
-  if (value === null || typeof value !== "object") return false;
+  if (typeof value === "symbol") return safeSymbol(value) !== value;
   try {
-    if (isErrorLike(value) || !isPlainContainer(value) || depth >= MAX_DEPTH) return true;
+    if (typeof value === "function") return !isPlainFunction(value);
+    if (value === null || typeof value !== "object") return false;
+    if (isErrorLike(value) || !isPlainContainer(value) || isOpaqueContainer(value) || depth >= MAX_DEPTH) return true;
     if (seen.has(value)) return false;
     seen.add(value);
-    const children = Array.isArray(value) ? Array.from({ length: value.length }, (_, i) => value[i]) : Object.values(value);
-    return children.some((child) => needsSanitizing(child, depth + 1, seen));
+    // Every own key, as util.inspect sees them: one it wouldn't copy (an
+    // array's input, a hidden key), or a key that is data, means a copy.
+    for (const key of Reflect.ownKeys(value)) {
+      if (Array.isArray(value) && key === "length") continue;
+      if (!isCopiedKey(value, key) || safeKey(key) !== key) return true;
+      if (needsSanitizing(Reflect.get(value, key), depth + 1, seen)) return true;
+    }
+    // An array's holes read as undefined in the copy, as before.
+    return false;
   } catch {
     return true;
   }
@@ -239,21 +302,30 @@ function needsSanitizing(value: unknown, depth: number, seen: Set<object>): bool
 
 function sanitize(value: unknown, depth: number, copies: Map<object, unknown>): unknown {
   if (typeof value === "string") return redactLogText(value);
-  if (value === null || typeof value !== "object") return value;
+  if (typeof value === "symbol") return safeSymbol(value);
   try {
+    if (typeof value === "function") return isPlainFunction(value) ? value : redactedObject(value);
+    if (value === null || typeof value !== "object") return value;
     if (isErrorLike(value)) return errorLogFields(value);
     if (copies.has(value)) return copies.get(value);
-    if (!isPlainContainer(value)) return redactedObject(value);
+    if (!isPlainContainer(value) || isOpaqueContainer(value)) return redactedObject(value);
     if (depth >= MAX_DEPTH) return { redacted: "TooDeep" };
+    // An array: its indices only (not a match's input or groups).
     if (Array.isArray(value)) {
       const out: unknown[] = [];
       copies.set(value, out);
       for (let i = 0; i < value.length; i += 1) out.push(sanitize(value[i], depth + 1, copies));
       return out;
     }
-    const out: Record<string, unknown> = Object.create(Object.getPrototypeOf(value));
+    // An object: its enumerable own keys, symbols too, each key redacted
+    // as text. defineProperty, so a "__proto__" key stays a key.
+    const out: Record<PropertyKey, unknown> = Object.create(Object.getPrototypeOf(value));
     copies.set(value, out);
-    for (const [key, item] of Object.entries(value)) out[key] = sanitize(item, depth + 1, copies);
+    for (const key of Reflect.ownKeys(value)) {
+      if (!isCopiedKey(value, key)) continue;
+      const item = sanitize(Reflect.get(value, key), depth + 1, copies);
+      Object.defineProperty(out, safeKey(key), { value: item, enumerable: true, writable: true, configurable: true });
+    }
     return out;
   } catch {
     return unloggable();

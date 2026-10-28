@@ -439,6 +439,117 @@ describe("sanitizeLogArg never throws", () => {
   });
 });
 
+describe("sanitizeLogArg: everything util.inspect prints", () => {
+  const EMAIL = "maya@x.com";
+  const SECRET = "SEKRIT";
+  const URL_TEXT = "https://x.com";
+
+  // What the wrapped console prints for these arguments, in each of the
+  // ways a line is formatted.
+  function printed(...args: unknown[]): string {
+    const { target, output } = capturingConsole();
+    installSafeConsole(target);
+    target.error(...args);
+    target.error("%o", args[0]);
+    target.dir(args[0], { depth: null, showHidden: true });
+    return output();
+  }
+
+  function assertNotPrinted(text: string, ...values: string[]) {
+    for (const value of values) assert.ok(!text.includes(value), `${value} in:\n${text}`);
+  }
+
+  it("a RegExp match array: its indices only, never its input or groups", () => {
+    const match = `Once upon a time ${SECRET} reading text ${URL_TEXT}`.match(new RegExp("(?<word>Once)"));
+    assert.ok(match);
+    assert.ok(inspect(match).includes(SECRET), "the raw match prints its input");
+    assert.deepEqual(sanitizeLogArg(match), ["Once", "Once"]);
+    assertNotPrinted(printed(match), SECRET, URL_TEXT, "upon a time");
+    assertNotPrinted(printed({ found: match }), SECRET, URL_TEXT);
+    // Any other own property on an array.
+    const list = Object.assign(["a"], { email: EMAIL });
+    assert.deepEqual(sanitizeLogArg(list), ["a"]);
+    assertNotPrinted(printed(list), EMAIL);
+  });
+
+  it("symbol-keyed values, and symbol keys and values with data in the description", () => {
+    const keyed = { ok: 1, [Symbol("k")]: EMAIL };
+    assertNotPrinted(printed(keyed), EMAIL);
+    const described = { [Symbol(EMAIL)]: 1, value: Symbol(`for ${EMAIL}`), list: [Symbol(SECRET + "1")] };
+    const out = printed(described);
+    assertNotPrinted(out, EMAIL, SECRET);
+    assert.ok(out.includes(`Symbol(${REDACTED_PART})`), out);
+    assert.equal(String(sanitizeLogArg(Symbol(EMAIL))), `Symbol(${REDACTED_PART})`);
+    assertNotPrinted(printed(Symbol(EMAIL)), EMAIL);
+    // A plain name is kept.
+    const tag = Symbol("readingTag");
+    assert.equal(sanitizeLogArg(tag), tag);
+    const named = { [tag]: 1 };
+    assert.equal(sanitizeLogArg(named), named);
+  });
+
+  it("data in object keys is redacted as text", () => {
+    assertNotPrinted(printed({ [EMAIL]: 1 }), EMAIL);
+    assert.deepEqual(sanitizeLogArg({ [EMAIL]: 1, readingId: "r1" }), { [REDACTED_PART]: 1, readingId: "r1" });
+    assertNotPrinted(printed({ nested: { [`Error: ${SECRET}`]: true } }), SECRET);
+    // A "__proto__" key stays a plain key in the copy.
+    const parsed = JSON.parse(`{"__proto__": {"x": "${EMAIL}"}, "y": 1}`);
+    const copy = sanitizeLogArg(parsed) as Record<string, unknown>;
+    assert.equal(Object.getPrototypeOf(copy), Object.prototype);
+    assertNotPrinted(printed(parsed), EMAIL);
+  });
+
+  it("a function with own properties, or a name that is data", () => {
+    const f = Object.assign(function f() {}, { email: EMAIL });
+    assert.ok(inspect(f).includes(EMAIL), "the raw function prints its fields");
+    assert.deepEqual(sanitizeLogArg(f), { redacted: "Function" });
+    assertNotPrinted(printed(f), EMAIL);
+    assertNotPrinted(printed({ handler: f }), EMAIL);
+    const named = { [EMAIL]: () => {} }[EMAIL];
+    assertNotPrinted(printed(named), EMAIL);
+    class WithStatic {
+      static email = EMAIL;
+    }
+    assertNotPrinted(printed(WithStatic), EMAIL);
+    // A plain function, an arrow, a class, and a bound function pass as
+    // they are.
+    for (const plain of [function helper() {}, () => {}, class Plain {}, function g() {}.bind(null), async () => {}]) {
+      assert.equal(sanitizeLogArg(plain), plain);
+    }
+  });
+
+  it("a plain object with its own inspect.custom: redacted, and never called", () => {
+    let called = false;
+    const custom = {
+      [inspect.custom]: () => {
+        called = true;
+        return `custom ${EMAIL}`;
+      },
+    };
+    assert.deepEqual(sanitizeLogArg(custom), { redacted: "Object" });
+    assertNotPrinted(printed(custom), EMAIL);
+    assertNotPrinted(printed({ inner: custom }), EMAIL);
+    const list = Object.assign([1], { [inspect.custom]: () => EMAIL });
+    assertNotPrinted(printed(list), EMAIL);
+    assert.equal(called, false);
+  });
+
+  it("a non-enumerable own key (shown by showHidden) is dropped", () => {
+    const hidden = { ok: 1 };
+    Object.defineProperty(hidden, "email", { value: EMAIL, enumerable: false });
+    assert.deepEqual(sanitizeLogArg(hidden), { ok: 1 });
+    assertNotPrinted(printed(hidden), EMAIL);
+  });
+
+  it("a Proxy, whose target util.inspect prints past its traps", () => {
+    const masked = new Proxy({ email: EMAIL }, { ownKeys: () => [] });
+    assert.ok(inspect(masked).includes(EMAIL), "the raw proxy prints its target");
+    assert.deepEqual(sanitizeLogArg(masked), { redacted: "Object" });
+    assertNotPrinted(printed(masked), EMAIL);
+    assertNotPrinted(printed(new Proxy(Object.assign(() => {}, { email: EMAIL }), { ownKeys: () => ["length", "name"] })), EMAIL);
+  });
+});
+
 describe("sanitizeLogArg depth", () => {
   // A chain of plain objects: depth 0 is the argument itself.
   function nested(levels: number, leaf: unknown): Record<string, unknown> {
