@@ -19,6 +19,7 @@ import {
   typedAnswer,
   isNextRedirect,
   NO_REPLY_STATE,
+  rejectionLogFields,
   submitCheck,
   TIMED_OUT_STATE,
   withCheckFallback,
@@ -88,7 +89,7 @@ describe("withCheckFallback", () => {
       // No stale field errors, and nothing about the answers: the form
       // keeps them, as it does after any check that saved no try.
       assert.equal("errors" in state, false);
-      assert.deepEqual(logged.mock.calls.at(-1)?.arguments, [failure]);
+      assert.deepEqual(logged.mock.calls.at(-1)?.arguments, ["answer check rejected", { kind: "no_reply", name: failure.name }]);
     }
     assert.deepEqual(NO_REPLY_STATE, {
       message: "We couldn’t hear back. Your answers are still here. Reload the page to see if they were checked.",
@@ -235,6 +236,42 @@ describe("isAppUpdatedError", () => {
       undefined,
     ]) {
       assert.equal(isAppUpdatedError(other), false, String(other));
+    }
+  });
+});
+
+describe("rejectionLogFields", () => {
+  const PERSONAL = "FAKE answer text and fake@example.invalid";
+
+  it("is the kind and an identifier-like name, never the message or stack", () => {
+    assert.deepEqual(rejectionLogFields(new TypeError(PERSONAL)), { kind: "no_reply", name: "TypeError" });
+    assert.deepEqual(rejectionLogFields(new UnrecognizedActionError('Server Action "abc" was not found on the server.')), {
+      kind: "app_updated",
+      name: "UnrecognizedActionError",
+    });
+    // A name that isn't identifier-like is dropped.
+    assert.deepEqual(rejectionLogFields(Object.assign(new Error("x"), { name: PERSONAL })), { kind: "no_reply", name: "Error" });
+    assert.deepEqual(rejectionLogFields(PERSONAL), { kind: "no_reply", name: "string" });
+    assert.deepEqual(rejectionLogFields(null), { kind: "no_reply", name: "null" });
+    assert.deepEqual(rejectionLogFields({ message: PERSONAL }), { kind: "no_reply", name: "object" });
+    for (const value of [new Error(PERSONAL), Object.assign(new Error("x"), { name: PERSONAL }), PERSONAL]) {
+      assert.doesNotMatch(JSON.stringify(rejectionLogFields(value)), /FAKE|example/);
+    }
+  });
+
+  it("never throws, even when the error's getters do", () => {
+    const hostile = new Error("x");
+    Object.defineProperty(hostile, "name", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    assert.deepEqual(rejectionLogFields(hostile), { kind: "no_reply", name: "object" });
+  });
+
+  it("the browser files never import the server's safe-error-fields.ts", () => {
+    for (const file of ["src/components/answer-form-state.ts", "src/components/action-fallback.ts"]) {
+      assert.doesNotMatch(readFileSync(file, "utf8"), /^import[^;]*(safe-error-fields|safe-console)/m, file);
     }
   });
 });

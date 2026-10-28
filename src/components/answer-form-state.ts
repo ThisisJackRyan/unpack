@@ -63,6 +63,28 @@ export function isAppUpdatedError(error: unknown): boolean {
   );
 }
 
+// What the browser logs about a rejected action call (here and in
+// withRejectionFallback, action-fallback.ts): app_updated or no_reply, and
+// the error's name when it is identifier-like. Never the error's message
+// or stack, or the form data. The server's helper (safe-error-fields.ts,
+// with drizzle and node:crypto) isn't bundled into the browser, so this
+// is its browser-side counterpart, kept this small on purpose.
+export type RejectionLogFields = { kind: "app_updated" | "no_reply"; name: string };
+
+const BROWSER_ERROR_NAME = /^[A-Za-z_$][\w$.]{0,79}$/;
+
+export function rejectionLogFields(error: unknown): RejectionLogFields {
+  let name: string = error === null ? "null" : typeof error;
+  let kind: RejectionLogFields["kind"] = "no_reply";
+  try {
+    if (error instanceof Error) name = BROWSER_ERROR_NAME.test(error.name) ? error.name : "Error";
+    kind = isAppUpdatedError(error) ? "app_updated" : "no_reply";
+  } catch {
+    // A getter that throws: the name as far as it got.
+  }
+  return { kind, name };
+}
+
 type AnswerAction = (state: AnswerFormState, formData: FormData) => Promise<AnswerFormState>;
 
 // The action as the form calls it. If the request itself fails (the
@@ -91,12 +113,9 @@ export function withCheckFallback(
       return await Promise.race([action(state, formData), gaveUp]);
     } catch (error) {
       rethrow(error);
-      // The error only: never the form data or the answers. This runs in
-      // the student's own browser, where Next sends a server error as a
-      // generic message and a digest, never its text, and the server-side
-      // helper (safe-error-fields.ts, with drizzle) isn't bundled.
-      // eslint-disable-next-line unpack/no-raw-error-log -- browser only, see above
-      console.error(error);
+      // The kind and the error's name only (rejectionLogFields): never the
+      // form data, the answers, or the error's message or stack.
+      console.error("answer check rejected", rejectionLogFields(error));
       return isAppUpdatedError(error) ? APP_UPDATED_STATE : NO_REPLY_STATE;
     } finally {
       clearTimeout(timer);
