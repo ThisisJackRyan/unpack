@@ -59,7 +59,39 @@ The route is public (no Clerk session); every delivery's signature is checked. A
 
 ### Migrations
 
-Apply migrations by hand, one `drizzle/*.sql` file at a time, each inside a transaction (`BEGIN;` ... `COMMIT;`), through the Neon HTTP driver or the Neon SQL Editor. Don't use `pnpm db:migrate`: the Neon database has no drizzle migrations table, so it would replay from `0000`, and port 5432 is blocked anyway.
+Apply migrations by hand, in order, one `drizzle/*.sql` file at a time, each as one transaction. Don't use `pnpm db:migrate`: the Neon database has no drizzle migrations table, so it would replay from `0000`, and port 5432 is blocked anyway.
+
+- Neon SQL Editor: paste the whole file between `BEGIN;` and `COMMIT;`.
+- Neon HTTP driver (`@neondatabase/serverless`): each request is its own transaction, so sending `BEGIN;` and `COMMIT;` as separate requests does nothing. Split the file on `--> statement-breakpoint` and send its statements together with `sql.transaction(statements.map((s) => sql.query(s)))`.
+
+Either way, a file that fails rolls back as a whole.
+
+The files are not idempotent and nothing records which ones were applied. Run these read-only checks, then apply in order starting from the first file whose check returns false. `col(t, c)` stands for `select exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = '<t>' and column_name = '<c>');`.
+
+| File | Check |
+| --- | --- |
+| `0000_init` | `select to_regclass('public.teachers') is not null;` |
+| `0001_link_fetch_attempts` | `select to_regclass('public.link_fetch_attempts') is not null;` |
+| `0002_question_generation` | `select to_regclass('public.question_generations') is not null;` |
+| `0003_join_attempts` | `select to_regclass('public.join_attempts') is not null;` |
+| `0004_effort_checks` | `select to_regclass('public.effort_checks') is not null;` |
+| `0005_teacher_queue` | `col(challenges, checks_allowed)` |
+| `0006_abuse_protection` | `select to_regclass('public.student_question_calls') is not null;` |
+| `0007_teacher_gaps` | `col(student_question_calls, given_back)` |
+| `0008_self_learner` | `col(teachers, age_confirmed_at)` |
+| `0009_hardening` | `col(deleted_clerk_users, clerk_deleted_at)` and `col(self_readings, slot_released_at)` |
+
+`0009_hardening.sql` was edited in place (PR 16). A database that got the earlier hand-applied 0009 has `slot_released_at` but not `clerk_deleted_at` (and has the index `deleted_clerk_users_deleted_at_idx`). Running the current file there fails at `CREATE TABLE` and rolls back, and the missing column breaks the under-13 delete. For that case, run this in the SQL Editor instead of the file:
+
+```sql
+BEGIN;
+ALTER TABLE deleted_clerk_users ADD COLUMN clerk_deleted_at timestamptz;
+CREATE INDEX deleted_clerk_users_clerk_deleted_at_idx ON deleted_clerk_users (clerk_deleted_at);
+DROP INDEX IF EXISTS deleted_clerk_users_deleted_at_idx;
+COMMIT;
+```
+
+The edited 0009 is already applied to Neon main and dev (Oct 27, 2026).
 
 ### Ops: pending Clerk deletes
 
