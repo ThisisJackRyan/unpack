@@ -95,7 +95,7 @@ describe("resolveReadingSource", () => {
   it("maps fetch errors to the link messages, logging only safe fields", async () => {
     const { d, calls } = deps({
       fetchArticle: async () => {
-        throw new FetchArticleError("not_html", "example.com");
+        throw new FetchArticleError("not_html");
       },
     });
     assert.deepEqual(await resolveReadingSource(LINK, d), {
@@ -105,7 +105,6 @@ describe("resolveReadingSource", () => {
     });
     assert.deepEqual(calls.logs.at(-1), {
       kind: "not_html",
-      host: "example.com",
       name: "FetchArticleError",
       causes: [],
       timedOut: false,
@@ -114,7 +113,7 @@ describe("resolveReadingSource", () => {
     });
     const tooLong = deps({
       fetchArticle: async () => {
-        throw new FetchArticleError("too_long", "example.com");
+        throw new FetchArticleError("too_long");
       },
     });
     const r = await resolveReadingSource(LINK, tooLong.d);

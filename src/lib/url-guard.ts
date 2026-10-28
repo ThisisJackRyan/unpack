@@ -162,7 +162,7 @@ export function checkUrl(
     throw new FetchArticleError("invalid_url");
   }
   if (url.username || url.password) {
-    throw new FetchArticleError("blocked", url.hostname);
+    throw new FetchArticleError("blocked");
   }
   // WHATWG URL drops a port that matches the scheme default, so "" here
   // means 80 for http and 443 for https.
@@ -172,15 +172,15 @@ export function checkUrl(
     url.port !== "80" &&
     url.port !== "443"
   ) {
-    throw new FetchArticleError("blocked", url.hostname);
+    throw new FetchArticleError("blocked");
   }
   // WHATWG URL has already turned 2130706433, 0x7f.1, and 017700000001 into
   // 127.0.0.1, and wraps IPv6 in brackets.
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (isIP(host)) {
-    if (policy.isBlockedAddress(host)) throw new FetchArticleError("blocked", host);
+    if (policy.isBlockedAddress(host)) throw new FetchArticleError("blocked");
   } else if (isBlockedHostname(host)) {
-    throw new FetchArticleError("blocked", host);
+    throw new FetchArticleError("blocked");
   }
   return url;
 }
@@ -196,7 +196,7 @@ export function checkRedirect(
   try {
     next = new URL(location, current);
   } catch {
-    throw new FetchArticleError("http_error", current.hostname);
+    throw new FetchArticleError("http_error");
   }
   return checkUrl(next, policy);
 }
@@ -228,10 +228,10 @@ export function createGuardedLookup(
             ? all.filter((a) => a.family === options.family)
             : all;
         if (all.some((a) => policy.isBlockedAddress(a.address))) {
-          throw new FetchArticleError("blocked", hostname);
+          throw new FetchArticleError("blocked");
         }
         if (wanted.length === 0) {
-          throw new FetchArticleError("http_error", hostname);
+          throw new FetchArticleError("http_error");
         }
         if (options.all) {
           callback(null, wanted);

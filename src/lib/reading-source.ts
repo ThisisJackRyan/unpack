@@ -51,7 +51,8 @@ export type ReadingSourceDeps = {
   // reads the time and the reader's zone). Without it, a relative time.
   limitedMessage?: () => Promise<string>;
   fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
-  // Safe fields only (kind, host, error names), never the URL or text.
+  // Safe fields only (kind, status, error names), never any part of the
+  // link (host, path, query) or the text.
   log: (message: string, fields: Record<string, unknown>) => void;
 };
 
@@ -91,13 +92,10 @@ export async function resolveReadingSource(
     article = await deps.fetchArticle(data.url);
   } catch (error) {
     const kind = error instanceof FetchArticleError ? error.kind : "http_error";
-    // Kind, host, and the safe fields only: no full URL (query strings),
-    // IPs, or stacks.
-    deps.log("fetchArticle failed", {
-      kind,
-      host: error instanceof FetchArticleError ? error.host : undefined,
-      ...safeErrorFields(error),
-    });
+    // The kind, the HTTP status of a non-2xx reply, and the safe fields
+    // only: no part of the link (host, path, query) and no IPs or stacks.
+    const status = error instanceof FetchArticleError ? error.status : undefined;
+    deps.log("fetchArticle failed", { kind, ...(status === undefined ? {} : { status }), ...safeErrorFields(error) });
     return {
       ok: false,
       errors: { url: LINK_ERRORS[kind] },
