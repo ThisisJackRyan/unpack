@@ -8,6 +8,7 @@ import {
   SUBMIT_FAILED_MESSAGE,
   withDeadline,
 } from "./answer-check-guard";
+import { DbReadTimeoutError } from "@/db/read-timeout";
 import { submitAnswersWith, type AttemptStore, type EffortChecker } from "./submit-answers-core";
 
 // Stands in for next/navigation's unstable_rethrow (see
@@ -121,6 +122,17 @@ describe("guardAnswerCheck", () => {
     );
     assert.equal(timedOut, TIMED_OUT_STATE);
     assert.deepEqual(hung.writes, []);
+
+    // A database read past its own timeout, as the driver wraps it.
+    const slowRead = recordingStore(async () => {
+      throw Object.assign(new Error("Error connecting to database"), { sourceError: new DbReadTimeoutError(15_000) });
+    });
+    const readTimedOut = await guardAnswerCheck(action(async () => ({ id: "s1" }), slowRead.store), {
+      rethrow: rethrowNext,
+      onError: () => {},
+    });
+    assert.equal(readTimedOut, TIMED_OUT_STATE);
+    assert.deepEqual(slowRead.writes, []);
   });
 
   it("lets Next's redirect through, unlogged, so a missing session still goes to /join", async () => {
