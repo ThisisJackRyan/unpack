@@ -57,12 +57,14 @@ export function shouldAutoGenerate(input: {
 }
 
 // The panel's state when its request got no usable answer (see
-// withRejectionFallback): on the card or the panel that sent it. Every
-// panel action is safe to repeat (a second publish, generate, save or
-// delete after the first one landed is refused with its own message, or
-// writes the same thing again), so a lost answer is "Something went
-// wrong. Try again."; a deploy since the page loaded, APP_UPDATED_MESSAGE. No client time limit, as for the reading forms
-// (see reading-form-fallback.ts).
+// withRejectionFallback): on the card or the panel that sent it. A lost
+// answer is "Something went wrong. Try again."; a deploy since the page
+// loaded, APP_UPDATED_MESSAGE. Not every action is free to repeat: a
+// second publish, generate, save or delete after the first one landed is
+// refused with its own message, or writes the same thing again, but a
+// repeated regenerate_all after a lost reply runs another paid generation
+// and counts toward the teacher's limit. No client time limit, as for the
+// reading forms (see reading-form-fallback.ts).
 export function questionPanelFallback(kind: RejectionKind, formData: FormData): QuestionActionState {
   const intent = formData.get("intent");
   return {
