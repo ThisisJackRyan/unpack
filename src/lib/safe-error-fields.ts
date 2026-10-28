@@ -20,6 +20,12 @@
 //   messages are fixed strings with no user input.
 // Never SQL, params, detail, hint, where, stacks, or the error stringified.
 // Callers add their own ids (classId, readingId: app uuids).
+//
+// It never throws: callers log from catch blocks, and Next logs from its
+// own error handling. A getter or proxy trap that throws (on name, code,
+// cause, a revoked Proxy) gives that level the name UNLOGGABLE_NAME, and
+// anything worse gives the minimal record { name: UNLOGGABLE_NAME,
+// causes: [], timedOut: false }.
 
 import { DrizzleQueryError } from "drizzle-orm";
 import { DbReadTimeoutError } from "../db/read-timeout";
@@ -37,6 +43,10 @@ export type SafeErrorFields = SafeErrorLevel & {
 };
 
 export const MAX_CAUSES = 4;
+
+// The name of a value whose getters or proxy traps threw while it was
+// being read.
+export const UNLOGGABLE_NAME = "UnloggableError";
 
 // Messages built only from fixed text and enums. QuestionWriterError and
 // EffortCheckError are left out: their reason can quote a schema problem
@@ -96,6 +106,14 @@ function isDrizzleQueryError(value: Error): boolean {
 
 // The name rule on its own, for callers that log one level by name.
 export function safeErrorName(value: unknown): string {
+  try {
+    return nameOf(value);
+  } catch {
+    return UNLOGGABLE_NAME;
+  }
+}
+
+function nameOf(value: unknown): string {
   if (!isErrorLike(value)) return value === null ? "null" : typeof value;
   // DrizzleQueryError never sets its name, so it would read "Error".
   if (isDrizzleQueryError(value)) return "DrizzleQueryError";
@@ -112,9 +130,13 @@ export function safeErrorName(value: unknown): string {
 
 function codeOf(value: unknown): string | number | undefined {
   if (value === null || typeof value !== "object") return undefined;
-  const { code } = value as { code?: unknown };
-  if (typeof code === "number" && Number.isInteger(code)) return code;
-  if (typeof code === "string" && CODE_PATTERN.test(code)) return code;
+  try {
+    const { code } = value as { code?: unknown };
+    if (typeof code === "number" && Number.isInteger(code)) return code;
+    if (typeof code === "string" && CODE_PATTERN.test(code)) return code;
+  } catch {
+    // A throwing getter or trap: no code.
+  }
   return undefined;
 }
 
@@ -126,29 +148,54 @@ function levelOf(value: unknown): SafeErrorLevel {
 function isTimeout(value: unknown, level: SafeErrorLevel): boolean {
   if (TIMEOUT_NAMES.has(level.name)) return true;
   if (level.code !== undefined && TIMEOUT_CODES.has(level.code)) return true;
-  return value instanceof FetchArticleError && value.kind === "timeout";
+  try {
+    return value instanceof FetchArticleError && value.kind === "timeout";
+  } catch {
+    return false;
+  }
 }
 
 function nextOf(value: unknown): unknown {
   if (value === null || typeof value !== "object") return undefined;
-  const { cause, sourceError } = value as { cause?: unknown; sourceError?: unknown };
-  return cause ?? sourceError;
+  try {
+    const { cause, sourceError } = value as { cause?: unknown; sourceError?: unknown };
+    return cause ?? sourceError;
+  } catch {
+    // A throwing getter or trap: the chain ends here.
+    return undefined;
+  }
+}
+
+// An allow-listed message, or none (also when reading it throws).
+function allowedMessage(error: unknown): string | undefined {
+  try {
+    if (!MESSAGE_ALLOWED.some((allowed) => error instanceof allowed)) return undefined;
+    const { message } = error as Error;
+    return typeof message === "string" ? message : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function safeErrorFields(error: unknown): SafeErrorFields {
-  const top = levelOf(error);
-  let timedOut = isTimeout(error, top);
-  const causes: SafeErrorLevel[] = [];
-  const seen = new Set<unknown>([error]);
-  let current = nextOf(error);
-  while (current != null && causes.length < MAX_CAUSES && !seen.has(current)) {
-    seen.add(current);
-    const level = levelOf(current);
-    causes.push(level);
-    timedOut ||= isTimeout(current, level);
-    current = nextOf(current);
+  try {
+    const top = levelOf(error);
+    let timedOut = isTimeout(error, top);
+    const causes: SafeErrorLevel[] = [];
+    const seen = new Set<unknown>([error]);
+    let current = nextOf(error);
+    while (current != null && causes.length < MAX_CAUSES && !seen.has(current)) {
+      seen.add(current);
+      const level = levelOf(current);
+      causes.push(level);
+      timedOut ||= isTimeout(current, level);
+      current = nextOf(current);
+    }
+    const fields: SafeErrorFields = { ...top, causes, timedOut };
+    const message = allowedMessage(error);
+    if (message !== undefined) fields.message = message;
+    return fields;
+  } catch {
+    return { name: UNLOGGABLE_NAME, causes: [], timedOut: false };
   }
-  const fields: SafeErrorFields = { ...top, causes, timedOut };
-  if (MESSAGE_ALLOWED.some((allowed) => error instanceof allowed)) fields.message = (error as Error).message;
-  return fields;
 }
