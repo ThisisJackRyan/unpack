@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { QUESTIONS_SYSTEM_PROMPT, QUESTIONS_TOOL_NAME, SOLO_QUESTIONS_SYSTEM_PROMPT } from "./ai/prompts";
 import type { ModelRequest } from "./ai/model";
-import { QuestionWriterError, type QuestionModel } from "./ai/questions";
+import { QuestionWriterError, type QuestionModel, type WriteReport } from "./ai/questions";
 import { toolReply } from "./ai/test-fixtures";
 import type { Statement } from "./link-rate-limit";
 import { QUESTION_GENERATION_LIMIT, QUESTION_GENERATION_WINDOW_MINUTES } from "./question-rate-limit";
@@ -352,5 +352,18 @@ describe("selfQuestionWriter", () => {
     assert.match(user, /Write for a high school reading level\./);
     assert.match(user, /the reader's own opinion/);
     assert.doesNotMatch(user, /teacher|student|class/i);
+  });
+
+  it("reports each write (the questions.generate log)", async () => {
+    const model: QuestionModel = {
+      model: "anthropic/claude-sonnet-5.5",
+      create: async () => toolReply(QUESTIONS_TOOL_NAME, { questions: ["Why?", "What next?"] }),
+    };
+    const reports: WriteReport[] = [];
+    const write = selfQuestionWriter(() => model, (r) => reports.push(r));
+    await write({ bodyText: "A fox ran into the snow.", gradeLevel: "9", questionCount: 2 });
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].outcome, "ok");
+    assert.equal(reports[0].attempts, 1);
   });
 });

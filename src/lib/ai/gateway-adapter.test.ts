@@ -6,11 +6,11 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { checkEffort, EFFORT_TOOL } from "./effort-check";
 import { EFFORT_SYSTEM_PROMPT, effortCheckPrompt } from "./effort-prompts";
-import { createGatewayCall, GATEWAY_ROUTING, withRequestTimeout } from "./gateway-adapter";
+import { countingFetch, createGatewayCall, GATEWAY_ROUTING, withRequestTimeout } from "./gateway-adapter";
 import type { QuestionModel } from "./model";
 import { QUESTIONS_SYSTEM_PROMPT, QUESTIONS_TOOL_NAME, questionSetPrompt, SOLO_QUESTIONS_SYSTEM_PROMPT } from "./prompts";
 import { AI_OUT_OF_CREDITS_LOG, logModelError } from "./errors";
-import { QUESTIONS_TOOL, questionErrorKind, questionErrorLogFields, writeQuestionSet } from "./questions";
+import { QUESTIONS_TOOL, questionErrorKind, questionErrorLogFields, writeQuestionSet, type WriteReport } from "./questions";
 import { AI_MAX_RETRIES, AI_TIMEOUT_MS } from "./settings";
 
 const MODEL = "anthropic/claude-sonnet-5.5";
@@ -338,6 +338,59 @@ describe("gateway failures", () => {
       checkEffort(model, { bodyText: BODY, gradeLevel: "3", items }, { deadlineMs: 30 }),
       (error: unknown) => questionErrorKind(error) === "timeout",
     );
+  });
+});
+
+describe("request counting (the questions.generate log)", () => {
+  const input = { bodyText: BODY, gradeLevel: "4" as const, count: 3 };
+
+  it("counts every HTTP request, SDK retries included", async () => {
+    let n = 0;
+    const { model, sent } = adapter(() =>
+      n++ === 0 ? gatewayError(429, "rate_limit_exceeded") : generated(QUESTIONS_TOOL_NAME, { questions: THREE }),
+    );
+    const reports: WriteReport[] = [];
+    await writeQuestionSet(model, input, { onReport: (r) => reports.push(r) });
+    assert.equal(sent.length, 2);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].outcome, "ok");
+    assert.equal(reports[0].attempts, 1);
+    assert.equal(reports[0].httpRequests, 2);
+  });
+
+  it("counts per call, not per provider: two calls at once each see their own", async () => {
+    const { model } = adapter(() => generated(QUESTIONS_TOOL_NAME, { questions: THREE }));
+    const reports: WriteReport[] = [];
+    const onReport = (r: WriteReport) => reports.push(r);
+    await Promise.all([writeQuestionSet(model, input, { onReport }), writeQuestionSet(model, input, { onReport })]);
+    assert.deepEqual(
+      reports.map((r) => r.httpRequests),
+      [1, 1],
+    );
+  });
+
+  it("a failure after the SDK's retry reports both requests", async () => {
+    const { model } = adapter(() => gatewayError(503, "internal_server_error"));
+    const reports: WriteReport[] = [];
+    await assert.rejects(writeQuestionSet(model, input, { onReport: (r) => reports.push(r) }));
+    assert.equal(reports[0].outcome, "failed");
+    assert.equal(reports[0].httpRequests, 1 + AI_MAX_RETRIES);
+  });
+});
+
+describe("countingFetch", () => {
+  it("counts, then passes the request through unchanged", async () => {
+    let count = 0;
+    const seen: unknown[] = [];
+    const base = (async (input: string | URL | Request) => {
+      seen.push(String(input));
+      return new Response("ok");
+    }) as typeof globalThis.fetch;
+    const fetch = countingFetch(() => count++, base);
+    await fetch("https://example.test/a");
+    await fetch("https://example.test/b");
+    assert.equal(count, 2);
+    assert.deepEqual(seen, ["https://example.test/a", "https://example.test/b"]);
   });
 });
 

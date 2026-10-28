@@ -34,6 +34,7 @@ import {
   updateSharedQuestion,
 } from "@/lib/shared-questions-db";
 import { getOrCreateTeacher } from "@/lib/teacher";
+import { questionsGenerateReporter } from "@/lib/timing-log";
 import {
   isQuestionIntent,
   QUESTION_MAX_LENGTH,
@@ -156,19 +157,25 @@ export async function questionAction(
       gradeLevel,
       count: reading.questionCount,
     };
+    // Each write logs questions.generate (timing-log.ts).
+    const write = { onReport: questionsGenerateReporter({ readingId: reading.id, mode: reading.questionMode, intent }) };
     let written: string[];
     try {
       const model = getQuestionModel();
       written =
         intent === "regenerate_one"
           ? [
-              await writeReplacementQuestion(model, {
-                ...input,
-                position: target!.position,
-                current: questions.map((q) => q.prompt),
-              }),
+              await writeReplacementQuestion(
+                model,
+                {
+                  ...input,
+                  position: target!.position,
+                  current: questions.map((q) => q.prompt),
+                },
+                write,
+              ),
             ]
-          : await writeQuestionSet(model, input);
+          : await writeQuestionSet(model, input, write);
     } catch (error) {
       logModelError("questionAction: write failed", {
         ...questionErrorLogFields(error),
