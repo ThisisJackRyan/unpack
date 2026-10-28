@@ -19,6 +19,12 @@
 //   one note saves (a failing check), or none (a passing one).
 // - Auto-close: a passing attempt closes an open challenge in the same
 //   transaction, and the queue never lists a passed student.
+// - Out of tries, no note yet (loadTeacherQueue, countTeacherQueue): a
+//   student out of tries (or at the check limit) with no note is listed
+//   with "Out of tries, no note yet" and counted; after their note they
+//   are listed once, as the challenge; one more try takes them off until
+//   it is used too; a passed student is never listed; another teacher
+//   sees nothing.
 // - Another teacher can't decide (not_found, still open) or see the queue.
 // - The class view's statuses (loadClassStatus) match the student's own
 //   (listReadingsWithStatus) and what each case expects.
@@ -42,7 +48,16 @@
 // against production.
 import { getSql } from "@/db";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
-import { decideChallenge, loadChallengeQueue, countOpenChallenges, type DecideResult } from "@/lib/challenge-queue";
+import {
+  countOpenChallenges,
+  countTeacherQueue,
+  decideChallenge,
+  loadChallengeQueue,
+  loadTeacherQueue,
+  type DecideResult,
+  type QueueEntry,
+} from "@/lib/challenge-queue";
+import { NO_NOTE_LABEL } from "@/lib/challenge-queue-core";
 import { sendChallenge, type ChallengeResult } from "@/lib/challenges";
 import { cellKey } from "@/lib/class-status";
 import { loadClassStatus } from "@/lib/class-status-db";
@@ -444,6 +459,84 @@ async function checkAutoClose() {
   expected.set(passedStudent, "passed");
 }
 
+async function checkNoNote() {
+  console.log("\n== OUT OF TRIES, NO NOTE YET ==");
+  const entriesFor = (queue: QueueEntry[], student: string) => queue.filter((e) => e.item.studentId === student);
+
+  // Out of tries, no note: listed with the label, and counted.
+  const student = await newStudent();
+  for (let i = 0; i < MAX_TRIES - 1; i++) await submit(student, "fail", 5);
+  const countBefore = await countTeacherQueue(classId, teacherId, execute);
+  const listedBefore = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student).length;
+  await submit(student, "fail", 5);
+  let queue = await loadTeacherQueue(classId, teacherId, execute);
+  let mine = entriesFor(queue, student);
+  const countOut = await countTeacherQueue(classId, teacherId, execute);
+  const entry = mine[0];
+  check(
+    listedBefore === 0 && mine.length === 1 && entry.kind === "no_note" && entry.item.tries === MAX_TRIES && entry.item.triesAllowed === MAX_TRIES,
+    `out of tries, no note: listed ${mine.length} time(s) as ${entry?.kind} (before the last try: ${listedBefore}), ${NO_NOTE_LABEL}`,
+  );
+  check(countOut === countBefore + 1 && countOut === queue.length, `counted: ${countBefore} -> ${countOut}, list ${queue.length}`);
+  check(
+    queue.every((e, i) => i === 0 || Date.parse(queue[i - 1].at) <= Date.parse(e.at)),
+    `oldest first by when they started waiting (${queue.map((e) => e.kind).join(",")})`,
+  );
+
+  // Another teacher sees nothing.
+  const theirs = await loadTeacherQueue(classId, otherTeacherId, execute);
+  const theirCount = await countTeacherQueue(classId, otherTeacherId, execute);
+  check(theirs.length === 0 && theirCount === 0, `other teacher: list ${theirs.length}, count ${theirCount}`);
+
+  // After the note: once, as the challenge; the count doesn't move.
+  const sent = await send(student);
+  queue = await loadTeacherQueue(classId, teacherId, execute);
+  mine = entriesFor(queue, student);
+  const countNote = await countTeacherQueue(classId, teacherId, execute);
+  check(
+    sent.status === "sent" && mine.length === 1 && mine[0].kind === "challenge" && countNote === countOut,
+    `after the note: ${sent.status}, listed ${mine.length} time(s) as ${mine.map((e) => e.kind).join(",")}, count ${countNote}`,
+  );
+
+  // One more try: off the list until it's used too, then back.
+  const challengeId = mine[0].kind === "challenge" ? mine[0].item.id : "";
+  const granted = await decide(challengeId, "deny", true);
+  const afterGrant = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student).length;
+  await submit(student, "fail", 5);
+  const usedTry = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student);
+  check(
+    granted.status === "denied" && afterGrant === 0 && usedTry.length === 1 && usedTry[0].kind === "no_note",
+    `one more try: listed ${afterGrant} time(s), after using it ${usedTry.map((e) => e.kind).join(",") || "none"}`,
+  );
+  expected.set(student, "waiting");
+
+  // At the check limit with tries left: listed too.
+  const checkLimit = await newStudent();
+  await submit(checkLimit, "fail", 5);
+  for (let i = 1; i < EFFORT_CHECK_LIMIT; i++) await submit(checkLimit, "error", 5);
+  const atLimit = entriesFor(await loadTeacherQueue(classId, teacherId, execute), checkLimit);
+  check(atLimit.length === 1 && atLimit[0].kind === "no_note", `check limit, no note: ${atLimit.map((e) => e.kind).join(",") || "none"}`);
+  expected.set(checkLimit, "waiting");
+
+  // Passed: never listed.
+  const passed = await newStudent();
+  for (let i = 0; i < MAX_TRIES - 1; i++) await submit(passed, "fail", 5);
+  const pass = await submit(passed, "pass", 5);
+  const passedListed = entriesFor(await loadTeacherQueue(classId, teacherId, execute), passed).length;
+  check(pass.status === "checked" && pass.passed && passedListed === 0, `passed on the last try: listed ${passedListed}`);
+  expected.set(passed, "passed");
+
+  // The list matches the class view: every no-note entry is Waiting there.
+  const status = await loadClassStatus(classId, teacherId, execute);
+  queue = await loadTeacherQueue(classId, teacherId, execute);
+  const noNote = queue.filter((e) => e.kind === "no_note");
+  const waiting = Object.values(status.cells).filter((c) => c.status === "waiting").length;
+  check(
+    noNote.length === waiting && noNote.every((e) => status.cells[cellKey(e.item.studentId, e.item.readingId)]?.status === "waiting"),
+    `no-note entries ${noNote.length}, Waiting for teacher in the class view ${waiting}`,
+  );
+}
+
 async function checkOwnership() {
   console.log("\n== ANOTHER TEACHER ==");
   const { student, challenge } = await challengedStudent();
@@ -573,6 +666,7 @@ async function main(): Promise<void> {
     await checkExtraTryAtCheckLimit();
     await checkSecondTab();
     await checkAutoClose();
+    await checkNoNote();
     await checkOwnership();
     await checkTeacherAnswers();
     await checkStatusDerivation();
