@@ -175,7 +175,12 @@ export async function getOrCreateSelfQuestionsWith(
     prompts = await deps.write(context);
   } catch (error) {
     deps.onError?.(questionErrorLogFields(error));
-    // The only place a slot is released: a write was attempted and failed.
+    // The only place a slot is released: a write was attempted and failed
+    // (a timeout, a 402, a provider error, anything the write throws). So
+    // while writes keep failing, an account's readings are capped by the
+    // question limit (QUESTION_GENERATION_LIMIT, 30 claims per 10 minutes), not by
+    // the 5 slots: each failed reading gives its slot back and another can
+    // be created. Bounded, and the user can't make the gateway fail.
     await store.release(accountId, readingId, token);
     return { status: "error", kind: questionErrorKind(error) };
   }

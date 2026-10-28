@@ -17,7 +17,9 @@
 // write (not set up, the account's question limit, another tab's claim)
 // keeps the slot, so an account at its question limit can't create, open,
 // and repeat past the allowance; that reading gets its questions later on
-// the slot it kept.
+// the slot it kept. So while writes keep failing (a timeout, a 402, a
+// provider error), readings are capped by the question limit (30 per 10
+// minutes, each failed write counts toward it), not by the 5 slots.
 // Its Try again takes the slot back in the claim itself, under the same
 // account lock and only while a slot is free (see selfClaimStatements in
 // self-questions-core.ts); a reading with questions always holds its slot.
