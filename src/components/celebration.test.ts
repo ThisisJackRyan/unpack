@@ -81,7 +81,7 @@ describe("pass celebration", () => {
     assert.match(source, /observer\.disconnect\(\)/);
     const form = read("./answer-form.tsx");
     const submit = form.slice(form.indexOf("function onSubmit"), form.indexOf("return (", form.indexOf("function onSubmit")));
-    assert.ok(submit.indexOf("markJustChecked(browserSessionStore(), readingId)") < submit.indexOf("startTransition"), submit);
+    assert.ok(submit.indexOf("markJustChecked(browserSessionStore(), readingId)") < submit.indexOf("submitCheck("), submit);
   });
 
   it("shows on a pass for students (not a teacher's accept) and self-learners", () => {

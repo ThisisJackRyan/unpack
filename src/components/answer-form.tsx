@@ -1,7 +1,7 @@
 "use client";
 
 import { unstable_rethrow } from "next/navigation";
-import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { card, pill, primaryButtonLarge } from "@/components/ui";
 import { lockedQuestionIds, passedCountLabel, type AttemptView } from "@/lib/reading-progress";
@@ -29,7 +29,7 @@ import {
   type DraftOwner,
 } from "@/lib/answer-drafts";
 import { browserSessionStore, markJustChecked } from "@/lib/celebration";
-import { withCheckFallback, type AnswerFormState } from "./answer-form-state";
+import { submitCheck, withCheckFallback, type AnswerFormState, type CheckRun } from "./answer-form-state";
 import { LimitNotice } from "./limit-notice";
 import { MaxLengthNote } from "./max-length-note";
 
@@ -46,6 +46,11 @@ type Props = {
   previous: AttemptView | null;
   // Whose unsent drafts these are (ids only, see answer-drafts.ts).
   drafts: DraftOwner;
+  // How long to wait for a check. Only the QA route (src/app/qa, off
+  // unless UNPACK_QA_ROUTES is set) passes a shorter one, for
+  // scripts/browser-check-answer-timeout.ts; the reading pages use
+  // CLIENT_CHECK_TIMEOUT_MS.
+  checkTimeoutMs?: number;
 };
 
 const initialState: AnswerFormState = {};
@@ -55,13 +60,17 @@ function prefill(questions: StudentQuestion[], previous: AttemptView | null): Re
 }
 
 // Every question with an answer box, and one button that checks them all.
-// The form submits through a transition (not the form action prop), so
+// The form submits from its own handler (not the form action prop), so
 // React doesn't reset the boxes after a check. A check request that fails
 // outright, or doesn't answer within CLIENT_CHECK_TIMEOUT_MS, shows a
 // message here, not the page's error boundary or an endless spinner (see
-// withCheckFallback).
-export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous, drafts }: Props) {
-  const [result, dispatch, pending] = useActionState(withCheckFallback(action, unstable_rethrow), initialState);
+// withCheckFallback). The state and the pending flag are plain state, set
+// outside any transition, so the message shows the moment the form stops
+// waiting (see submitCheck).
+export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous, drafts, checkTimeoutMs }: Props) {
+  const [result, setResult] = useState(initialState);
+  const [pending, setPending] = useState(false);
+  const run = useRef<CheckRun>({ seq: 0, pending: false });
   const [values, setValues] = useState(() => prefill(questions, previous));
   // A new try (the page re-renders after a check): start from its answers.
   const [shownTry, setShownTry] = useState(tryNumber);
@@ -99,13 +108,26 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (pending) return;
+    if (run.current.pending) return;
     const data = new FormData(e.currentTarget);
     // A pass swaps this form for the result in place: the celebration
     // takes this mark and scrolls into view.
     markJustChecked(browserSessionStore(), readingId);
     setSubmittedTry(tryNumber);
-    startTransition(() => dispatch(data));
+    const check = withCheckFallback(action, unstable_rethrow, checkTimeoutMs);
+    void submitCheck(run.current, () => check(result, data), {
+      start: () => setPending(true),
+      result: (state) => {
+        setResult(state);
+        setPending(false);
+      },
+      error: (error) => {
+        setPending(false);
+        setResult(() => {
+          throw error;
+        });
+      },
+    });
   }
 
   return (

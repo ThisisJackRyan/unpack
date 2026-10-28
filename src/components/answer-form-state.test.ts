@@ -10,10 +10,13 @@ import {
   CHECK_NO_REPLY_MESSAGE,
   CLIENT_CHECK_TIMEOUT_MS,
   isAppUpdatedError,
+  isNextRedirect,
   NO_REPLY_STATE,
+  submitCheck,
   TIMED_OUT_STATE,
   withCheckFallback,
   type AnswerFormState,
+  type CheckRun,
 } from "./answer-form-state";
 
 // Stands in for next/navigation's unstable_rethrow: lets an error with a
@@ -80,7 +83,6 @@ describe("withCheckFallback", () => {
       assert.deepEqual(logged.mock.calls.at(-1)?.arguments, [failure]);
     }
     assert.deepEqual(NO_REPLY_STATE, {
-      timedOut: true,
       message: "We couldn’t hear back. Your answers are still here. Reload the page to see if they were checked.",
     });
     // The form can't know whether the check was saved.
@@ -137,8 +139,8 @@ describe("withCheckFallback", () => {
 
       t.mock.timers.tick(1);
       await pending;
-      // The wrapper has returned, so useActionState's transition ends and
-      // the button comes back.
+      // The wrapper has returned, so submitCheck clears pending and the
+      // button comes back.
       assert.equal(settled, NO_REPLY_STATE);
       assert.deepEqual([...data.entries()].length, 2, "the answers are untouched");
 
@@ -226,5 +228,129 @@ describe("isAppUpdatedError", () => {
     ]) {
       assert.equal(isAppUpdatedError(other), false, String(other));
     }
+  });
+});
+
+describe("isNextRedirect", () => {
+  it("matches Next's redirect digest only", () => {
+    assert.ok(isNextRedirect(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;push;/join;307;" })));
+    assert.ok(isNextRedirect({ digest: "NEXT_REDIRECT;replace;/sign-in;303;" }));
+    for (const other of [
+      { digest: "NEXT_HTTP_ERROR_FALLBACK;404" },
+      new Error("NEXT_REDIRECT"),
+      new TypeError("Failed to fetch"),
+      null,
+      undefined,
+    ]) {
+      assert.equal(isNextRedirect(other), false, String(other));
+    }
+  });
+});
+
+describe("submitCheck", () => {
+  // Records what the form would do with each handler.
+  function recorder() {
+    const events: string[] = [];
+    const states: AnswerFormState[] = [];
+    const errors: unknown[] = [];
+    return {
+      events,
+      states,
+      errors,
+      on: {
+        start: () => events.push("start"),
+        result: (state: AnswerFormState) => {
+          events.push("result");
+          states.push(state);
+        },
+        error: (error: unknown) => {
+          events.push("error");
+          errors.push(error);
+        },
+      },
+    };
+  }
+
+  it("starts, then applies the result and clears pending", async () => {
+    const run: CheckRun = { seq: 0, pending: false };
+    const r = recorder();
+    const request = deferred();
+    const done = submitCheck(run, () => request.promise, r.on);
+    assert.deepEqual(r.events, ["start"]);
+    assert.equal(run.pending, true);
+    const state = { message: "x" };
+    request.resolve(state);
+    await done;
+    assert.deepEqual(r.events, ["start", "result"]);
+    assert.equal(r.states[0], state);
+    assert.equal(run.pending, false);
+  });
+
+  it("refuses a second submit while one is running", async () => {
+    const run: CheckRun = { seq: 0, pending: false };
+    const r = recorder();
+    const request = deferred();
+    let calls = 0;
+    const check = () => {
+      calls += 1;
+      return request.promise;
+    };
+    const first = submitCheck(run, check, r.on);
+    await submitCheck(run, check, r.on);
+    assert.equal(calls, 1);
+    assert.deepEqual(r.events, ["start"]);
+    request.resolve({});
+    await first;
+  });
+
+  it("drops the result and the error of a superseded submit", async () => {
+    const run: CheckRun = { seq: 0, pending: false };
+    const r = recorder();
+    const old = deferred();
+    const oldDone = submitCheck(run, () => old.promise, r.on);
+    // Something moved the sequence on (a newer submit).
+    run.seq += 1;
+    run.pending = false;
+    old.resolve({ message: "late" });
+    await oldDone;
+    assert.deepEqual(r.events, ["start"]);
+
+    const failed = deferred();
+    const failedDone = submitCheck(run, () => failed.promise, r.on);
+    run.seq += 1;
+    failed.reject(new Error("late failure"));
+    await failedDone;
+    assert.deepEqual(r.events, ["start", "start"]);
+  });
+
+  it("with withCheckFallback: the timeout shows at the bound, and the late result never arrives", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const run: CheckRun = { seq: 0, pending: false };
+    const r = recorder();
+    const request = deferred();
+    const check = withCheckFallback(() => request.promise, rethrowNext, 2_000);
+    const done = submitCheck(run, () => check({}, formWithAnswers()), r.on);
+    t.mock.timers.tick(2_000);
+    await done;
+    assert.deepEqual(r.states, [NO_REPLY_STATE]);
+    assert.equal(run.pending, false, "the button comes back");
+    request.resolve({ message: "late" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(r.states, [NO_REPLY_STATE]);
+  });
+
+  it("leaves a redirect to Next's router (stays pending) and passes other Next errors to the form", async () => {
+    const run: CheckRun = { seq: 0, pending: false };
+    const r = recorder();
+    const redirect = Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;push;/join;307;" });
+    await submitCheck(run, () => Promise.reject(redirect), r.on);
+    assert.deepEqual(r.events, ["start"]);
+    assert.equal(run.pending, true, "no flash of the idle form before the page goes");
+
+    const fresh: CheckRun = { seq: 0, pending: false };
+    const notFound = Object.assign(new Error("NEXT_HTTP_ERROR_FALLBACK;404"), { digest: "NEXT_HTTP_ERROR_FALLBACK;404" });
+    await submitCheck(fresh, () => Promise.reject(notFound), r.on);
+    assert.equal(r.errors[0], notFound);
+    assert.equal(fresh.pending, false);
   });
 });
