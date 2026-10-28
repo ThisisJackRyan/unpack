@@ -28,7 +28,7 @@ import { generateSessionToken, hashSessionToken } from "./student-session-token"
 import { CLASS_NOT_FOUND_MESSAGE, type JoinErrors, type JoinValues } from "./validate-join";
 import { hashJoinCode } from "./client-ip";
 
-export const NAME_TAKEN_MESSAGE = "Someone already has that name. If it’s you, open unpack on the device you joined with. If not, add a letter to your first name.";
+export const NAME_TAKEN_MESSAGE = "Someone already has that name. If it’s you, open unpack on the device you joined with. If not, ask your teacher for help.";
 
 const NAME_KEY_CONSTRAINT = "students_class_id_name_key_unique";
 
@@ -115,7 +115,9 @@ export async function joinClassWith(data: JoinValues, deps: JoinDeps): Promise<J
 
 // What the form shows for an outcome that's a mistake to fix. An unknown
 // or turned-off code goes on the code field, like a malformed one (see
-// validateJoin), so every "no such class" reads the same. "limited" isn't
+// validateJoin), so every "no such class" reads the same. A name already
+// taken goes on the first-name field (not the last letters, which only
+// cap at 2). "limited" isn't
 // here: the join action shows it as an amber note with a retry time.
 export function joinOutcomeErrors(
   outcome: Exclude<JoinOutcome, { status: "joined" | "limited" }>,
@@ -124,6 +126,6 @@ export function joinOutcomeErrors(
     case "class_not_found":
       return { code: CLASS_NOT_FOUND_MESSAGE };
     case "name_taken":
-      return { lastInitials: NAME_TAKEN_MESSAGE };
+      return { firstName: NAME_TAKEN_MESSAGE };
   }
 }

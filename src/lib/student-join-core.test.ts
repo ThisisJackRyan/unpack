@@ -45,7 +45,7 @@ describe("isNameTakenConflict", () => {
   });
 
   it("has the agreed message", () => {
-    assert.equal(NAME_TAKEN_MESSAGE, "Someone already has that name. If it’s you, open unpack on the device you joined with. If not, add a letter to your first name.");
+    assert.equal(NAME_TAKEN_MESSAGE, "Someone already has that name. If it’s you, open unpack on the device you joined with. If not, ask your teacher for help.");
   });
 });
 
@@ -137,7 +137,7 @@ describe("joinOutcomeErrors", () => {
   });
 
   it("keeps a taken name on its own field", () => {
-    assert.deepEqual(joinOutcomeErrors({ status: "name_taken" }), { lastInitials: NAME_TAKEN_MESSAGE });
+    assert.deepEqual(joinOutcomeErrors({ status: "name_taken" }), { firstName: NAME_TAKEN_MESSAGE });
   });
 
   // Codes that pass validateJoin but match no class (or a class whose code
