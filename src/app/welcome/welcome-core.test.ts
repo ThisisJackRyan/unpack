@@ -46,6 +46,7 @@ function spies(opts: { ageGated?: boolean; local?: RolelessDeleteOutcome; save?:
           calls.clerk.push(id);
           calls.order.push("clerk");
         },
+        confirmClerkDeleted: async () => {},
         log: (...line) => logs.push(line),
       }),
     logError: (...line) => logs.push(line),

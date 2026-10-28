@@ -1,6 +1,7 @@
 import "server-only";
 import { clerkClient } from "@clerk/nextjs/server";
 import { neonExecutor } from "./neon-executor";
+import { confirmClerkDeletedStatement } from "./deleted-accounts";
 import { deleteRolelessAccountStatements, rolelessDeleteOutcome, type Under13DeleteDeps } from "./under-13-account";
 
 // Server-only: the real dependencies of the under-13 delete (see
@@ -9,5 +10,8 @@ import { deleteRolelessAccountStatements, rolelessDeleteOutcome, type Under13Del
 export const under13DeleteDeps: Under13DeleteDeps = {
   deleteLocal: async (clerkUserId) => rolelessDeleteOutcome(await neonExecutor(deleteRolelessAccountStatements(clerkUserId))),
   deleteClerkUser: async (clerkUserId) => (await clerkClient()).users.deleteUser(clerkUserId),
+  confirmClerkDeleted: async (clerkUserId) => {
+    await neonExecutor([confirmClerkDeletedStatement(clerkUserId)]);
+  },
   log: (level, message, fields) => (level === "error" ? console.error : console.info)(message, fields),
 };

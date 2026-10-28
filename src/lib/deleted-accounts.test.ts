@@ -4,11 +4,13 @@ import { describe, it } from "node:test";
 import {
   accountLockStatement,
   ACCOUNT_LOCK_SPACE,
+  confirmClerkDeletedStatement,
   createAccountStatement,
   createAccountStatements,
   DELETED_ACCOUNT_RETENTION_DAYS,
   hashClerkUserId,
   isDeletedStatement,
+  pendingClerkDeletesStatement,
   pruneDeletedStatement,
   recordDeletedStatement,
 } from "./deleted-accounts";
@@ -20,18 +22,49 @@ describe("deleted accounts list", () => {
     assert.equal(hash, createHash("sha256").update("deleted-clerk-user:user_test_1").digest("hex"));
     assert.notEqual(hash, createHash("sha256").update("user_test_1").digest("hex"));
     assert.notEqual(hashClerkUserId("user_test_2"), hash);
-    for (const s of [recordDeletedStatement("user_test_1"), isDeletedStatement("user_test_1")]) {
+    for (const s of [
+      recordDeletedStatement("user_test_1", "pending"),
+      recordDeletedStatement("user_test_1", "confirmed"),
+      confirmClerkDeletedStatement("user_test_1"),
+      isDeletedStatement("user_test_1"),
+    ]) {
       assert.deepEqual(s.params, [hash]);
       assert.equal(s.text.includes("user_test_1"), false);
     }
   });
 
-  it("a repeat delete keeps the first time; the prune drops rows past the retention", () => {
-    assert.match(recordDeletedStatement("u").text, /on conflict \(clerk_user_hash\) do nothing/);
+  it("pending never touches an existing row; confirmed confirms a pending row and never un-confirms", () => {
+    assert.equal(
+      recordDeletedStatement("u", "pending").text,
+      "insert into deleted_clerk_users (clerk_user_hash) values ($1::text)\non conflict (clerk_user_hash) do nothing",
+    );
+    assert.equal(
+      recordDeletedStatement("u", "confirmed").text,
+      "insert into deleted_clerk_users (clerk_user_hash, clerk_deleted_at) values ($1::text, now())\non conflict (clerk_user_hash) do update\nset clerk_deleted_at = coalesce(deleted_clerk_users.clerk_deleted_at, excluded.clerk_deleted_at)",
+    );
+    // deleted_at is never in the update: a repeat keeps the first time.
+    assert.equal(/[\s(,]deleted_at\b/.test(recordDeletedStatement("u", "confirmed").text), false);
+    assert.equal(
+      confirmClerkDeletedStatement("u").text,
+      "update deleted_clerk_users set clerk_deleted_at = now()\nwhere clerk_user_hash = $1::text and clerk_deleted_at is null",
+    );
+  });
+
+  it("the prune drops only confirmed rows, counted from the confirmation", () => {
     const prune = pruneDeletedStatement();
-    assert.match(prune.text, /deleted_at < now\(\) - make_interval\(days => \$1::int\)/);
+    assert.match(prune.text, /where clerk_deleted_at is not null\n    and clerk_deleted_at < now\(\) - make_interval\(days => \$1::int\)\n  order by clerk_deleted_at\n/);
+    assert.equal(/\bdeleted_at </.test(prune.text.replace(/clerk_deleted_at/g, "")), false);
     assert.equal(prune.params[0], DELETED_ACCOUNT_RETENTION_DAYS);
     assert.equal(DELETED_ACCOUNT_RETENTION_DAYS, 30);
+  });
+
+  it("the ops listing reads only pending rows, hash and deleted_at", () => {
+    const s = pendingClerkDeletesStatement();
+    assert.equal(
+      s.text,
+      "select clerk_user_hash, deleted_at from deleted_clerk_users\nwhere clerk_deleted_at is null\norder by deleted_at, clerk_user_hash",
+    );
+    assert.deepEqual(s.params, []);
   });
 
   it("the first-visit creation refuses a listed id in the insert itself and never sets a role", () => {

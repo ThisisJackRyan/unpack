@@ -13,24 +13,32 @@
 //    user.deleted webhook (deleteTeacherStatements in clerk-webhook.ts),
 //    with every step limited to a row whose role is still null. It takes
 //    the same account lock, locks the row, deletes what hangs off it, lists
-//    the id's hash on deleted_clerk_users, and deletes the row, in one
-//    transaction. Done first so nothing depends on the webhook's timing:
+//    the id's hash on deleted_clerk_users as pending (Clerk's delete not
+//    confirmed yet), and deletes the row, in one transaction. Done first so nothing depends on the webhook's timing:
 //    the moment it commits, the name and email are gone and the hash list
 //    refuses a first visit or a late user.created (deleted-accounts.ts).
 // 2. Clerk (users.deleteUser): removes the account itself, and its
-//    sessions. Clerk then sends user.deleted, and the webhook's delete
-//    finds no row: already_gone, a harmless no-op (the hash insert is ON
-//    CONFLICT DO NOTHING). Run at the same moment, the account lock puts
-//    the two deletes one after the other.
+//    sessions. On success (or a 404) the hash is confirmed
+//    (confirmClerkDeletedStatement), which lets the list prune it after
+//    its retention. Clerk then sends user.deleted, and the webhook's
+//    delete finds no row: already_gone, a harmless no-op that confirms
+//    the hash too (it never un-confirms). Run at the same moment, the
+//    account lock puts the two deletes one after the other.
 //
 // Failures (fail safe: the account must not survive):
 // - The local delete throws: Clerk is still called, so the webhook's
 //   delete (which Svix retries for days) removes the row.
 // - Clerk throws: tried once more. If that fails too, the row is already
-//   gone and the hash listed, so the account can't get a row back: a sign
-//   in later only reaches the deleted-account refusal in account.ts, which
-//   calls deleteUser again (retryClerkDelete). A 404 from Clerk means it
-//   is already gone and counts as done.
+//   gone and the hash listed as pending, so the account can't get a row
+//   back: a pending row is never pruned (deleted-accounts.ts). A sign in
+//   later only reaches the deleted-account refusal in account.ts, which
+//   calls deleteUser again (retryClerkDelete) and confirms the hash when
+//   that works. Ops can list the pending rows and the Clerk ids behind
+//   them (pnpm ops:list-pending-clerk-deletes) and delete those accounts
+//   in the Clerk dashboard; Clerk's user.deleted then confirms the row.
+//   A 404 from Clerk means it is already gone and counts as done.
+// - The confirm write throws: logged; the row stays pending (never
+//   pruned) until the webhook's user.deleted confirms it.
 // - Either way the caller still sets the cookie and signs the user out.
 //
 // Logs: one fixed tag (UNDER_13_DELETE_TAG) with fixed outcome words and,
@@ -57,6 +65,7 @@ export function deleteRolelessAccountStatements(clerkUserId: string): Statement[
     { text: `select id, role from teachers where clerk_user_id = $1::text for update`, params },
     { text: `delete from classes\nwhere teacher_id in (${roleless})`, params },
     { text: `delete from self_readings\nwhere account_id in (${roleless})`, params },
+    // Pending (no clerk_deleted_at): Clerk's delete comes after this.
     {
       text: `insert into deleted_clerk_users (clerk_user_hash)
 select $2::text
@@ -84,6 +93,8 @@ export type Under13DeleteDeps = {
   deleteLocal: (clerkUserId: string) => Promise<RolelessDeleteOutcome>;
   // clerkClient().users.deleteUser.
   deleteClerkUser: (clerkUserId: string) => Promise<unknown>;
+  // Runs confirmClerkDeletedStatement: Clerk's delete is done.
+  confirmClerkDeleted: (clerkUserId: string) => Promise<void>;
   // Safe fields only (see the top of this file).
   log: (level: "info" | "error", message: string, fields: Record<string, unknown>) => void;
 };
@@ -101,6 +112,20 @@ function errorFields(error: unknown): { name?: unknown; code?: unknown; status?:
 // Clerk says the account doesn't exist (already deleted).
 function isNotFound(error: unknown): boolean {
   return errorFields(error).status === 404;
+}
+
+// The confirm write; logged (never thrown) when it fails, so the row just
+// stays pending until the webhook confirms it.
+async function confirmInList(
+  clerkUserId: string,
+  deps: Pick<Under13DeleteDeps, "confirmClerkDeleted">,
+): Promise<{ ok: true } | { ok: false; error: unknown }> {
+  try {
+    await deps.confirmClerkDeleted(clerkUserId);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error };
+  }
 }
 
 // deleteUser, tried twice; a 404 counts as done.
@@ -132,26 +157,46 @@ export async function deleteUnder13Account(clerkUserId: string, deps: Under13Del
     return "has_role";
   }
   const clerk = await deleteInClerk(clerkUserId, deps);
-  const failed = local === "failed" || !clerk.ok;
+  const confirm = clerk.ok ? await confirmInList(clerkUserId, deps) : null;
+  const failed = local === "failed" || !clerk.ok || confirm?.ok === false;
   deps.log(failed ? "error" : "info", UNDER_13_DELETE_TAG, {
     local,
     clerk: clerk.ok ? "deleted" : "failed",
+    listed: confirm?.ok ? "confirmed" : confirm ? "confirm_failed" : "pending",
     ...(local === "failed" ? { localError: errorFields(localError) } : {}),
     ...(!clerk.ok ? { clerkError: errorFields(clerk.error) } : {}),
+    ...(confirm && !confirm.ok ? { confirmError: errorFields(confirm.error) } : {}),
   });
   return "deleted";
 }
 
 // The deleted-account refusal (account.ts): a signed-in Clerk account
 // whose id is on the deleted list should not exist in Clerk any more, so
-// this is an under-13 delete whose Clerk call failed. Try it again. Never
-// throws; logs the same tag with no id.
-export async function retryClerkDelete(clerkUserId: string, deps: Pick<Under13DeleteDeps, "deleteClerkUser" | "log">): Promise<void> {
+// this is an under-13 delete whose Clerk call failed. Try it again, and
+// on success (or a 404) confirm the hash, so the list can prune it after
+// its retention. A failure leaves the row pending. Never throws; logs the
+// same tag with no id.
+export async function retryClerkDelete(
+  clerkUserId: string,
+  deps: Pick<Under13DeleteDeps, "deleteClerkUser" | "confirmClerkDeleted" | "log">,
+): Promise<void> {
+  let retry: "deleted" | "not_found";
   try {
     await deps.deleteClerkUser(clerkUserId);
-    deps.log("info", UNDER_13_DELETE_TAG, { retry: "deleted" });
+    retry = "deleted";
   } catch (error) {
-    if (isNotFound(error)) return;
-    deps.log("error", UNDER_13_DELETE_TAG, { retry: "failed", clerkError: errorFields(error) });
+    if (!isNotFound(error)) {
+      deps.log("error", UNDER_13_DELETE_TAG, { retry: "failed", listed: "pending", clerkError: errorFields(error) });
+      return;
+    }
+    retry = "not_found";
   }
+  const confirm = await confirmInList(clerkUserId, deps);
+  if (confirm.ok) {
+    // A 404 on a confirmed row (a session that outlived an ordinary
+    // delete) is the everyday case: nothing to log.
+    if (retry === "deleted") deps.log("info", UNDER_13_DELETE_TAG, { retry, listed: "confirmed" });
+    return;
+  }
+  deps.log("error", UNDER_13_DELETE_TAG, { retry, listed: "confirm_failed", confirmError: errorFields(confirm.error) });
 }

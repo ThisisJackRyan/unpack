@@ -57,7 +57,8 @@ export const getOrCreateAccount = cache(async (): Promise<Account> => {
   // statement, after the id's account lock (see deleted-accounts.ts): no
   // row is created, and the person sees a friendly page instead. A live
   // Clerk account on the deleted list is an under-13 delete whose Clerk
-  // call failed (under-13-account.ts), so that is tried again first.
+  // call failed (under-13-account.ts), so that is tried again first; on
+  // success (or a 404) its hash is confirmed, so the list can prune it.
   const [, rows = []] = await neonExecutor(createAccountStatements(user.id, name, email));
   if (rows.length === 0) {
     await retryClerkDelete(user.id, under13DeleteDeps);

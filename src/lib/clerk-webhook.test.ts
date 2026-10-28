@@ -148,8 +148,13 @@ describe("handleClerkEvent", () => {
       "delete from self_readings\nwhere account_id in (select id from teachers where clerk_user_id = $1::text)",
     );
     assert.equal(teacher.text, "delete from teachers where clerk_user_id = $1::text returning id");
-    // Listed in the same batch as the cascade, by hash only.
-    assert.match(listed.text, /^insert into deleted_clerk_users \(clerk_user_hash\) values \(\$1::text\)\non conflict \(clerk_user_hash\) do nothing$/);
+    // Listed in the same batch as the cascade, by hash only, and confirmed
+    // (Clerk sent the event): a pending row from an under-13 delete is
+    // confirmed, a confirmed one keeps its first confirmation.
+    assert.equal(
+      listed.text,
+      "insert into deleted_clerk_users (clerk_user_hash, clerk_deleted_at) values ($1::text, now())\non conflict (clerk_user_hash) do update\nset clerk_deleted_at = coalesce(deleted_clerk_users.clerk_deleted_at, excluded.clerk_deleted_at)",
+    );
     assert.deepEqual(listed.params, [hashClerkUserId("user_test_1")]);
     assert.match(prune.text, /^delete from deleted_clerk_users/);
     assert.deepEqual(prune.params, [30, 200]);

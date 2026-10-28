@@ -30,7 +30,8 @@
 //   A user with no email address at all is skipped on either event (email
 //   is required); the lazy creation refuses such a user too.
 // - user.deleted: deletes the account's classes, then its self-learner
-//   readings, lists the id's hash as deleted, then deletes the teachers
+//   readings, lists the id's hash as deleted (Clerk's delete confirmed),
+//   then deletes the teachers
 //   row, in one transaction (deleteTeacherStatements). The classes cascade to their readings,
 //   students, and all student work; the self-learner readings to their
 //   questions, tries, answers, and effort checks; the account row then to
@@ -122,9 +123,11 @@ returning id`,
 //    account that switched roles has both kinds, so both steps always run.
 // 4. List the id's hash on deleted_clerk_users (deleted-accounts.ts), so
 //    a late user.created or a first visit can't recreate the row, and
-//    prune that list's rows past its retention. Listed even when there
-//    was no row (an account that never visited): it is deleted in Clerk
-//    either way.
+//    prune that list's confirmed rows past its retention. Listed even
+//    when there was no row (an account that never visited): it is
+//    deleted in Clerk either way. Listed as confirmed, since Clerk sent
+//    the event: this also confirms the pending row of an under-13 delete
+//    whose deleteUser calls failed (under-13-account.ts).
 // 5. Delete the account row: what's left under it is the teacher's own
 //    logs (link_fetch_attempts, question_generation_attempts, and any
 //    reading_cap_raises left), and the cascade would reach any self_*
@@ -146,7 +149,7 @@ where teacher_id in (select id from teachers where clerk_user_id = $1::text)`,
 where account_id in (select id from teachers where clerk_user_id = $1::text)`,
       params,
     },
-    recordDeletedStatement(clerkUserId),
+    recordDeletedStatement(clerkUserId, "confirmed"),
     pruneDeletedStatement(),
     { text: `delete from teachers where clerk_user_id = $1::text returning id`, params },
   ];

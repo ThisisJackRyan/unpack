@@ -15,8 +15,8 @@ import {
 const CLERK_ID = "user_test_child_1";
 const EMAIL = "child@example.invalid";
 
-function spies(opts: { local?: RolelessDeleteOutcome | Error; clerk?: (Error | null)[] } = {}) {
-  const calls = { local: [] as string[], clerk: [] as string[], order: [] as string[] };
+function spies(opts: { local?: RolelessDeleteOutcome | Error; clerk?: (Error | null)[]; confirm?: Error } = {}) {
+  const calls = { local: [] as string[], clerk: [] as string[], confirm: [] as string[], order: [] as string[] };
   const logs: { level: string; message: string; fields: Record<string, unknown> }[] = [];
   const clerkResults = [...(opts.clerk ?? [])];
   const deps: Under13DeleteDeps = {
@@ -31,6 +31,11 @@ function spies(opts: { local?: RolelessDeleteOutcome | Error; clerk?: (Error | n
       calls.order.push("clerk");
       const next = clerkResults.shift();
       if (next) throw next;
+    },
+    confirmClerkDeleted: async (id) => {
+      calls.confirm.push(id);
+      calls.order.push("confirm");
+      if (opts.confirm) throw opts.confirm;
     },
     log: (level, message, fields) => logs.push({ level, message, fields }),
   };
@@ -85,10 +90,13 @@ describe("deleteUnder13Account", () => {
   it("deletes locally first, then in Clerk, both with the account's Clerk id", async () => {
     const { deps, calls, logs } = spies();
     assert.equal(await deleteUnder13Account(CLERK_ID, deps), "deleted");
-    assert.deepEqual(calls.order, ["local", "clerk"]);
+    assert.deepEqual(calls.order, ["local", "clerk", "confirm"]);
     assert.deepEqual(calls.local, [CLERK_ID]);
     assert.deepEqual(calls.clerk, [CLERK_ID]);
-    assert.deepEqual(logs, [{ level: "info", message: UNDER_13_DELETE_TAG, fields: { local: "deleted", clerk: "deleted" } }]);
+    assert.deepEqual(calls.confirm, [CLERK_ID]);
+    assert.deepEqual(logs, [
+      { level: "info", message: UNDER_13_DELETE_TAG, fields: { local: "deleted", clerk: "deleted", listed: "confirmed" } },
+    ]);
     assertSafeLogs(logs);
   });
 
@@ -96,12 +104,14 @@ describe("deleteUnder13Account", () => {
     const { deps, calls } = spies({ local: "already_gone" });
     assert.equal(await deleteUnder13Account(CLERK_ID, deps), "deleted");
     assert.deepEqual(calls.clerk, [CLERK_ID]);
+    assert.deepEqual(calls.confirm, [CLERK_ID]);
   });
 
   it("never touches an account that has a role: Clerk isn't called", async () => {
     const { deps, calls, logs } = spies({ local: "has_role" });
     assert.equal(await deleteUnder13Account(CLERK_ID, deps), "has_role");
     assert.deepEqual(calls.clerk, []);
+    assert.deepEqual(calls.confirm, []);
     assert.deepEqual(logs[0].fields, { local: "has_role", clerk: "skipped" });
     assertSafeLogs(logs);
   });
@@ -112,7 +122,12 @@ describe("deleteUnder13Account", () => {
     assert.equal(await deleteUnder13Account(CLERK_ID, deps), "deleted");
     assert.deepEqual(calls.clerk, [CLERK_ID]);
     assert.equal(logs[0].level, "error");
-    assert.deepEqual(logs[0].fields, { local: "failed", clerk: "deleted", localError: { name: "NeonDbError", code: "40001", status: undefined } });
+    assert.deepEqual(logs[0].fields, {
+      local: "failed",
+      clerk: "deleted",
+      listed: "confirmed",
+      localError: { name: "NeonDbError", code: "40001", status: undefined },
+    });
     assertSafeLogs(logs);
   });
 
@@ -120,42 +135,84 @@ describe("deleteUnder13Account", () => {
     const once = spies({ clerk: [clerkError(500)] });
     assert.equal(await deleteUnder13Account(CLERK_ID, once.deps), "deleted");
     assert.equal(once.calls.clerk.length, 2);
+    assert.deepEqual(once.calls.confirm, [CLERK_ID]);
     assert.equal(once.logs[0].level, "info");
 
     const twice = spies({ clerk: [clerkError(500), clerkError(503)] });
     assert.equal(await deleteUnder13Account(CLERK_ID, twice.deps), "deleted");
     assert.equal(twice.calls.clerk.length, 2);
+    // Both failed: the hash stays pending (never pruned) and is not confirmed.
+    assert.deepEqual(twice.calls.confirm, []);
     assert.equal(twice.logs[0].level, "error");
     assert.deepEqual(twice.logs[0].fields, {
       local: "deleted",
       clerk: "failed",
+      listed: "pending",
       clerkError: { name: "ClerkAPIResponseError", code: undefined, status: 503 },
     });
     assertSafeLogs(twice.logs);
   });
 
-  it("a 404 from Clerk means already gone: done, no retry", async () => {
+  it("a 404 from Clerk means already gone: done, no retry, and the hash is confirmed", async () => {
     const { deps, calls, logs } = spies({ clerk: [clerkError(404)] });
     assert.equal(await deleteUnder13Account(CLERK_ID, deps), "deleted");
     assert.equal(calls.clerk.length, 1);
+    assert.deepEqual(calls.confirm, [CLERK_ID]);
     assert.equal(logs[0].level, "info");
+    assert.equal(logs[0].fields.listed, "confirmed");
+  });
+
+  it("a failed confirm write is logged as an error, never thrown (the row stays pending for the webhook)", async () => {
+    const pgError = Object.assign(new Error(`timeout ${EMAIL}`), { name: "NeonDbError", code: "57014" });
+    const { deps, calls, logs } = spies({ confirm: pgError });
+    assert.equal(await deleteUnder13Account(CLERK_ID, deps), "deleted");
+    assert.deepEqual(calls.order, ["local", "clerk", "confirm"]);
+    assert.equal(logs[0].level, "error");
+    assert.deepEqual(logs[0].fields, {
+      local: "deleted",
+      clerk: "deleted",
+      listed: "confirm_failed",
+      confirmError: { name: "NeonDbError", code: "57014", status: undefined },
+    });
+    assertSafeLogs(logs);
   });
 });
 
 describe("retryClerkDelete", () => {
-  it("deletes in Clerk with the id, logs the tag only, and never throws", async () => {
+  it("deletes in Clerk with the id, confirms the hash, logs the tag only, and never throws", async () => {
     const ok = spies();
     await retryClerkDelete(CLERK_ID, ok.deps);
+    assert.deepEqual(ok.calls.order, ["clerk", "confirm"]);
     assert.deepEqual(ok.calls.clerk, [CLERK_ID]);
-    assert.deepEqual(ok.logs[0].fields, { retry: "deleted" });
+    assert.deepEqual(ok.calls.confirm, [CLERK_ID]);
+    assert.deepEqual(ok.logs[0].fields, { retry: "deleted", listed: "confirmed" });
 
     const failed = spies({ clerk: [clerkError(500)] });
     await retryClerkDelete(CLERK_ID, failed.deps);
+    assert.equal(failed.calls.clerk.length, 1);
+    assert.deepEqual(failed.calls.confirm, [], "a failed retry leaves the row pending");
     assert.equal(failed.logs[0].level, "error");
+    assert.equal(failed.logs[0].fields.listed, "pending");
     assertSafeLogs([...ok.logs, ...failed.logs]);
+  });
 
+  it("a 404 confirms the hash quietly (a session that outlived an ordinary delete)", async () => {
     const gone = spies({ clerk: [clerkError(404)] });
     await retryClerkDelete(CLERK_ID, gone.deps);
+    assert.deepEqual(gone.calls.confirm, [CLERK_ID]);
     assert.deepEqual(gone.logs, []);
+  });
+
+  it("a failed confirm after the retry is logged, never thrown", async () => {
+    const pgError = Object.assign(new Error(`timeout ${EMAIL}`), { name: "NeonDbError", code: "57014" });
+    const broken = spies({ confirm: pgError });
+    await retryClerkDelete(CLERK_ID, broken.deps);
+    assert.equal(broken.logs[0].level, "error");
+    assert.deepEqual(broken.logs[0].fields, {
+      retry: "deleted",
+      listed: "confirm_failed",
+      confirmError: { name: "NeonDbError", code: "57014", status: undefined },
+    });
+    assertSafeLogs(broken.logs);
   });
 });
