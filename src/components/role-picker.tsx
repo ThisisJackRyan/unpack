@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useClerk } from "@clerk/nextjs";
 import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { BIRTH_MONTH_FIELD, BIRTH_YEAR_FIELD, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
 import { MONTH_NAMES } from "@/lib/age-screen";
 import { ErrorMessage } from "./error-message";
-import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, type RoleFormState } from "./role-form-state";
+import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, signOutTo, type RoleFormState } from "./role-form-state";
 import { field, primaryButtonLarge, secondaryButtonLarge } from "./ui";
 
 const CHOICES: { role: AccountRole; title: string; line: string }[] = [
@@ -22,7 +23,9 @@ const CHOICES: { role: AccountRole; title: string; line: string }[] = [
 // and birth year, with no default and nothing on the page about what the
 // answer is for. The server checks it. When it says no (now, or the
 // cookie from before), the class note with a link to /join takes its
-// place, with no way to send self-learner again.
+// place, with no way to send self-learner again. On /welcome a fresh
+// under-13 answer has deleted the account (state.signOutTo): the note
+// stays while the form signs the user out to /join.
 //
 // confirmSwitch (/settings, for a teacher): choosing "reading for myself"
 // and pressing the button first shows an amber note that the classes stay
@@ -67,7 +70,10 @@ export function RolePicker({
   const errors = state.errors ?? {};
   const gated = !ageConfirmed && (ageGated || state.ageGate === true);
   const askAge = !ageConfirmed && !gated;
-  const gateShown = gated && role === "self_learner";
+  const leaving = state.signOutTo;
+  // Only the class note: nothing left to choose.
+  const onlyNote = Boolean(leaving);
+  const gateShown = gated && (role === "self_learner" || onlyNote);
   const ageError = ageErrorCleared ? undefined : errors.age;
   const age = ageNote(ageError);
   const confirmed = state.switchConfirm === "confirmed";
@@ -81,6 +87,12 @@ export function RolePicker({
   useEffect(() => {
     if (warning) warningHeading.current?.focus();
   }, [warning]);
+
+  // The account is gone: sign out, then /join.
+  const { signOut } = useClerk();
+  useEffect(() => {
+    if (leaving) void signOutTo(leaving, signOut, (path) => window.location.assign(path));
+  }, [leaving, signOut]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     const submitter = (e.nativeEvent as SubmitEvent).submitter;
@@ -102,45 +114,47 @@ export function RolePicker({
 
   return (
     <form action={formAction} onSubmit={onSubmit} noValidate className="group/role flex flex-col gap-6">
-      <fieldset className="flex flex-col gap-3" aria-describedby={errors.role ? "role-error" : undefined}>
-        <legend className="mb-3 text-xl font-bold text-ink-950">{legend}</legend>
-        {/* Remount on each result so the kept choice is applied. */}
-        <div key={`role-${state.role ?? initialRole ?? "none"}`} className="grid gap-3 sm:grid-cols-2">
-          {CHOICES.map((c) => (
-            <label
-              key={c.role}
-              className="relative flex min-h-32 cursor-pointer flex-col gap-2 rounded-3xl border-2 border-ink-200 bg-white p-5 shadow-card transition-colors hover:border-primary-300 has-checked:border-primary-600 has-checked:bg-primary-50 has-checked:shadow-lip-primary has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600"
-            >
-              <input
-                ref={c.role === "teacher" ? teacherRadio : undefined}
-                type="radio"
-                id={`role-${c.role}`}
-                name="role"
-                value={c.role}
-                defaultChecked={(state.role ?? initialRole) === c.role}
-                onChange={(e) => setRole(e.currentTarget.value)}
-                aria-describedby={`role-${c.role}-line`}
-                className="peer sr-only"
-              />
-              <span
-                aria-hidden="true"
-                className="absolute top-5 right-5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-ink-400 bg-white peer-checked:border-primary-600 peer-checked:bg-primary-600"
+      {!onlyNote && (
+        <fieldset className="flex flex-col gap-3" aria-describedby={errors.role ? "role-error" : undefined}>
+          <legend className="mb-3 text-xl font-bold text-ink-950">{legend}</legend>
+          {/* Remount on each result so the kept choice is applied. */}
+          <div key={`role-${state.role ?? initialRole ?? "none"}`} className="grid gap-3 sm:grid-cols-2">
+            {CHOICES.map((c) => (
+              <label
+                key={c.role}
+                className="relative flex min-h-32 cursor-pointer flex-col gap-2 rounded-3xl border-2 border-ink-200 bg-white p-5 shadow-card transition-colors hover:border-primary-300 has-checked:border-primary-600 has-checked:bg-primary-50 has-checked:shadow-lip-primary has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600"
               >
-                <span className="h-2 w-2 rounded-full bg-white" />
-              </span>
-              <span className="pr-10 text-xl font-bold text-ink-950">{c.title}</span>
-              <span id={`role-${c.role}-line`} className="text-lg text-ink-700">
-                {c.line}
-              </span>
-            </label>
-          ))}
-        </div>
-        <ErrorMessage id="role-error">
-          {errors.role}
-        </ErrorMessage>
-      </fieldset>
+                <input
+                  ref={c.role === "teacher" ? teacherRadio : undefined}
+                  type="radio"
+                  id={`role-${c.role}`}
+                  name="role"
+                  value={c.role}
+                  defaultChecked={(state.role ?? initialRole) === c.role}
+                  onChange={(e) => setRole(e.currentTarget.value)}
+                  aria-describedby={`role-${c.role}-line`}
+                  className="peer sr-only"
+                />
+                <span
+                  aria-hidden="true"
+                  className="absolute top-5 right-5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-ink-400 bg-white peer-checked:border-primary-600 peer-checked:bg-primary-600"
+                >
+                  <span className="h-2 w-2 rounded-full bg-white" />
+                </span>
+                <span className="pr-10 text-xl font-bold text-ink-950">{c.title}</span>
+                <span id={`role-${c.role}-line`} className="text-lg text-ink-700">
+                  {c.line}
+                </span>
+              </label>
+            ))}
+          </div>
+          <ErrorMessage id="role-error">
+            {errors.role}
+          </ErrorMessage>
+        </fieldset>
+      )}
 
-      {askAge && (
+      {askAge && !onlyNote && (
         <fieldset
           className={`flex-col gap-3 rounded-3xl border-2 border-ink-200 bg-white p-5 ${
             role === "self_learner" ? "flex" : "hidden group-has-[#role-self_learner:checked]/role:flex"
@@ -222,9 +236,15 @@ export function RolePicker({
               Ask your teacher for a class code, then join their class to read and answer questions. You don’t need an
               account for that.
             </p>
-            <Link href="/join" className={`${primaryButtonLarge} sm:self-start`}>
-              Join with a code
-            </Link>
+            {leaving ? (
+              <p role="status" className="text-base font-semibold text-ink-950">
+                Taking you there…
+              </p>
+            ) : (
+              <Link href="/join" className={`${primaryButtonLarge} sm:self-start`}>
+                Join with a code
+              </Link>
+            )}
           </section>
         )}
       </div>

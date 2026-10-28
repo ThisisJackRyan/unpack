@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ReadingBuddy, Sparkle } from "@/components/illustrations";
 import { StudentShell } from "@/components/student-shell";
 import { card, primaryButtonLarge } from "@/components/ui";
+import { readAgeGate } from "@/lib/age-gate";
 import { botCheckSiteKey } from "@/lib/join-bot-check";
 import { getStudentSession } from "@/lib/student-auth";
 import { JoinForm } from "./join-form";
@@ -11,9 +12,12 @@ export const metadata: Metadata = { title: "Join your class" };
 
 // Anyone can open this. A student who already has a session sees their
 // class first, with one button back to it, and the form below to join a
-// different class (which switches this browser to the new class).
+// different class (which switches this browser to the new class). With
+// the age gate cookie (an under-13 answer on /welcome, see age-screen.ts)
+// the heading is the class note's, with nothing about why.
 export default async function JoinPage() {
   const session = await getStudentSession();
+  const gated = await readAgeGate();
 
   return (
     <StudentShell narrow>
@@ -47,7 +51,7 @@ export default async function JoinPage() {
                 </h2>
               ) : (
                 <h1 id="join-heading" className="text-4xl font-bold tracking-tight text-ink-950">
-                  Join your class
+                  {gated ? "Let’s get you into a class" : "Join your class"}
                 </h1>
               )}
               <p className="text-lg text-ink-700">

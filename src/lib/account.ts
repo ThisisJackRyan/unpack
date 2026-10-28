@@ -9,6 +9,8 @@ import { ACCOUNT_DELETED_PATH, createAccountStatements } from "./deleted-account
 import { roleRedirect, setRoleOutcome, setRoleStatements, type AccountRole, type Area, type SetRoleOutcome } from "./account-role";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
+import { retryClerkDelete } from "./under-13-account";
+import { under13DeleteDeps } from "./under-13-server";
 
 // Server-only: the signed-in Clerk account's row (the teachers table holds
 // every account, teacher or self-learner) and the role guards every page
@@ -53,9 +55,14 @@ export const getOrCreateAccount = cache(async (): Promise<Account> => {
   // row. The role is never set here: the account chooses on /welcome. A
   // deleted account (a session that outlived it) is refused in the same
   // statement, after the id's account lock (see deleted-accounts.ts): no
-  // row is created, and the person sees a friendly page instead.
+  // row is created, and the person sees a friendly page instead. A live
+  // Clerk account on the deleted list is an under-13 delete whose Clerk
+  // call failed (under-13-account.ts), so that is tried again first.
   const [, rows = []] = await neonExecutor(createAccountStatements(user.id, name, email));
-  if (rows.length === 0) redirect(ACCOUNT_DELETED_PATH);
+  if (rows.length === 0) {
+    await retryClerkDelete(user.id, under13DeleteDeps);
+    redirect(ACCOUNT_DELETED_PATH);
+  }
   const [account] = await db
     .select()
     .from(schema.teachers)
