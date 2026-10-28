@@ -87,6 +87,8 @@ Before an account first reads for itself, `/welcome` (or Settings) asks **"When 
 
 When the answer is under 13, the server sets one cookie on that browser: **`unpack_age_gate`**, value **`under`**, kept **30 days**, httpOnly (page scripts can't read it), Secure in production, SameSite=Lax. It holds **no date, no age and no account id**, only the word "under". While it is there, reading for yourself is refused on that browser without asking again (on `/welcome` and in Settings, checked by the server action, not only the page), and the page points to joining a class with a teacher's code (`/join`) instead. It doesn't affect an account that confirmed 13+ before. It expires on its own after 30 days, or when the browser's cookies are cleared.
 
+The cookie is not signed, on purpose. It can only ever narrow what a browser may do (refuse reading for yourself); nothing reads it to grant anything. So the only thing editing or deleting it can do is undo the block, which anyone can already do by clearing cookies or using another browser. That is a known, accepted limit of an age screen with no identity check (it stops a quick retry with a different date, not a determined person), and signing the cookie wouldn't change it. A forged cookie can only block its own browser.
+
 ### `teachers` (the account row), new columns
 
 | Column | What | Why |
