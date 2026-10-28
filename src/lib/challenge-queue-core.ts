@@ -25,7 +25,17 @@
 
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { studentDisplayName } from "./class-status";
-import { checksAllowedSql, countedCheckSql, effortLockSql, EXTRA_TRY_CHECKS, latestChallengeSql, limitsFromRow, triesAllowedSql } from "./reading-limits";
+import {
+  checksAllowedSql,
+  countedCheckSql,
+  effortLockSql,
+  EXTRA_TRY_CHECKS,
+  grantedChecksSql,
+  grantedTriesSql,
+  latestChallengeSql,
+  limitsFromRow,
+  triesAllowedSql,
+} from "./reading-limits";
 import { latestChallenge, studentReadingStatus } from "./reading-progress";
 
 export const CHALLENGE_DECISIONS = ["accept", "deny"] as const;
@@ -80,9 +90,9 @@ export function decideStatements(input: DecideInput): Statement[] {
     {
       text: `update challenges ch set status = $4::challenge_status, resolved_at = now(), resolved_by = $2::uuid,
   tries_allowed = case when $5::boolean then
-    (select count(*)::int from attempts a where a.student_id = ch.student_id and a.reading_id = ch.reading_id) + 1 end,
+    ${grantedTriesSql("ch.student_id", "ch.reading_id")} end,
   checks_allowed = case when $5::boolean then
-    (select count(*)::int from effort_checks e where e.student_id = ch.student_id and e.reading_id = ch.reading_id and ${countedCheckSql("e")}) + $6::int end
+    ${grantedChecksSql("ch.student_id", "ch.reading_id", "$6::int")} end
 from readings r, classes c
 where ch.id = $1::uuid and r.id = ch.reading_id and c.id = r.class_id
   and c.id = $3::uuid and c.teacher_id = $2::uuid
@@ -153,6 +163,9 @@ export type QueueQuestion = {
 export type QueueItem = {
   id: string;
   round: number;
+  // Which of the student's notes this is: the round, less the rounds a
+  // teacher gave one more try without a note (challenge-grant-core.ts).
+  noteNumber: number;
   note: string;
   createdAt: string;
   studentId: string;
@@ -186,7 +199,9 @@ export function queueStatements(classId: string, teacherId: string): Statement[]
   (select count(*)::int from effort_checks e where e.student_id = ch.student_id and e.reading_id = ch.reading_id and ${countedCheckSql("e")}) as checks,
   ${triesAllowedSql("ch.student_id", "ch.reading_id")} as tries_allowed,
   ${checksAllowedSql("ch.student_id", "ch.reading_id")} as checks_allowed,
-  (select max(a.try_number) from attempts a where a.student_id = ch.student_id and a.reading_id = ch.reading_id) as last_try
+  (select max(a.try_number) from attempts a where a.student_id = ch.student_id and a.reading_id = ch.reading_id) as last_try,
+  (select count(*)::int from challenges n where n.student_id = ch.student_id and n.reading_id = ch.reading_id
+    and n.round <= ch.round and n.note <> '') as note_number
 ${OPEN_IN_CLASS}
 order by ch.created_at, ch.id`,
       params: [classId, teacherId],
@@ -233,6 +248,7 @@ export function queueItems(results: Record<string, unknown>[][]): QueueItem[] {
     return {
       id: String(row.id),
       round: Number(row.round ?? 1),
+      noteNumber: Number(row.note_number ?? row.round ?? 1),
       note: String(row.note ?? ""),
       createdAt: isoTime(row.created_at),
       studentId: String(row.student_id),
@@ -355,6 +371,43 @@ export function triesUsedLabel(tries: number, allowed: number): string {
 // Under the no-note item's title.
 export function noNoteHelp(name: string): string {
   return `${name} can still send you a note.`;
+}
+
+// "Give one more try" on a no-note row (challenge-grant-core.ts for the
+// statements): the same grant as "Deny, give one more try", without a
+// note. Scoped to the class and its owning teacher, like a decision.
+export type GrantInput = {
+  classId: string;
+  teacherId: string;
+  studentId: string;
+  readingId: string;
+};
+
+export type GrantResult =
+  | { status: "granted" }
+  // Not out of tries with no note any more: they sent a note, passed, or
+  // already have a try (a double-click, or a second tab).
+  | { status: "not_waiting" }
+  // An effort check is still running for them; nothing changed.
+  | { status: "busy" }
+  | { status: "not_found" };
+
+// The button on a no-note row, and its pending text.
+export const GIVE_EXTRA_TRY_LABEL = "Give one more try";
+export const GIVE_EXTRA_TRY_PENDING = "Giving…";
+
+// For the queue's live region. `name` is the student's display name.
+export function grantMessage(result: GrantResult, name: string): string {
+  switch (result.status) {
+    case "granted":
+      return `One more try given. ${name} has 1 more try.`;
+    case "not_waiting":
+      return "Nothing to change. The list is up to date.";
+    case "busy":
+      return `${name}’s answers are still being checked. Try again in a minute.`;
+    case "not_found":
+      return "We couldn’t find that student on that reading. The list is up to date.";
+  }
 }
 
 // The whole queue, one list. `at` is when the student started waiting on

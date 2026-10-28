@@ -5,6 +5,9 @@ import Link from "next/link";
 import { pill, primaryButton, secondaryButton } from "@/components/ui";
 import {
   decisionMessage,
+  GIVE_EXTRA_TRY_LABEL,
+  GIVE_EXTRA_TRY_PENDING,
+  grantMessage,
   NO_NOTE_LABEL,
   noNoteHelp,
   triesUsedLabel,
@@ -17,23 +20,40 @@ import {
 import { ErrorMessage } from "@/components/error-message";
 import { MetaLine } from "@/components/meta-line";
 import { studentOnReading } from "@/lib/meta-line";
-import type { DecideState } from "./state";
+import type { DecideState, GrantState } from "./state";
 
 type Action = (state: DecideState, formData: FormData) => Promise<DecideState>;
+type GrantAction = (state: GrantState, formData: FormData) => Promise<GrantState>;
 
 const secondaryButtonDisabled = `${secondaryButton} disabled:cursor-not-allowed disabled:opacity-60`;
 
 // The queue, with one live region that stays mounted while cards come and
-// go: after a decision the page refreshes, the card is gone, and the
-// region still says what happened. Focus moves to the heading so it isn't
-// lost with the card.
-export function ChallengeQueue({ action, classId, entries }: { action: Action; classId: string; entries: QueueEntry[] }) {
+// go: after a decision (or one more try on a no-note row) the page
+// refreshes, the card is gone, and the region still says what happened.
+// Focus moves to the heading so it isn't lost with the card.
+export function ChallengeQueue({
+  action,
+  grantAction,
+  classId,
+  entries,
+}: {
+  action: Action;
+  grantAction: GrantAction;
+  classId: string;
+  entries: QueueEntry[];
+}) {
   const [announcement, setAnnouncement] = useState("");
   const [focusHeading, setFocusHeading] = useState(0);
 
   useEffect(() => {
     if (focusHeading > 0) document.getElementById("queue-heading")?.focus();
   }, [focusHeading]);
+
+  // `stays`: the card or row is still there (busy), so focus stays too.
+  function onDecided(message: string, stays = false) {
+    setAnnouncement(message);
+    if (!stays) setFocusHeading((n) => n + 1);
+  }
 
   return (
     <>
@@ -47,17 +67,9 @@ export function ChallengeQueue({ action, classId, entries }: { action: Action; c
         <ol className="flex flex-col gap-6">
           {entries.map((entry) =>
             entry.kind === "challenge" ? (
-              <ChallengeCard
-                key={entry.key}
-                action={action}
-                item={entry.item}
-                onDecided={(message) => {
-                  setAnnouncement(message);
-                  setFocusHeading((n) => n + 1);
-                }}
-              />
+              <ChallengeCard key={entry.key} action={action} item={entry.item} onDecided={onDecided} />
             ) : (
-              <NoNoteRow key={entry.key} classId={classId} item={entry.item} />
+              <NoNoteRow key={entry.key} action={grantAction} classId={classId} item={entry.item} onDecided={onDecided} />
             ),
           )}
         </ol>
@@ -66,9 +78,35 @@ export function ChallengeQueue({ action, classId, entries }: { action: Action; c
   );
 }
 
-// Out of tries, no note yet: one row, a short status line, and the way to
-// their answers. Nothing to decide until a note comes.
-function NoNoteRow({ classId, item }: { classId: string; item: NoNoteItem }) {
+// Out of tries, no note yet: one row, a short status line, the way to
+// their answers, and "Give one more try" (the same grant as "Deny, give
+// one more try", without a note; secondary, not a warning: it undoes
+// nothing). Once given, the page refreshes and the row is gone.
+function NoNoteRow({
+  action,
+  classId,
+  item,
+  onDecided,
+}: {
+  action: GrantAction;
+  classId: string;
+  item: NoNoteItem;
+  onDecided: (message: string, stays?: boolean) => void;
+}) {
+  const key = `${item.studentId}:${item.readingId}`;
+  const [state, dispatch, pending] = useActionState(async (prev: GrantState, formData: FormData) => {
+    const next = await action(prev, formData);
+    if (next.result) onDecided(grantMessage(next.result, item.studentName), next.result.status === "busy");
+    return next;
+  }, {});
+
+  function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (pending) return;
+    const data = new FormData(e.currentTarget);
+    startTransition(() => dispatch(data));
+  }
+
   const headingId = `no-note-${item.studentId}-${item.readingId}`;
   const answersHref = `/teacher/classes/${classId}/students/${item.studentId}?reading=${item.readingId}#reading-${item.readingId}`;
   return (
@@ -85,9 +123,23 @@ function NoNoteRow({ classId, item }: { classId: string; item: NoNoteItem }) {
         <p className="text-lg text-ink-700 tabular-nums">{triesUsedLabel(item.tries, item.triesAllowed)}</p>
         <p className="text-lg text-ink-700">{noNoteHelp(item.studentName)}</p>
       </div>
-      <Link href={answersHref} className={`${secondaryButton} self-start`}>
-        See answers<span className="sr-only"> from {item.studentName} on {item.readingTitle}</span>
-      </Link>
+      <form onSubmit={onSubmit} aria-busy={pending} className="flex flex-col gap-3">
+        <input type="hidden" name="studentId" value={item.studentId} />
+        <input type="hidden" name="readingId" value={item.readingId} />
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <Link href={answersHref} className={`${secondaryButton} self-start`}>
+            See answers<span className="sr-only"> from {item.studentName} on {item.readingTitle}</span>
+          </Link>
+          <button type="submit" disabled={pending} className={`${secondaryButtonDisabled} self-start`}>
+            {pending ? GIVE_EXTRA_TRY_PENDING : GIVE_EXTRA_TRY_LABEL}
+            <span className="sr-only">
+              {" "}
+              for {item.studentName} on {item.readingTitle}
+            </span>
+          </button>
+        </div>
+        <ErrorMessage>{state.key === key ? state.error : ""}</ErrorMessage>
+      </form>
     </li>
   );
 }
@@ -132,7 +184,7 @@ function ChallengeCard({
             {triesUsedLabel(item.tries, item.triesAllowed)}
           </span>
           {item.round > 1 && (
-            <span className={`${pill} bg-primary-50 text-primary-700 text-base`}>Note {item.round}, after one more try</span>
+            <span className={`${pill} bg-primary-50 text-primary-700 text-base`}>Note {item.noteNumber}, after one more try</span>
           )}
         </p>
       </div>

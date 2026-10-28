@@ -10,9 +10,12 @@ import {
   teacherQueue,
   type DecideInput,
   type DecideResult,
+  type GrantInput,
+  type GrantResult,
   type QueueEntry,
   type QueueItem,
 } from "./challenge-queue-core";
+import { grantExtraTryWith } from "./challenge-grant-core";
 import { isUuid } from "./classes";
 import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
@@ -22,7 +25,7 @@ import { neonExecutor } from "./neon-executor";
 // and the decision itself are scoped to the class and its owning teacher.
 // `execute` is for scripts/check-teacher-queue.ts; the app passes nothing.
 
-export type { DecideResult, NoNoteItem, QueueEntry, QueueItem } from "./challenge-queue-core";
+export type { DecideResult, GrantResult, NoNoteItem, QueueEntry, QueueItem } from "./challenge-queue-core";
 
 // What the challenges page lists: the open challenges and the students
 // out of tries with no note yet, oldest first (see teacherQueue).
@@ -79,4 +82,12 @@ export function decideChallenge(
 ): Promise<DecideResult> {
   if (!isUuid(input.challengeId) || !isUuid(input.classId)) return Promise.resolve({ status: "not_found" });
   return decideChallengeWith(input, execute);
+}
+
+// "Give one more try" on a no-note row (see challenge-grant-core.ts).
+export function grantExtraTry(input: GrantInput, execute: StatementExecutor = neonExecutor): Promise<GrantResult> {
+  if (!isUuid(input.classId) || !isUuid(input.studentId) || !isUuid(input.readingId)) {
+    return Promise.resolve({ status: "not_found" });
+  }
+  return grantExtraTryWith(input, execute);
 }

@@ -200,6 +200,8 @@ describe("queue", () => {
           tries_allowed: 4,
           checks_allowed: 5,
           last_try: 4,
+          // Round 1 was one more try without a note: this is their first.
+          note_number: 1,
         },
         { id: "ch2", note: "Help", created_at: "2026-10-27", student_id: "s2", first_name: "Keʻala", last_initials: "P", reading_id: "r1", title: "Foxes", tries: 0, checks: 6, last_try: null },
       ],
@@ -212,6 +214,7 @@ describe("queue", () => {
     assert.deepEqual(items[0], {
       id: "ch1",
       round: 2,
+      noteNumber: 1,
       note: "I tried.",
       createdAt: "2026-10-27T10:00:00.000Z",
       studentId: "s1",
@@ -230,6 +233,7 @@ describe("queue", () => {
     });
     assert.equal(items[1].studentName, "Keʻala P");
     assert.equal(items[1].round, 1);
+    assert.equal(items[1].noteNumber, 1);
     assert.equal(items[1].triesAllowed, 3);
     assert.equal(items[1].checksAllowed, 6);
     assert.equal(items[1].lastTry, null);
@@ -258,6 +262,7 @@ describe("out of tries, no note yet", () => {
     return {
       id,
       round: 1,
+      noteNumber: 1,
       note: "I tried.",
       createdAt,
       studentId,

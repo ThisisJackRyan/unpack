@@ -29,6 +29,19 @@ export function countedCheckSql(alias?: string): string {
 // student is at the check limit again and can send a new note.
 export const EXTRA_TRY_CHECKS = 2;
 
+// The one more try grant, as SQL: the limits a grant stores (tries used
+// + 1, checks used + the extra checks in parameter `extraChecks`). Shared
+// by "Deny, give one more try" and "Give one more try" without a note
+// (challenge-queue-core.ts, challenge-grant-core.ts), so both give the
+// same. `student` and `reading` are SQL expressions.
+export function grantedTriesSql(student: string, reading: string): string {
+  return `(select count(*)::int from attempts a where a.student_id = ${student} and a.reading_id = ${reading}) + 1`;
+}
+
+export function grantedChecksSql(student: string, reading: string, extraChecks: string): string {
+  return `(select count(*)::int from effort_checks e where e.student_id = ${student} and e.reading_id = ${reading} and ${countedCheckSql("e")}) + ${extraChecks}`;
+}
+
 export type Limits = { tries: number; checks: number };
 
 export const DEFAULT_LIMITS: Limits = { tries: MAX_TRIES, checks: EFFORT_CHECK_LIMIT };

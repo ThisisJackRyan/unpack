@@ -4,7 +4,7 @@ import { backLink, card } from "@/components/ui";
 import { loadTeacherQueue } from "@/lib/challenge-queue";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadClass } from "../loaders";
-import { decideChallengeAction } from "./actions";
+import { decideChallengeAction, giveExtraTryAction } from "./actions";
 import { ChallengeQueue } from "./queue";
 import { PaperPlane } from "@/components/illustrations";
 
@@ -19,7 +19,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // The open challenges in this class: who, which reading, their note, and
 // their last try answer by answer, then Accept or Deny. With them, oldest
 // first in one list, the students out of tries with no note yet, each
-// with a link to their answers.
+// with a link to their answers and "Give one more try".
 // Only the owning teacher gets here (loadClass 404s others), and each
 // decision checks ownership again in its own transaction.
 export default async function ChallengesPage({ params }: Props) {
@@ -43,7 +43,12 @@ export default async function ChallengesPage({ params }: Props) {
         </p>
       </div>
 
-      <ChallengeQueue action={decideChallengeAction.bind(null, found.id)} classId={found.id} entries={entries} />
+      <ChallengeQueue
+        action={decideChallengeAction.bind(null, found.id)}
+        grantAction={giveExtraTryAction.bind(null, found.id)}
+        classId={found.id}
+        entries={entries}
+      />
 
       {entries.length === 0 && (
         <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
