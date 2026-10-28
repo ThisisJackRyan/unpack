@@ -14,6 +14,7 @@ import {
   type ReadingFormData,
   type ReadingFormErrors,
 } from "./validate-reading";
+import { safeErrorFields } from "./safe-error-fields";
 
 export const LINK_ERRORS: Record<FetchArticleErrorKind, string> = {
   invalid_url: "Enter a full web link, like https://example.com/story.",
@@ -50,7 +51,8 @@ export type ReadingSourceDeps = {
   // reads the time and the reader's zone). Without it, a relative time.
   limitedMessage?: () => Promise<string>;
   fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
-  // Safe fields only (kind, host, error names), never the URL or text.
+  // Safe fields only (kind, status, error names), never any part of the
+  // link (host, path, query) or the text.
   log: (message: string, fields: Record<string, unknown>) => void;
 };
 
@@ -68,9 +70,9 @@ export async function resolveReadingSource(
   try {
     allowed = await deps.recordLinkFetch();
   } catch (error) {
-    // Name, code, and message only: a Postgres error's detail can echo a row.
-    const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-    deps.log("recordLinkFetch failed", { name, code, message });
+    // Safe fields only (safe-error-fields.ts): a query error's message can
+    // echo a row.
+    deps.log("recordLinkFetch failed", safeErrorFields(error));
     return { ok: false, errors: { form: SAVE_READING_FAILED_MESSAGE } };
   }
   if (!allowed) {
@@ -90,12 +92,10 @@ export async function resolveReadingSource(
     article = await deps.fetchArticle(data.url);
   } catch (error) {
     const kind = error instanceof FetchArticleError ? error.kind : "http_error";
-    // Kind and host only: no full URL (query strings), IPs, or stacks.
-    deps.log("fetchArticle failed", {
-      kind,
-      host: error instanceof FetchArticleError ? error.host : undefined,
-      name: error instanceof Error ? error.name : typeof error,
-    });
+    // The kind, the HTTP status of a non-2xx reply, and the safe fields
+    // only: no part of the link (host, path, query) and no IPs or stacks.
+    const status = error instanceof FetchArticleError ? error.status : undefined;
+    deps.log("fetchArticle failed", { kind, ...(status === undefined ? {} : { status }), ...safeErrorFields(error) });
     return {
       ok: false,
       errors: { url: LINK_ERRORS[kind] },

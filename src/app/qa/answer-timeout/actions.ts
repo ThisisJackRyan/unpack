@@ -5,6 +5,7 @@ import { notFound, redirect, unstable_rethrow } from "next/navigation";
 import type { AnswerFormState } from "@/components/answer-form-state";
 import { guardAnswerCheck, PRE_CHECK_DEADLINE_MS, withDeadline } from "@/lib/answer-check-guard";
 import { qaRoutesEnabled } from "@/lib/qa-routes";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { ANSWER_FIELD_PREFIX } from "@/lib/validate-answers";
 import { saveQaTry } from "./tries";
 
@@ -56,7 +57,7 @@ export async function qaAnswerAction(
     },
     {
       rethrow: unstable_rethrow,
-      onError: (error) => console.error("qa-answer-action failed", (error as { name?: unknown }).name),
+      onError: (error) => console.error("qa-answer-action failed", safeErrorFields(error)),
       deadlineMs: bounded ? options.precheckMs ?? PRE_CHECK_DEADLINE_MS : PRE_CHECK_DEADLINE_MS,
     },
   );

@@ -261,7 +261,7 @@ describe("Give one more try on the queue", () => {
     assert.match(action, /grantExtraTry\(\{ classId, teacherId: teacher\.id, studentId, readingId \}\)/);
     assert.match(action, /revalidatePath\(`\/teacher\/classes\/\$\{classId\}\/challenges`\)/);
     // No ids of a student in the log.
-    assert.match(action, /console\.error\("giveExtraTryAction: grant failed", \{ name, code, message, classId \}\)/);
+    assert.match(action, /console\.error\("giveExtraTryAction: grant failed", \{ \.\.\.safeErrorFields\(error\), classId \}\)/);
   });
 
   it("says what happened, with curly apostrophes and no em dashes", () => {

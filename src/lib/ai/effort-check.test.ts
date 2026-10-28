@@ -261,6 +261,8 @@ describe("checkEffort", () => {
     assert.deepEqual(effortErrorLogFields(gatewayErrors.forbidden()), {
       kind: "not_configured",
       name: "GatewayForbiddenError",
+      causes: [],
+      timedOut: false,
       status: 403,
       type: "forbidden",
     });
@@ -287,6 +289,6 @@ describe("checkEffort", () => {
 
   it("logs safe fields only", () => {
     const fields = effortErrorLogFields(new EffortCheckError("failed", "invalid output: x"));
-    assert.deepEqual(fields, { kind: "failed", name: "EffortCheckError", reason: "invalid output: x" });
+    assert.deepEqual(fields, { kind: "failed", name: "EffortCheckError", causes: [], timedOut: false, reason: "invalid output: x" });
   });
 });

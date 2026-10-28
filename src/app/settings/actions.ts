@@ -15,6 +15,7 @@ import {
   type SetRoleOutcome,
 } from "@/lib/account-role";
 import { readAgeGate, setAgeGate } from "@/lib/age-gate";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 
 // Switches the account's role. Keeps every row (classes and self-learner
 // readings alike); only the home changes. Choosing the current role again
@@ -51,8 +52,7 @@ export async function switchRoleAction(_prev: RoleFormState, formData: FormData)
   try {
     outcome = await setAccountRole(account.id, choice.role, choice.confirmAge, false);
   } catch (error) {
-    const { name, code } = error as { name?: unknown; code?: unknown };
-    console.error("switchRoleAction: save failed", { name, code });
+    console.error("switchRoleAction: save failed", safeErrorFields(error));
     return { errors: { form: ROLE_SAVE_FAILED_MESSAGE }, role: kept, ...confirmed };
   }
   if (outcome.status === "saved") redirect(homeFor(outcome.role));

@@ -144,14 +144,13 @@ export function decodeBody(body: Uint8Array, headerCharset: string | undefined):
 export async function readCapped(
   stream: AsyncIterable<Buffer | string>,
   maxBytes: number,
-  host?: string,
 ): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of stream) {
     const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
     total += buf.length;
-    if (total > maxBytes) throw new FetchArticleError("too_large", host);
+    if (total > maxBytes) throw new FetchArticleError("too_large");
     chunks.push(buf);
   }
   return Buffer.concat(chunks, total);
@@ -163,7 +162,6 @@ export async function readCapped(
 export function decompress(
   body: Readable,
   encoding: string | undefined,
-  host?: string,
 ): Readable {
   const name = (encoding ?? "").trim().toLowerCase();
   if (name === "" || name === "identity") return body;
@@ -171,7 +169,7 @@ export function decompress(
   if (name === "gzip" || name === "x-gzip") decoder = zlib.createGunzip();
   else if (name === "deflate") decoder = zlib.createInflate();
   else if (name === "br") decoder = zlib.createBrotliDecompress();
-  else throw new FetchArticleError("http_error", host);
+  else throw new FetchArticleError("http_error");
   // pipeline passes an error on either side to the other, so a dropped
   // connection fails the read instead of hanging it.
   return pipeline(body, decoder, () => {});
@@ -219,37 +217,36 @@ export async function safeFetch(
       if (status >= 300 && status < 400 && location) {
         response.destroy();
         if (redirects >= maxRedirects) {
-          throw new FetchArticleError("http_error", url.hostname);
+          throw new FetchArticleError("http_error");
         }
         url = checkRedirect(url, location, policy);
         continue;
       }
       if (status < 200 || status >= 300) {
-        throw new FetchArticleError("http_error", url.hostname);
+        throw new FetchArticleError("http_error", { status });
       }
       const { mimeType, charset } = parseContentType(
         response.headers["content-type"],
       );
       if (!isHtmlType(mimeType)) {
-        throw new FetchArticleError("not_html", url.hostname);
+        throw new FetchArticleError("not_html");
       }
       const length = Number(response.headers["content-length"]);
       if (Number.isFinite(length) && length > maxBytes) {
-        throw new FetchArticleError("too_large", url.hostname);
+        throw new FetchArticleError("too_large");
       }
       const body = await readCapped(
-        decompress(response, response.headers["content-encoding"], url.hostname),
+        decompress(response, response.headers["content-encoding"]),
         maxBytes,
-        url.hostname,
       );
       return { url, html: decodeBody(body, charset) };
     }
   } catch (error) {
     if (error instanceof FetchArticleError) throw error;
     if (controller.signal.aborted) {
-      throw new FetchArticleError("timeout", url.hostname, { cause: error });
+      throw new FetchArticleError("timeout", { cause: error });
     }
-    throw new FetchArticleError("http_error", url.hostname, { cause: error });
+    throw new FetchArticleError("http_error", { cause: error });
   } finally {
     clearTimeout(timer);
     response?.destroy();

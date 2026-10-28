@@ -10,13 +10,13 @@ import {
   JOIN_CODE_SAVE_FAILED_MESSAGE,
   newCodeMessage,
 } from "@/lib/join-code-settings";
+import { safeErrorFields, type SafeErrorFields } from "@/lib/safe-error-fields";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import type { JoinCodeState } from "./state";
 
-// Name, code, and message only, as everywhere else.
-function logError(where: string, error: unknown, classId: string) {
-  const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-  console.error(where, { name, code, message, classId });
+// Safe fields only (safe-error-fields.ts), as everywhere else.
+function logError(where: string, fields: SafeErrorFields, classId: string) {
+  console.error(where, { ...fields, classId });
 }
 
 // Turns the code on or off. Sets the value the switch asked for (not a
@@ -34,7 +34,7 @@ export async function setJoinCodeActiveAction(
     revalidatePath(`/teacher/classes/${classId}`);
     return { message: result.active ? JOIN_CODE_ON_MESSAGE : JOIN_CODE_OFF_MESSAGE };
   } catch (error) {
-    logError("setJoinCodeActiveAction: save failed", error, classId);
+    logError("setJoinCodeActiveAction: save failed", safeErrorFields(error), classId);
     return { error: JOIN_CODE_SAVE_FAILED_MESSAGE };
   }
 }
@@ -49,7 +49,7 @@ export async function newJoinCodeAction(classId: string): Promise<JoinCodeState>
     revalidatePath(`/teacher/classes/${classId}`);
     return { message: newCodeMessage(result.code) };
   } catch (error) {
-    if (!(error instanceof JoinCodeExhaustedError)) logError("newJoinCodeAction: save failed", error, classId);
+    if (!(error instanceof JoinCodeExhaustedError)) logError("newJoinCodeAction: save failed", safeErrorFields(error), classId);
     return { error: JOIN_CODE_NEW_FAILED_MESSAGE };
   }
 }

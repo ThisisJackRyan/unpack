@@ -5,13 +5,14 @@ import { redirect } from "next/navigation";
 import { capAlreadyRaisedMessage, capRaisedMessage, CAP_RAISE_FAILED_MESSAGE } from "@/lib/reading-cap";
 import { READING_DELETE_FAILED_MESSAGE, READING_DELETED_FLAG } from "@/lib/reading-delete";
 import { deleteReading, raiseReadingCap } from "@/lib/readings";
+import { safeErrorFields, type SafeErrorFields } from "@/lib/safe-error-fields";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import type { DeleteReadingState, RaiseCapState } from "./reading-state";
 
-// Name, code, and message only: a Postgres error's detail can echo a row.
-function logError(where: string, error: unknown, classId: string, readingId: string) {
-  const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-  console.error(where, { name, code, message, classId, readingId });
+// Safe fields only (safe-error-fields.ts): a query error's message can
+// echo a row.
+function logError(where: string, fields: SafeErrorFields, classId: string, readingId: string) {
+  console.error(where, { ...fields, classId, readingId });
 }
 
 // Deletes the reading and everything under it. Ownership (the class is the
@@ -25,7 +26,7 @@ export async function deleteReadingAction(classId: string, readingId: string): P
     const result = await deleteReading(classId, teacher.id, readingId);
     if (result.status === "not_found") return { error: READING_DELETE_FAILED_MESSAGE };
   } catch (error) {
-    logError("deleteReadingAction: delete failed", error, classId, readingId);
+    logError("deleteReadingAction: delete failed", safeErrorFields(error), classId, readingId);
     return { error: READING_DELETE_FAILED_MESSAGE };
   }
   revalidatePath(`/teacher/classes/${classId}`, "layout");
@@ -45,7 +46,7 @@ export async function raiseCapAction(classId: string, readingId: string): Promis
       message: result.status === "raised" ? capRaisedMessage(result.limit) : capAlreadyRaisedMessage(result.limit),
     };
   } catch (error) {
-    logError("raiseCapAction: raise failed", error, classId, readingId);
+    logError("raiseCapAction: raise failed", safeErrorFields(error), classId, readingId);
     return { error: CAP_RAISE_FAILED_MESSAGE };
   }
 }

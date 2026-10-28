@@ -91,7 +91,11 @@ export function withCheckFallback(
       return await Promise.race([action(state, formData), gaveUp]);
     } catch (error) {
       rethrow(error);
-      // The error only: never the form data or the answers.
+      // The error only: never the form data or the answers. This runs in
+      // the student's own browser, where Next sends a server error as a
+      // generic message and a digest, never its text, and the server-side
+      // helper (safe-error-fields.ts, with drizzle) isn't bundled.
+      // eslint-disable-next-line unpack/no-raw-error-log -- browser only, see above
       console.error(error);
       return isAppUpdatedError(error) ? APP_UPDATED_STATE : NO_REPLY_STATE;
     } finally {

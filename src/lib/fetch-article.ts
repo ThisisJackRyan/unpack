@@ -164,16 +164,15 @@ export function htmlToText(root: DomNode): string {
 // inside the try, so a parser error, a page over the size limits above, or
 // a RangeError from deep nesting is "extract_failed", not a crash.
 export function extractArticle(html: string, pageUrl: URL): Article {
-  const host = pageUrl.hostname;
   let text: string;
   let title: string;
   try {
     if (exceedsStartTagLimit(html)) {
-      throw new FetchArticleError("extract_failed", host);
+      throw new FetchArticleError("extract_failed");
     }
     const { document } = parseHTML(html);
     if (exceedsElementLimits(document.documentElement)) {
-      throw new FetchArticleError("extract_failed", host);
+      throw new FetchArticleError("extract_failed");
     }
     for (const el of document.querySelectorAll(
       "script, style, noscript, template, base",
@@ -195,18 +194,18 @@ export function extractArticle(html: string, pageUrl: URL): Article {
       maxElemsToParse: MAX_ELEMENTS,
       serializer: (el) => el as unknown as DomNode,
     }).parse();
-    if (!parsed?.content) throw new FetchArticleError("extract_failed", host);
+    if (!parsed?.content) throw new FetchArticleError("extract_failed");
     text = htmlToText(parsed.content);
     title = normalizeTitle(parsed.title || pageTitle);
   } catch (error) {
     if (error instanceof FetchArticleError) throw error;
-    throw new FetchArticleError("extract_failed", host, { cause: error });
+    throw new FetchArticleError("extract_failed", { cause: error });
   }
   if (text.length < BODY_TEXT_MIN_LENGTH) {
-    throw new FetchArticleError("extract_failed", host);
+    throw new FetchArticleError("extract_failed");
   }
   if (text.length > BODY_TEXT_MAX_LENGTH) {
-    throw new FetchArticleError("too_long", host);
+    throw new FetchArticleError("too_long");
   }
   return { title, text };
 }

@@ -441,25 +441,35 @@ describe("questionErrorKind", () => {
   it("logs only safe fields", () => {
     const error = new GatewayRateLimitError({ message: `secret ${BODY}`, statusCode: 429, generationId: "gen_123" });
     const fields = questionErrorLogFields(error);
-    assert.deepEqual(Object.keys(fields).sort(), ["generationId", "kind", "name", "status", "type"]);
+    assert.deepEqual(Object.keys(fields).sort(), ["causes", "generationId", "kind", "name", "status", "timedOut", "type"]);
     assert.equal(fields.generationId, "gen_123");
     assert.equal(fields.status, 429);
     assert.equal(fields.type, "rate_limit_exceeded");
     assert.equal(JSON.stringify(fields).includes("Mia"), false);
   });
 
-  it("logs the last try's status and cause names after retries, nothing else", () => {
+  it("logs the last try's status and safe error fields after retries, nothing else", () => {
     const fields = questionErrorLogFields(retried(gatewayErrors.requestTimeout()));
     assert.deepEqual(fields, {
       kind: "timeout",
       name: "AI_RetryError",
+      causes: [],
+      timedOut: false,
       tries: 2,
       retryReason: "maxRetriesExceeded",
-      lastName: "GatewayResponseError",
+      last: { name: "GatewayResponseError", causes: [{ name: "TimeoutError", code: 23 }], timedOut: true },
       status: 500,
       type: "response_error",
-      causeName: "TimeoutError",
     });
+  });
+
+  it("never logs a message, even one quoting the request", () => {
+    const cause = Object.assign(new Error(`upstream said ${BODY}`), { code: "provider_error_mia" });
+    const error = new GatewayRateLimitError({ message: `secret ${BODY}`, statusCode: 429, cause });
+    const json = JSON.stringify(questionErrorLogFields(error));
+    assert.equal(json.includes(BODY), false);
+    assert.equal(json.includes("secret"), false);
+    assert.equal(json.includes("provider_error_mia"), false);
   });
 });
 
