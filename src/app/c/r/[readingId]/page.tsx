@@ -22,7 +22,8 @@ import { requestRetryClock } from "@/lib/request-time-zone";
 import { getPublishedReading, loadStudentReading } from "@/lib/student-readings";
 import { MAX_TRIES } from "@/lib/validate-answers";
 import { sendChallengeAction, submitAnswersAction } from "./actions";
-import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
+import { ClearAnswerDrafts } from "@/components/answer-form";
+import { ClassAnswerForm } from "@/components/reading-answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
 import { PassCelebration } from "@/components/celebration";
@@ -181,14 +182,12 @@ function QuestionsStage({
   switch (stage.kind) {
     case "answer":
       return (
-        <AnswerForm
+        <ClassAnswerForm
           action={submitAnswersAction.bind(null, readingId)}
+          readingId={readingId}
+          ownerId={studentId}
           questions={questions}
-          tryNumber={stage.tryNumber}
-          maxTries={stage.maxTries}
-          previous={stage.previous}
-          extraTry={stage.extraTry}
-          drafts={{ mode: "class", readingId, ownerId: studentId }}
+          stage={stage}
         />
       );
     case "passed":

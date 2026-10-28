@@ -30,7 +30,7 @@ const clerk = clerkMiddleware(
 );
 
 // The test-only /qa routes skip Clerk, and only while UNPACK_QA_ROUTES=1
-// (scripts/browser-check-answer-timeout.ts, never a deploy): with the
+// (scripts/browser-check-answer-timeout.ts; never set it in Vercel): with the
 // dummy development key that check builds with, Clerk sends every browser
 // page load to its handshake, which fails. Without the env var, /qa goes
 // through Clerk like any public route (and its pages are 404s).

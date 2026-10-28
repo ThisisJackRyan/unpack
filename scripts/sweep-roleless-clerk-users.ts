@@ -30,8 +30,10 @@
 // times) at least --min-age-days ago (default 7, never under 7), looks
 // their ids up in a read-only transaction, and prints the count and, per
 // role-less account, the Clerk id, a 12-character hash prefix, which kind
-// it is, and how many days ago it was last seen, then the exact --apply
-// command to copy. Nothing is written and no DELETE is sent.
+// it is, and how many days ago it was last seen; then the totals per kind,
+// a 12-character digest of the sorted ids (the same digest means the same
+// accounts, not only the same count), and the exact --apply command to
+// copy. Nothing is written and no DELETE is sent.
 //
 // --apply: deletes up to --limit accounts (default 25, at most 500),
 // oldest first. Each one is re-checked in the same transaction as the

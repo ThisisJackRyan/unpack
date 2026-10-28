@@ -16,6 +16,7 @@ import {
   TIMED_OUT_STATE,
   withCheckFallback,
   type AnswerFormState,
+  valuesForNewTry,
   type CheckRun,
 } from "./answer-form-state";
 
@@ -352,5 +353,25 @@ describe("submitCheck", () => {
     await submitCheck(fresh, () => Promise.reject(notFound), r.on);
     assert.equal(r.errors[0], notFound);
     assert.equal(fresh.pending, false);
+  });
+});
+
+describe("valuesForNewTry", () => {
+  const checked = { q1: "to see the snow", q2: "it ran away" };
+
+  it("starts the new try from the answers just checked when nothing was typed since the submit", () => {
+    assert.deepEqual(valuesForNewTry(checked, checked, false), checked);
+    // Even when the boxes differ (restored drafts, say), no edit since the
+    // submit means the checked answers win.
+    assert.deepEqual(valuesForNewTry(checked, { q1: "older", q2: "" }, false), checked);
+  });
+
+  it("keeps what the student typed after the form gave up, when the late check lands", () => {
+    const typed = { q1: "to see the snow, and play in it", q2: "it ran away" };
+    assert.deepEqual(valuesForNewTry(checked, typed, true), typed);
+  });
+
+  it("fills a question the boxes don't have from the new try", () => {
+    assert.deepEqual(valuesForNewTry(checked, { q1: "mine" }, true), { q1: "mine", q2: "it ran away" });
   });
 });

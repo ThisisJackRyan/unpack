@@ -24,6 +24,7 @@
 // only id and environment_type from the instance; a failed Clerk call is
 // reported by HTTP status only.
 
+import { createHash } from "node:crypto";
 import { hashClerkUserId } from "@/lib/deleted-accounts";
 import type { Statement } from "@/lib/link-rate-limit";
 import type { RolelessDeleteOutcome } from "@/lib/under-13-account";
@@ -224,7 +225,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Created AND last seen (latest of created_at, last_sign_in_at,
 // last_active_at) at least minAgeDays ago, so an old account that came
-// back and is on /welcome right now is not swept. An unknown time (null:
+// back and is on /welcome right now is not swept. last_active_at is
+// there because last_sign_in_at alone misses a returning user: a Clerk
+// session outlives its sign-in, so someone who signed in weeks ago and
+// still has the session open shows an old last_sign_in_at, while Clerk
+// moves last_active_at when that session is used. An unknown time (null:
 // missing or garbage, see clerkUserRef) is never old enough.
 export function olderThan(users: readonly ClerkUserRef[], minAgeDays: number, now: Date): ClerkUserRef[] {
   const cutoff = now.getTime() - minAgeDays * DAY_MS;
@@ -312,6 +317,24 @@ const KIND_LABEL: Record<CandidateKind, string> = {
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+// "3 no app row, 1 row with no role, 0 delete pending": every kind, in
+// KIND_LABEL's order, so two runs' lines compare at a glance.
+export function kindTotalsLine(candidates: readonly Candidate[]): string {
+  const totals = (Object.keys(KIND_LABEL) as CandidateKind[]).map(
+    (kind) => `${candidates.filter((c) => c.kind === kind).length} ${KIND_LABEL[kind]}`,
+  );
+  return `By kind: ${totals.join(", ")}.`;
+}
+
+// A short digest of the candidate list: the first 12 hex characters of
+// sha256 over the sorted Clerk ids, one per line. Two runs that print the
+// same digest found the same accounts, not only the same count. Ids only,
+// as the list itself prints them; nothing personal goes in.
+export function candidatesDigest(candidates: readonly Candidate[]): string {
+  const ids = candidates.map((c) => c.id).sort();
+  return createHash("sha256").update(ids.join("\n"), "utf8").digest("hex").slice(0, 12);
 }
 
 export function candidateLine(candidate: Candidate, now: Date): string {
@@ -415,6 +438,10 @@ export async function runSweep(options: Options, deps: SweepDeps): Promise<Sweep
   result.candidates = candidates.length;
   print(`${plural(candidates.length, "role-less account", "role-less accounts")} (no teacher or self-learner role):`);
   for (const candidate of candidates) print(candidateLine(candidate, now));
+  if (candidates.length > 0) {
+    print(kindTotalsLine(candidates));
+    print(`Id digest: ${candidatesDigest(candidates)} (sha256 of the sorted Clerk ids, first 12 characters).`);
+  }
 
   if (!options.apply) {
     if (candidates.length === 0) {
