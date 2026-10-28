@@ -29,7 +29,18 @@ import {
   type DraftOwner,
 } from "@/lib/answer-drafts";
 import { browserSessionStore, markJustChecked } from "@/lib/celebration";
-import { submitCheck, valuesForNewTry, withCheckFallback, type AnswerFormState, type CheckRun } from "./answer-form-state";
+import {
+  initialAnswerView,
+  landedResult,
+  newTryView,
+  startedCheck,
+  submitCheck,
+  typedAnswer,
+  withCheckFallback,
+  type AnswerFormState,
+  type AnswerFormView,
+  type CheckRun,
+} from "./answer-form-state";
 import { LimitNotice } from "./limit-notice";
 import { MaxLengthNote } from "./max-length-note";
 
@@ -53,8 +64,6 @@ type Props = {
   checkTimeoutMs?: number;
 };
 
-const initialState: AnswerFormState = {};
-
 function prefill(questions: StudentQuestion[], previous: AttemptView | null): Record<string, string> {
   return Object.fromEntries(questions.map((q) => [q.id, previous?.answers[q.id]?.text ?? ""]));
 }
@@ -66,34 +75,27 @@ function prefill(questions: StudentQuestion[], previous: AttemptView | null): Re
 // message here, not the page's error boundary or an endless spinner (see
 // withCheckFallback). The state and the pending flag are plain state, set
 // outside any transition, so the message shows the moment the form stops
-// waiting (see submitCheck).
+// waiting (see submitCheck). The boxes, the message and the edited flag
+// move only through answer-form-state.ts's view functions (typedAnswer,
+// startedCheck, landedResult, newTryView), tested there.
 export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous, drafts, checkTimeoutMs }: Props) {
-  const [result, setResult] = useState(initialState);
+  const [view, setView] = useState<AnswerFormView>(() => initialAnswerView(tryNumber, prefill(questions, previous)));
   const [pending, setPending] = useState(false);
   const run = useRef<CheckRun>({ seq: 0, pending: false });
-  const [values, setValues] = useState(() => prefill(questions, previous));
-  // Whether the student changed an answer since their last submit: only
-  // possible once the form stopped waiting (the boxes are read-only while
-  // a check runs).
-  const [edited, setEdited] = useState(false);
   // Answers kept over a new try (see valuesForNewTry), to save as its
   // drafts once committed.
   const [carried, setCarried] = useState<{ tryNumber: number; values: Record<string, string> } | null>(null);
   // A new try (the page re-renders after a check): start from its answers,
-  // unless the student has typed since the submit (a check that landed
-  // after the form gave up): then keep what they typed.
-  const [shownTry, setShownTry] = useState(tryNumber);
-  if (shownTry !== tryNumber) {
-    setShownTry(tryNumber);
-    const next = valuesForNewTry(prefill(questions, previous), values, edited);
-    setValues(next);
-    setCarried(edited ? { tryNumber, values: next } : null);
+  // unless the student has typed since the last result landed (a check
+  // that landed after the form gave up): then keep what they typed. The
+  // old try's message goes.
+  if (view.tryNumber !== tryNumber) {
+    const next = newTryView(view, tryNumber, prefill(questions, previous));
+    setView(next.view);
+    setCarried(next.carried ? { tryNumber, values: next.carried } : null);
   }
-  // The try the last submit was for. A check that landed after the form
-  // stopped waiting re-renders the page with a new try: the old submit's
-  // message ("We couldn't hear back") no longer applies.
-  const [submittedTry, setSubmittedTry] = useState(tryNumber);
-  const state = submittedTry === tryNumber ? result : initialState;
+  const { values } = view;
+  const state: AnswerFormState = view.result;
   const errors = state.errors ?? {};
   const { mode, readingId, ownerId } = drafts;
   const locked = lockedQuestionIds(previous);
@@ -114,7 +116,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     const ids = questionIds.split(",");
     const saved = loadDrafts(storage, { ...owner, tryNumber }, ids);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a one-time restore from browser storage
-    if (Object.keys(saved).length > 0) setValues((v) => withDrafts(v, saved, ids));
+    if (Object.keys(saved).length > 0) setView((v) => ({ ...v, values: withDrafts(v.values, saved, ids) }));
   }, [mode, readingId, ownerId, tryNumber, questionIds]);
 
   // Answers kept over a new try: their drafts were the old try's (removed
@@ -135,23 +137,24 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     // A pass swaps this form for the result in place: the celebration
     // takes this mark and scrolls into view.
     markJustChecked(browserSessionStore(), readingId);
-    setSubmittedTry(tryNumber);
-    setEdited(false);
     const check = withCheckFallback(action, unstable_rethrow, checkTimeoutMs);
-    void submitCheck(run.current, () => check(result, data), {
-      // A new check: the last one's message (say "We couldn't hear back")
+    void submitCheck(run.current, () => check(state, data), {
+      // A new check: the last one's message (say "We couldn’t hear back")
       // no longer applies.
       start: () => {
         setPending(true);
-        setResult(initialState);
+        setView(startedCheck);
       },
-      result: (state) => {
-        setResult(state);
+      // Only this submit's result (an older one's is dropped), shown even
+      // if a newer try was saved meanwhile: a refusal as out of date must
+      // say why, over the boxes the student still has.
+      result: (result) => {
+        setView((v) => landedResult(v, result));
         setPending(false);
       },
       error: (error) => {
         setPending(false);
-        setResult(() => {
+        setView(() => {
           throw error;
         });
       },
@@ -221,8 +224,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
                 value={value}
                 onChange={(e) => {
                   const next = e.target.value;
-                  setValues((v) => ({ ...v, [q.id]: next }));
-                  setEdited(true);
+                  setView((v) => typedAnswer(v, q.id, next));
                   saveDraft(browserDraftStorage(), { mode, readingId, ownerId, tryNumber }, q.id, next);
                 }}
                 readOnly={pending}

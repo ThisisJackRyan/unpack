@@ -36,6 +36,13 @@
 //             request), the form still gives up at its 2s limit, the
 //             student edits, and when the late result lands with the next
 //             try, the edit stays.
+//   stale     the same latency, and the student edits after the give-up and
+//             checks again while the first check is still on its way:
+//             the first lands as try 2 with the edit kept, then the
+//             second is refused as out of date (as the reading pages
+//             refuse a submit a saved try overtook): its message
+//             (ANSWERS_STALE_MESSAGE) shows, the edit is still in the box,
+//             and the button works again.
 //   precheck  a wait bounded as a lookup before the claim (1s), through
 //             the reading pages' guardAnswerCheck: the server's timeout
 //             message, well before the client limit.
@@ -48,7 +55,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHECK_NO_REPLY_MESSAGE } from "@/components/answer-form-state";
-import { CHECK_TIMED_OUT_MESSAGE } from "@/lib/validate-answers";
+import { ANSWERS_STALE_MESSAGE, CHECK_TIMED_OUT_MESSAGE } from "@/lib/validate-answers";
 
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const SLOW_MS = 10_000;
@@ -451,6 +458,55 @@ async function latencyCase(cdp: Cdp, base: string, as: Variant) {
   }
 }
 
+// The PR 20 follow-up's rare loss: give up, edit, check again while the
+// first check is still on its way; the first lands (a new try), then the
+// second is refused as out of date. Next sends one server action at a
+// time, so the second request goes out once the first has answered.
+async function staleCase(cdp: Cdp, base: string, as: Variant) {
+  const label = `${as} stale`;
+  console.log(`-- ${label}: ${LATENCY_MS}ms latency, edit and check again after the give-up; the second is refused as out of date`);
+  const run = runId(as, "stale");
+  await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=200&limit=${LIMIT_MS}&advance=1&stale=1&run=${run}`);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: LATENCY_MS, downloadThroughput: -1, uploadThroughput: -1 });
+  try {
+    await fillAndSubmit(cdp);
+    const gaveUp = await waitFor("the no-reply message", LATENCY_MS, async () => {
+      const s = await snapshot(cdp);
+      return s.message === CHECK_NO_REPLY_MESSAGE && !s.disabled ? s : undefined;
+    }).catch(() => undefined);
+    check(!!gaveUp, `${label}: the form gave up`);
+    if (!gaveUp) return;
+    await evaluate(cdp, `(() => { const t = document.querySelectorAll("form textarea")[0]; t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
+    await cdp.send("Input.insertText", { text: EDIT });
+    const edited = [ANSWERS[0] + EDIT, ANSWERS[1]];
+    await evaluate(cdp, `document.querySelector('form button[type="submit"]').click()`);
+    const resubmitted = await waitFor("the second check's pending button", 2_000, async () => {
+      const s = await snapshot(cdp);
+      return s.disabled ? s : undefined;
+    }).catch(() => undefined);
+    check(!!resubmitted, `${label}: the second check is running`);
+
+    const landed = await waitFor("the first check's new try", LATENCY_MS + 10_000, async () => {
+      const s = await snapshot(cdp);
+      return s.tryLabel === "Try 2 of 3" ? s : undefined;
+    }).catch(() => undefined);
+    check(!!landed && JSON.stringify(landed.answers) === JSON.stringify(edited), `${label}: the first check landed as try 2 and kept the edit`, JSON.stringify(landed?.answers));
+
+    const refused = await waitFor("the out-of-date message", 2 * LATENCY_MS + 10_000, async () => {
+      const s = await snapshot(cdp);
+      return s.message === ANSWERS_STALE_MESSAGE ? s : undefined;
+    }).catch(() => undefined);
+    check(!!refused, `${label}: the second check's out-of-date refusal shows`, refused?.message ?? (await snapshot(cdp)).message);
+    if (!refused) return;
+    check(JSON.stringify(refused.answers) === JSON.stringify(edited), `${label}: the edit is still in the box`, JSON.stringify(refused.answers));
+    check(!refused.disabled && refused.button === "Check my answers" && refused.tryLabel === "Try 2 of 3", `${label}: button back, still try 2`);
+  } finally {
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await cdp.send("Network.disable");
+  }
+}
+
 // A wait bounded as a lookup before the claim, through guardAnswerCheck:
 // the server's own timeout message, long before the client's limit.
 async function precheckCase(cdp: Cdp, base: string, as: Variant) {
@@ -510,6 +566,7 @@ async function main() {
       await redirectCase(cdp, base, as);
       await networkCase(cdp, base, as);
       await latencyCase(cdp, base, as);
+      await staleCase(cdp, base, as);
       await precheckCase(cdp, base, as);
     }
     cdp.close();

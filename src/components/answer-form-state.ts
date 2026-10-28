@@ -160,12 +160,67 @@ export async function submitCheck(
 // the answers just checked. But a check can land after the form stopped
 // waiting, while the student is already changing their answers: then
 // replacing the boxes would throw that typing away. So if they edited
-// since their last submit, the boxes keep what they typed (`current`); the
-// new try's results and tips still show around them.
+// since the last result landed, the boxes keep what they typed
+// (`current`); the new try's results and tips still show around them.
 export function valuesForNewTry(
   prefilled: Record<string, string>,
   current: Record<string, string>,
-  editedSinceSubmit: boolean,
+  editedSinceLanded: boolean,
 ): Record<string, string> {
-  return editedSinceSubmit ? { ...prefilled, ...current } : prefilled;
+  return editedSinceLanded ? { ...prefilled, ...current } : prefilled;
+}
+
+// What the answer form keeps between renders: the boxes, the message line,
+// whether the student typed since the last result landed, and the try the
+// boxes belong to. The form moves it only through the functions below, so
+// the whole sequence is tested without React (answer-form-state.test.ts).
+export type AnswerFormView = {
+  tryNumber: number;
+  values: Record<string, string>;
+  // The last result that landed (the form's own no-reply included).
+  result: AnswerFormState;
+  // Typed since the last result landed. Not reset by a submit: a student
+  // can only type once the form stopped waiting (the boxes are read-only
+  // while a check runs), and a check the form gave up on can still land
+  // later, while a newer submit runs, and must not replace that typing.
+  edited: boolean;
+};
+
+export function initialAnswerView(tryNumber: number, values: Record<string, string>): AnswerFormView {
+  return { tryNumber, values, result: {}, edited: false };
+}
+
+// The student typed in a box.
+export function typedAnswer(view: AnswerFormView, questionId: string, text: string): AnswerFormView {
+  return { ...view, values: { ...view.values, [questionId]: text }, edited: true };
+}
+
+// A new check started: the last message (say "We couldn’t hear back") no
+// longer applies. The edited flag stays (see AnswerFormView).
+export function startedCheck(view: AnswerFormView): AnswerFormView {
+  return { ...view, result: {} };
+}
+
+// The current submit's result landed (submitCheck drops older ones): show
+// it, whatever try the page is on now. A submit refused because a newer
+// try was saved while it waited (the server's "stale", or the page moved
+// on: shown as ANSWERS_STALE_MESSAGE and the like) lands after that try's
+// re-render, and its message must show: the boxes still hold what the
+// student sent, and the message says why it wasn't checked. Typing up to
+// now has been answered, so `edited` resets.
+export function landedResult(view: AnswerFormView, result: AnswerFormState): AnswerFormView {
+  return { ...view, result, edited: false };
+}
+
+// The page re-rendered with a new try (a check was saved): the boxes per
+// valuesForNewTry, and the old try's message cleared (a no-reply message
+// for the check that just landed no longer applies). `carried` is set
+// when typing was kept, so the form saves it as the new try's drafts.
+export function newTryView(
+  view: AnswerFormView,
+  tryNumber: number,
+  prefilled: Record<string, string>,
+): { view: AnswerFormView; carried: Record<string, string> | null } {
+  const values = valuesForNewTry(prefilled, view.values, view.edited);
+  return { view: { ...view, tryNumber, values, result: {} }, carried: view.edited ? values : null };
 }
