@@ -154,3 +154,18 @@ export async function submitCheck(
     on.error(error);
   }
 }
+
+// The boxes when the page moves to a new try (a check was saved, and the
+// page re-rendered). Normally that's the new try's answers (`prefilled`):
+// the answers just checked. But a check can land after the form stopped
+// waiting, while the student is already changing their answers: then
+// replacing the boxes would throw that typing away. So if they edited
+// since their last submit, the boxes keep what they typed (`current`); the
+// new try's results and tips still show around them.
+export function valuesForNewTry(
+  prefilled: Record<string, string>,
+  current: Record<string, string>,
+  editedSinceSubmit: boolean,
+): Record<string, string> {
+  return editedSinceSubmit ? { ...prefilled, ...current } : prefilled;
+}

@@ -29,7 +29,7 @@ import {
   type DraftOwner,
 } from "@/lib/answer-drafts";
 import { browserSessionStore, markJustChecked } from "@/lib/celebration";
-import { submitCheck, withCheckFallback, type AnswerFormState, type CheckRun } from "./answer-form-state";
+import { submitCheck, valuesForNewTry, withCheckFallback, type AnswerFormState, type CheckRun } from "./answer-form-state";
 import { LimitNotice } from "./limit-notice";
 import { MaxLengthNote } from "./max-length-note";
 
@@ -72,11 +72,22 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
   const [pending, setPending] = useState(false);
   const run = useRef<CheckRun>({ seq: 0, pending: false });
   const [values, setValues] = useState(() => prefill(questions, previous));
-  // A new try (the page re-renders after a check): start from its answers.
+  // Whether the student changed an answer since their last submit: only
+  // possible once the form stopped waiting (the boxes are read-only while
+  // a check runs).
+  const [edited, setEdited] = useState(false);
+  // Answers kept over a new try (see valuesForNewTry), to save as its
+  // drafts once committed.
+  const [carried, setCarried] = useState<{ tryNumber: number; values: Record<string, string> } | null>(null);
+  // A new try (the page re-renders after a check): start from its answers,
+  // unless the student has typed since the submit (a check that landed
+  // after the form gave up): then keep what they typed.
   const [shownTry, setShownTry] = useState(tryNumber);
   if (shownTry !== tryNumber) {
     setShownTry(tryNumber);
-    setValues(prefill(questions, previous));
+    const next = valuesForNewTry(prefill(questions, previous), values, edited);
+    setValues(next);
+    setCarried(edited ? { tryNumber, values: next } : null);
   }
   // The try the last submit was for. A check that landed after the form
   // stopped waiting re-renders the page with a new try: the old submit's
@@ -106,6 +117,17 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     if (Object.keys(saved).length > 0) setValues((v) => withDrafts(v, saved, ids));
   }, [mode, readingId, ownerId, tryNumber, questionIds]);
 
+  // Answers kept over a new try: their drafts were the old try's (removed
+  // above), so save them again as this try's.
+  useEffect(() => {
+    if (!carried || carried.tryNumber !== tryNumber) return;
+    const storage = browserDraftStorage();
+    for (const id of questionIds.split(",")) {
+      const text = carried.values[id];
+      if (text) saveDraft(storage, { mode, readingId, ownerId, tryNumber }, id, text);
+    }
+  }, [carried, mode, readingId, ownerId, tryNumber, questionIds]);
+
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (run.current.pending) return;
@@ -114,9 +136,15 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     // takes this mark and scrolls into view.
     markJustChecked(browserSessionStore(), readingId);
     setSubmittedTry(tryNumber);
+    setEdited(false);
     const check = withCheckFallback(action, unstable_rethrow, checkTimeoutMs);
     void submitCheck(run.current, () => check(result, data), {
-      start: () => setPending(true),
+      // A new check: the last one's message (say "We couldn't hear back")
+      // no longer applies.
+      start: () => {
+        setPending(true);
+        setResult(initialState);
+      },
       result: (state) => {
         setResult(state);
         setPending(false);
@@ -194,6 +222,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
                 onChange={(e) => {
                   const next = e.target.value;
                   setValues((v) => ({ ...v, [q.id]: next }));
+                  setEdited(true);
                   saveDraft(browserDraftStorage(), { mode, readingId, ownerId, tryNumber }, q.id, next);
                 }}
                 readOnly={pending}
