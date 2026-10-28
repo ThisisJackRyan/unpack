@@ -494,14 +494,20 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "clerk_deleted_at": {
+          "name": "clerk_deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
-        "deleted_clerk_users_deleted_at_idx": {
-          "name": "deleted_clerk_users_deleted_at_idx",
+        "deleted_clerk_users_clerk_deleted_at_idx": {
+          "name": "deleted_clerk_users_clerk_deleted_at_idx",
           "columns": [
             {
-              "expression": "deleted_at",
+              "expression": "clerk_deleted_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

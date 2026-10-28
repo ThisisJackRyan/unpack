@@ -489,20 +489,24 @@ export const joinAttempts = pgTable(
   ],
 );
 
-// Clerk accounts that were deleted (the user.deleted webhook), so a late
-// user.created or user.updated delivery, or a first visit on a session
-// that outlived the account, can't bring the account row back. Only a
-// SHA-256 hash of the Clerk user id (see src/lib/deleted-accounts.ts),
-// never the id, a name, or an email. Rows older than
-// DELETED_ACCOUNT_RETENTION_DAYS are pruned by the next account delete
-// (see docs/privacy.md).
+// Clerk accounts that were deleted (the user.deleted webhook, or an
+// under-13 delete on /welcome), so a late user.created or user.updated
+// delivery, or a first visit on a session that outlived the account,
+// can't bring the account row back. Only a SHA-256 hash of the Clerk user
+// id (see src/lib/deleted-accounts.ts), never the id, a name, or an email.
+// clerk_deleted_at: when Clerk's own delete was confirmed (null while it
+// is pending: an under-13 delete whose Clerk call failed). Confirmed rows
+// older than DELETED_ACCOUNT_RETENTION_DAYS (counted from
+// clerk_deleted_at) are pruned by the next account delete; pending rows
+// never are (see docs/privacy.md).
 export const deletedClerkUsers = pgTable(
   "deleted_clerk_users",
   {
     clerkUserHash: text("clerk_user_hash").primaryKey(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull().defaultNow(),
+    clerkDeletedAt: timestamp("clerk_deleted_at", { withTimezone: true }),
   },
-  (t) => [index("deleted_clerk_users_deleted_at_idx").on(t.deletedAt)],
+  (t) => [index("deleted_clerk_users_clerk_deleted_at_idx").on(t.clerkDeletedAt)],
 );
 
 // Self-learner mode (see src/lib/self-readings-core.ts). Its own tables,
