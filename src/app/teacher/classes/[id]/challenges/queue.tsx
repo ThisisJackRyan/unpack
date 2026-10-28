@@ -7,6 +7,7 @@ import {
   decisionMessage,
   NO_NOTE_LABEL,
   noNoteHelp,
+  triesUsedLabel,
   parseDecisionChoice,
   type DecisionChoice,
   type NoNoteItem,
@@ -80,13 +81,7 @@ function NoNoteRow({ classId, item }: { classId: string; item: NoNoteItem }) {
             <span aria-hidden="true" className="h-2 w-2 rounded-full bg-warning-500" /> {NO_NOTE_LABEL}
           </span>
         </div>
-        <MetaLine
-          className="text-base text-ink-700 tabular-nums"
-          parts={[
-            `${item.tries} of ${item.triesAllowed} ${item.triesAllowed === 1 ? "try" : "tries"} used`,
-            `${item.checks} of ${item.checksAllowed} checks used`,
-          ]}
-        />
+        <p className="text-base text-ink-700 tabular-nums">{triesUsedLabel(item.tries, item.triesAllowed)}</p>
         <p className="text-base text-ink-700">{noNoteHelp(item.studentName)}</p>
       </div>
       <Link href={answersHref} className={`${secondaryButton} self-start`}>
@@ -133,10 +128,7 @@ function ChallengeCard({
         </h2>
         <p className="flex flex-wrap items-center gap-2 text-base text-ink-700">
           <span className={`${pill} bg-ink-100 text-ink-700 text-base tabular-nums`}>
-            {item.tries} of {item.triesAllowed} {item.triesAllowed === 1 ? "try" : "tries"} used
-          </span>
-          <span className={`${pill} bg-ink-100 text-ink-700 text-base tabular-nums`}>
-            {item.checks} of {item.checksAllowed} checks used
+            {triesUsedLabel(item.tries, item.triesAllowed)}
           </span>
           {item.round > 1 && (
             <span className={`${pill} bg-primary-50 text-primary-700 text-base`}>Note {item.round}, after one more try</span>

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   decideChallengeWith,
@@ -7,6 +8,7 @@ import {
   decisionMessage,
   parseDecisionChoice,
   NO_NOTE_LABEL,
+  triesUsedLabel,
   noNoteHelp,
   noNoteItems,
   noNoteStatement,
@@ -374,5 +376,21 @@ describe("out of tries, no note yet", () => {
   it("has a plain label and helper line", () => {
     assert.equal(NO_NOTE_LABEL, "Out of tries, no note yet");
     assert.equal(noNoteHelp("Maya Ro"), "Maya Ro can still send you a note.");
+  });
+});
+
+// C2: the teacher's queue cards show tries, not "checks used".
+describe("queue card counts", () => {
+  it("says tries used, singular for 1", () => {
+    assert.equal(triesUsedLabel(3, 3), "3 of 3 tries used");
+    assert.equal(triesUsedLabel(4, 4), "4 of 4 tries used");
+    assert.equal(triesUsedLabel(1, 1), "1 of 1 try used");
+    assert.equal(triesUsedLabel(0, 3), "0 of 3 tries used");
+  });
+
+  it("neither the challenge card nor the out of tries row shows checks", () => {
+    const queue = readFileSync(new URL("../app/teacher/classes/[id]/challenges/queue.tsx", import.meta.url), "utf8");
+    assert.doesNotMatch(queue, /checks used|item\.checks/);
+    assert.equal(queue.match(/triesUsedLabel\(item\.tries, item\.triesAllowed\)/g)?.length, 2);
   });
 });

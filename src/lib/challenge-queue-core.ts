@@ -346,6 +346,12 @@ export function noNoteItems(rows: Record<string, unknown>[]): NoNoteItem[] {
 // The pill on a no-note item.
 export const NO_NOTE_LABEL = "Out of tries, no note yet";
 
+// The one count on a queue card: tries, not checks (checks are an AI
+// failure allowance, noise for the teacher here).
+export function triesUsedLabel(tries: number, allowed: number): string {
+  return `${tries} of ${allowed} ${allowed === 1 ? "try" : "tries"} used`;
+}
+
 // Under the no-note item's title.
 export function noNoteHelp(name: string): string {
   return `${name} can still send you a note.`;
