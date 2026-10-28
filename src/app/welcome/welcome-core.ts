@@ -76,3 +76,11 @@ export async function chooseRoleCore(formData: FormData, deps: ChooseRoleDeps): 
   if (outcome.status === "age_required") return { state: { errors: { age: AGE_REQUIRED_MESSAGE }, role: kept } };
   return { state: { errors: { form: ROLE_SAVE_FAILED_MESSAGE }, role: kept } };
 }
+
+// The action's last step: redirect (Next's redirect() throws, so the
+// action never returns) or hand back the form's state. Passed redirect so
+// tests can check the path without Next.
+export function finishChooseRole(result: ChooseRoleResult, redirect: (path: string) => never): RoleFormState {
+  if ("redirect" in result) redirect(result.redirect);
+  return result.state;
+}

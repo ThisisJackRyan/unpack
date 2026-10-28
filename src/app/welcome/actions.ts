@@ -6,7 +6,7 @@ import { requireArea, setAccountRole } from "@/lib/account";
 import { readAgeGate, setAgeGate } from "@/lib/age-gate";
 import { deleteUnder13Account } from "@/lib/under-13-account";
 import { under13DeleteDeps } from "@/lib/under-13-server";
-import { chooseRoleCore } from "./welcome-core";
+import { chooseRoleCore, finishChooseRole } from "./welcome-core";
 
 // The first-run choice. Only for an account with no role yet (requireArea
 // sends any other home), and the save itself only matches while no role
@@ -28,7 +28,6 @@ export async function chooseRoleAction(_prev: RoleFormState, formData: FormData)
     setAccountRole: (accountId, role, confirmAge) => setAccountRole(accountId, role, confirmAge, true),
     deleteUnder13: (clerkUserId) => deleteUnder13Account(clerkUserId, under13DeleteDeps),
   });
-  // redirect() throws, so it stays outside chooseRoleCore.
-  if ("redirect" in result) redirect(result.redirect);
-  return result.state;
+  // redirect() throws, so it stays outside chooseRoleCore (finishChooseRole).
+  return finishChooseRole(result, redirect);
 }

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import { AGE_REQUIRED_MESSAGE, ROLE_SAVE_FAILED_MESSAGE, type AccountRole, type SetRoleOutcome } from "@/lib/account-role";
 import { deleteUnder13Account, type RolelessDeleteOutcome } from "@/lib/under-13-account";
-import { chooseRoleCore, UNDER_13_EXIT_PATH, type ChooseRoleDeps } from "./welcome-core";
+import { chooseRoleCore, finishChooseRole, UNDER_13_EXIT_PATH, type ChooseRoleDeps } from "./welcome-core";
 
 // Mid-month, October 2026 (UTC).
 const NOW = new Date("2026-10-15T12:00:00Z");
@@ -121,5 +122,38 @@ describe("chooseRoleCore", () => {
       state: { errors: { form: ROLE_SAVE_FAILED_MESSAGE }, role: "teacher" },
     });
     assert.deepEqual(failed.logs, [["chooseRoleAction: save failed", { name: "NeonDbError", code: "57P01" }]]);
+  });
+});
+
+// Next's redirect() throws; this one records the path and throws the same way.
+class Redirected extends Error {
+  path: string;
+  constructor(path: string) {
+    super("NEXT_REDIRECT");
+    this.path = path;
+  }
+}
+function fakeRedirect(path: string): never {
+  throw new Redirected(path);
+}
+
+describe("chooseRoleAction's last step (finishChooseRole)", () => {
+  it("an under-13 answer calls redirect(\"/join\") and returns no state", async () => {
+    const { deps, calls } = spies();
+    const result = await chooseRoleCore(form({ role: "self_learner", ...UNDER }), deps);
+    assert.throws(() => finishChooseRole(result, fakeRedirect), (e) => e instanceof Redirected && e.path === "/join");
+    assert.deepEqual(calls.clerk, [CLERK_ID]);
+  });
+
+  it("a state is returned as is, with no redirect", () => {
+    const state = { role: "self_learner", ageGate: true as const };
+    assert.equal(finishChooseRole({ state }, fakeRedirect), state);
+  });
+
+  it("actions.ts hands chooseRoleCore's result to finishChooseRole with Next's redirect", () => {
+    const source = readFileSync(new URL("./actions.ts", import.meta.url), "utf8");
+    assert.match(source, /import \{ redirect \} from "next\/navigation";/);
+    assert.match(source, /const result = await chooseRoleCore\(formData, \{/);
+    assert.match(source, /return finishChooseRole\(result, redirect\);/);
   });
 });
