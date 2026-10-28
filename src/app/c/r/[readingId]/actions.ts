@@ -73,8 +73,12 @@ async function checkAnswers(readingId: string, formData: FormData, preCheck: Abo
       refresh(readingId);
       return { message: submitMessage(result.status) };
     case "timed_out":
-      // Never counts toward the check limit, so the page can't have moved
-      // on: no re-render at the end of an already slow request.
+      // Usually given back (the model never replied), so the page can't
+      // have moved on: no re-render at the end of an already slow request.
+      // But a reply, then a retry that ran out of time, counts toward the
+      // check limit and may have been the last check: then show where
+      // things stand (the note to the teacher).
+      if (result.counted) refresh(readingId);
       return TIMED_OUT_STATE;
     case "paused":
       // An outage: a short break, with when checking frees up again.

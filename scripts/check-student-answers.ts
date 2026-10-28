@@ -328,7 +328,7 @@ async function checkModelFailureAndLimit() {
   const slowOutcome = await one<{ outcome: string }>(sql`
     select outcome from effort_checks where student_id = ${slow} and reading_id = ${readingId}`);
   check(
-    timedOut.status === "timed_out" && c.attempts === 0 && c.live === 0 && slowOutcome.outcome === "given_back",
+    timedOut.status === "timed_out" && !timedOut.counted && c.attempts === 0 && c.live === 0 && slowOutcome.outcome === "given_back",
     `timeout: ${timedOut.status}, attempts ${c.attempts}, live ${c.live}, outcome ${slowOutcome.outcome}`,
   );
   const afterTimeout = await submit(slow, "fail", { delayMs: 20 });

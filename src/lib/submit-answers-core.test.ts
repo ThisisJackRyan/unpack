@@ -475,7 +475,7 @@ describe("submitAnswersWith", () => {
         newId,
         onError: (e) => errors.push(e),
       });
-      assert.deepEqual(r, { status: "timed_out" });
+      assert.deepEqual(r, { status: "timed_out", counted: false });
       assert.equal(errors.length, 1, "logged once");
     } finally {
       clearInterval(keepAlive);
@@ -487,13 +487,27 @@ describe("submitAnswersWith", () => {
     assert.equal(next.status === "checked" && next.tryNumber, 1);
   });
 
-  it("a timeout after an unusable reply is timed_out too, and counts as a check", async () => {
+  it("a timeout after an unusable reply is timed_out too, and counts as a check (counted: true)", async () => {
     const { store, attempts, checks } = fakeStore();
     const deadline = new DOMException("The operation was aborted due to timeout", "TimeoutError");
     const r = await submit(store, fakeChecker(() => deadline, 5, true).check);
-    assert.deepEqual(r, { status: "timed_out" });
+    assert.deepEqual(r, { status: "timed_out", counted: true });
     assert.equal(attempts.length, 0);
     assert.equal(checks[0].outcome, "error");
+  });
+
+  it("a counted timeout can be the last check: the page must move on (the action re-renders)", async () => {
+    const { store, attempts } = fakeStore();
+    for (let i = 0; i < EFFORT_CHECK_LIMIT - 1; i++) {
+      assert.equal((await submit(store, fakeChecker(badOutput).check)).status, "check_failed");
+    }
+    const deadline = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    const last = await submit(store, fakeChecker(() => deadline, 5, true).check);
+    assert.deepEqual(last, { status: "timed_out", counted: true });
+    // That was the limit: the answer form would be stale, so the action
+    // refreshes on `counted`, and the next submit is refused.
+    assert.equal((await submit(store, fakeChecker().check)).status, "too_many_checks");
+    assert.equal(attempts.length, 0);
   });
 
   it("a plain failure is still check_failed, not timed_out", async () => {

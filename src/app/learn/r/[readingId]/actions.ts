@@ -60,7 +60,9 @@ async function checkSelfAnswers(readingId: string, formData: FormData, preCheck:
       refresh();
       return { message: soloSubmitMessage(result.status) };
     case "timed_out":
-      // As on the student reading page: no re-render.
+      // As on the student reading page: a re-render only when the check
+      // counted (it may have been the last one).
+      if (result.counted) refresh();
       return TIMED_OUT_STATE;
     case "paused":
       // An outage: a short break, with when checking frees up again.

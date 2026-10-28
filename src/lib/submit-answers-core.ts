@@ -54,9 +54,11 @@
 // 5. On a model error or timeout, finish the claim with no attempt: the try
 //    isn't used up. A timeout (EFFORT_CHECK_DEADLINE_MS, or a per-request
 //    timeout that ended the call) is reported as "timed_out", anything
-//    else as "check_failed", so the student is told which. Whether the check still counts toward
-//    EFFORT_CHECK_LIMIT depends on whether the model replied
-//    (effortFailureCounts):
+//    else as "check_failed", so the student is told which. Whether the
+//    check still counts toward EFFORT_CHECK_LIMIT depends on whether the
+//    model replied (effortFailureCounts), for a timeout too (a reply, then
+//    a retry that ran out of time): "timed_out" says so (`counted`), since
+//    a counted check can be the last one and the page then moves on.
 //    - It replied, but not usably (no tool call, the wrong answers, a
 //      refusal): outcome "error", and it counts, so a model that keeps
 //      answering badly can't be retried forever. Once the limit is reached
@@ -218,7 +220,9 @@ export type SubmitResult =
   | { status: "too_many_checks" }
   | { status: "paused"; retryAt: Date | null }
   | { status: "check_failed" }
-  | { status: "timed_out" };
+  // `counted`: the model replied before the deadline, so the check counts
+  // toward the limit (step 5) and may have been the last one.
+  | { status: "timed_out"; counted: boolean };
 
 // Whether a failed check counts toward EFFORT_CHECK_LIMIT (step 5 above):
 // only when the model replied at least once. Unusable output is only ever
@@ -295,8 +299,9 @@ export async function submitAnswersWith(
     if (!results) throw new Error("effort check returned the wrong answers");
   } catch (error) {
     deps.onError?.(error);
-    await store.release(studentId, readingId, claimId, !effortFailureCounts(error, modelResponded));
-    return { status: effortErrorKind(error) === "timeout" ? "timed_out" : "check_failed" };
+    const counted = effortFailureCounts(error, modelResponded);
+    await store.release(studentId, readingId, claimId, !counted);
+    return effortErrorKind(error) === "timeout" ? { status: "timed_out", counted } : { status: "check_failed" };
   }
 
   // The locked questions passed already, so the try passes when every
