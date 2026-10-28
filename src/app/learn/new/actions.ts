@@ -12,6 +12,7 @@ import { requestRetryClock } from "@/lib/request-time-zone";
 import { createSelfReadingWith } from "@/lib/self-reading-create";
 import { safeErrorFields } from "@/lib/safe-error-fields";
 import { createSelfReading, getAllowance } from "@/lib/self-readings";
+import { logStripFallback } from "@/lib/strip-fallback-log";
 import { readingFormInput, readingFormValues } from "@/lib/validate-reading";
 
 // Starts a self-learner reading (see createSelfReadingWith for the steps).
@@ -32,6 +33,7 @@ export async function createSelfReadingAction(_prev: ReadingFormState, formData:
         fetchArticle: (url) => fetchArticle(url),
         createSelfReading: (accountId, draft) => createSelfReading(accountId, draft),
         log: (message, fields) => console.error(`createSelfReadingAction: ${message}`, fields),
+        logStripFallback: (fields) => logStripFallback(fields),
       }),
     () => ({ state: readingSaveFailedState(readingFormValues(input)) }),
     {

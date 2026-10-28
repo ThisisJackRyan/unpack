@@ -127,6 +127,18 @@ describe("resolveReadingSource", () => {
     assert.deepEqual(calls.logs, []);
   });
 
+  it("passes the strip fallback's reason on, beside the source, and logs nothing itself", async () => {
+    const { d, calls } = deps({
+      fetchArticle: async (url) => ({ title: "Page", text: "Article ".repeat(40), url, trimmed: false, stripFallback: "too_short" }),
+    });
+    assert.deepEqual(await resolveReadingSource(LINK, d), {
+      ok: true,
+      source: { title: "Page", bodyText: "Article ".repeat(40), sourceUrl: LINK.source === "link" ? LINK.url : "", bodyTrimmed: false },
+      stripFallback: "too_short",
+    });
+    assert.deepEqual(calls.logs, []);
+  });
+
   it("has no long-article refusal any more", () => {
     assert.equal("too_long" in LINK_ERRORS, false);
   });

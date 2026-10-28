@@ -336,6 +336,7 @@ describe("call sites log only safe fields", () => {
       fetchArticle: failing(new Error("no fetch")),
       createSelfReading: failing(error),
       log: (message, fields) => logs.push([message, fields]),
+      logStripFallback: () => assert.fail("no fallback for pasted text"),
     });
     assert.deepEqual(logs, [
       ["createSelfReading failed", { name: "DrizzleQueryError", causes: [{ name: "NeonDbError", code: "23503" }], timedOut: false }],
@@ -354,6 +355,7 @@ describe("call sites log only safe fields", () => {
       fetchArticle: failing(new Error("no fetch")),
       insertReading: failing(error),
       log: (message, fields) => logs.push([message, fields]),
+      logStripFallback: () => assert.fail("no fallback for pasted text"),
     });
     assert.deepEqual(logs, [
       ["insertReading failed", { name: "DrizzleQueryError", causes: [{ name: "NeonDbError", code: "23503" }], timedOut: false }],

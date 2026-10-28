@@ -14,6 +14,7 @@ import {
   saveReadingEdit,
 } from "@/lib/readings";
 import { safeErrorFields, type SafeErrorFields } from "@/lib/safe-error-fields";
+import { logStripFallback } from "@/lib/strip-fallback-log";
 import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { createTeacherReadingWith } from "@/lib/teacher-reading-create";
@@ -49,6 +50,7 @@ export async function createReading(
         fetchArticle: (url) => fetchArticle(url),
         insertReading: (id, teacherId, draft) => insertReading(id, teacherId, draft),
         log: (message, fields) => console.error(`createReading: ${message}`, fields),
+        logStripFallback: (fields) => logStripFallback(fields),
       }),
     () => ({ state: readingSaveFailedState(readingFormValues(input)) }),
     {

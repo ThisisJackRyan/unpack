@@ -5,6 +5,7 @@
 // action, so both read links the same way. Pure flow over injected deps,
 // so tests run it with fakes; no Node imports.
 
+import type { StripFallbackReason } from "./fetch-article";
 import { FetchArticleError, type FetchArticleErrorKind } from "./fetch-errors";
 import { LINK_FETCH_LIMITED_MESSAGE } from "./link-rate-limit";
 import { withRetryAt } from "./local-time";
@@ -32,10 +33,18 @@ export const NO_PAGE_TITLE_MESSAGE = "We couldn’t find a title on that page. P
 // is the first part (see trim-article.ts). Never true for pasted text.
 export type ReadingSource = { title: string; bodyText: string; sourceUrl: string | null; bodyTrimmed: boolean };
 
-export type FetchedArticle = { title: string; text: string; url: string; trimmed: boolean };
+// stripFallback: the text is the unstripped page, and why (see
+// fetch-article.ts); the create flows log it once the reading exists.
+export type FetchedArticle = {
+  title: string;
+  text: string;
+  url: string;
+  trimmed: boolean;
+  stripFallback?: StripFallbackReason;
+};
 
 export type ReadingSourceResult =
-  | { ok: true; source: ReadingSource }
+  | { ok: true; source: ReadingSource; stripFallback?: StripFallbackReason }
   | {
       ok: false;
       errors: ReadingFormErrors & { form?: string };
@@ -110,5 +119,6 @@ export async function resolveReadingSource(
   return {
     ok: true,
     source: { title, bodyText: article.text, sourceUrl: article.url, bodyTrimmed: article.trimmed },
+    ...(article.stripFallback ? { stripFallback: article.stripFallback } : {}),
   };
 }

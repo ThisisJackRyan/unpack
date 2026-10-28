@@ -717,6 +717,7 @@ async function checkFailedCreates() {
     fetchArticle: async (url) => ({ title: "From the page", text: BODY, url, trimmed: false }),
     createSelfReading: (id, draft) => createSelfReading(id, draft),
     log: () => {},
+    logStripFallback: () => {},
   });
   const run = (input: ReadingFormInput, deps: SelfCreateDeps) =>
     keepingAlive(() =>
@@ -786,6 +787,7 @@ async function checkFailedCreates() {
     fetchArticle: async (url) => ({ title: "Page", text: BODY, url, trimmed: false }),
     insertReading: (c, t, draft) => insertReading(c, t, draft),
     log: () => {},
+    logStripFallback: () => {},
     ...over,
   });
   const teacherFailures: { name: string; over: Partial<TeacherCreateDeps> }[] = [

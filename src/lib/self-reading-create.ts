@@ -18,6 +18,7 @@ import { withDeadline } from "./deadline";
 import { readingSaveFailedState } from "./create-guard";
 import { resolveReadingSource, type FetchedArticle } from "./reading-source";
 import { safeErrorFields } from "./safe-error-fields";
+import type { StripFallbackLog } from "./strip-fallback-log";
 import { createOutcomeRedirect, type CreateOutcome, type CreateRedirect, type SelfReadingDraft } from "./self-allowance";
 import { validateSoloReadingForm } from "./self-reading-form";
 import type { ReadingFormInput } from "./validate-reading";
@@ -36,6 +37,8 @@ export type SelfCreateDeps = {
   createSelfReading: (accountId: string, draft: SelfReadingDraft) => Promise<CreateOutcome>;
   // Safe fields only.
   log: (message: string, fields: Record<string, unknown>) => void;
+  // logStripFallback: one info line when the text is the unstripped page.
+  logStripFallback: (fields: StripFallbackLog) => void;
 };
 
 export type SelfCreateResult = { state: ReadingFormState } | { redirect: CreateRedirect };
@@ -72,6 +75,11 @@ export async function createSelfReadingWith(
   });
   if (!resolved.ok) return { state: { errors: resolved.errors, values, suggestText: resolved.suggestText, limit: resolved.limit } };
 
+  // Once, after the insert, with the reading's id when there is one.
+  const noteStripFallback = (readingId?: string) => {
+    if (resolved.stripFallback) deps.logStripFallback({ reason: resolved.stripFallback, path: "self", readingId });
+  };
+
   // The first write that uses a slot. Not bounded: see create-guard.ts.
   let outcome: CreateOutcome;
   try {
@@ -82,7 +90,9 @@ export async function createSelfReadingWith(
     });
   } catch (error) {
     deps.log("createSelfReading failed", safeErrorFields(error));
+    noteStripFallback();
     return { state: readingSaveFailedState(values) };
   }
+  noteStripFallback(outcome.status === "created" ? outcome.id : undefined);
   return { redirect: createOutcomeRedirect(outcome) };
 }

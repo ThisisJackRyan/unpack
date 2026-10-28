@@ -45,6 +45,7 @@ export async function qaCreateAction(options: QaCreateOptions, _prev: ReadingFor
         },
         createSelfReading: async () => ({ status: "created", id: "qa-reading" }),
         log: () => {},
+        logStripFallback: () => {},
       }),
     () => ({ state: readingSaveFailedState(readingFormValues(input)) }),
     {
