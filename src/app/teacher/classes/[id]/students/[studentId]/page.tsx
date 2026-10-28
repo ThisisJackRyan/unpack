@@ -17,7 +17,10 @@ import { ProgressAnnouncer } from "../announcer";
 import { ResetTriesButton } from "../reset-tries";
 import { OpenBook } from "@/components/illustrations";
 
-type Props = { params: Promise<{ id: string; studentId: string }> };
+type Props = {
+  params: Promise<{ id: string; studentId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
 // Cached per request so generateMetadata and the page share one query.
 const load = cache(async (id: string, studentId: string): Promise<{ status: ClassStatus; name: string; classId: string; className: string; teacherId: string }> => {
@@ -41,9 +44,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // their own questions used, none came back), it says so in plain words,
 // with "Let them try again". Only the owning teacher gets here (loadClass
 // 404s others, and a student not in this class 404s); the reset checks
-// ownership again in its own statement.
-export default async function StudentProgressPage({ params }: Props) {
+// ownership again in its own statement. `?reading=<id>` (from the
+// challenge queue) opens that reading's answers.
+export default async function StudentProgressPage({ params, searchParams }: Props) {
   const { id, studentId } = await params;
+  const { reading: openReading } = await searchParams;
   const { status, name, classId, className, teacherId } = await load(id, studentId);
   const onReset = resetTriesAction.bind(null, classId);
   // Owner-scoped in the SQL (class + this teacher); the student is in
@@ -75,7 +80,7 @@ export default async function StudentProgressPage({ params }: Props) {
           {status.readings.map((r) => {
             const cell = status.cells[cellKey(studentId, r.id)] ?? NOT_STARTED_CELL;
             return (
-              <li key={r.id} className="flex flex-col gap-3 px-5 py-4">
+              <li key={r.id} id={`reading-${r.id}`} className="flex scroll-mt-6 flex-col gap-3 px-5 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                   <h2 className="min-w-0 text-base font-semibold break-words text-ink-950">{r.title}</h2>
                   {cell.needsReset ? (
@@ -90,7 +95,7 @@ export default async function StudentProgressPage({ params }: Props) {
                   )}
                 </div>
                 {cell.tries > 0 && (
-                  <details className="group rounded-2xl border border-ink-200 bg-ink-50">
+                  <details open={openReading === r.id} className="group rounded-2xl border border-ink-200 bg-ink-50">
                     <summary
                       className={`flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-4 py-2 text-base font-semibold text-primary-700 hover:bg-ink-100 [&::-webkit-details-marker]:hidden ${focusRing}`}
                     >

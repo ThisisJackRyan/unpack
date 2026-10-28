@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { backLink, card } from "@/components/ui";
-import { loadChallengeQueue } from "@/lib/challenge-queue";
+import { loadTeacherQueue } from "@/lib/challenge-queue";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadClass } from "../loaders";
 import { decideChallengeAction } from "./actions";
@@ -16,15 +16,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: `Challenges: ${found.name}` };
 }
 
-// The open challenges in this class, oldest first: who, which reading,
-// their note, and their last try answer by answer, then Accept or Deny.
+// The open challenges in this class: who, which reading, their note, and
+// their last try answer by answer, then Accept or Deny. With them, oldest
+// first in one list, the students out of tries with no note yet, each
+// with a link to their answers.
 // Only the owning teacher gets here (loadClass 404s others), and each
 // decision checks ownership again in its own transaction.
 export default async function ChallengesPage({ params }: Props) {
   const { id } = await params;
   const found = await loadClass(id);
   const teacher = await getOrCreateTeacher();
-  const items = await loadChallengeQueue(found.id, teacher.id);
+  const entries = await loadTeacherQueue(found.id, teacher.id);
 
   return (
     <div className="flex flex-col gap-8">
@@ -41,9 +43,9 @@ export default async function ChallengesPage({ params }: Props) {
         </p>
       </div>
 
-      <ChallengeQueue action={decideChallengeAction.bind(null, found.id)} items={items} />
+      <ChallengeQueue action={decideChallengeAction.bind(null, found.id)} classId={found.id} entries={entries} />
 
-      {items.length === 0 && (
+      {entries.length === 0 && (
         <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
           <PaperPlane className="h-24 w-32" />
           <p className="text-lg text-ink-700">You’re all caught up. New challenges show up here.</p>

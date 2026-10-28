@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { OpenBook } from "@/components/illustrations";
-import { countOpenChallenges } from "@/lib/challenge-queue";
+import { countTeacherQueue } from "@/lib/challenge-queue";
 import { countDraftsClearedByGradeChange } from "@/lib/classes";
 import { READING_DELETED_FLAG, READING_DELETED_MESSAGE } from "@/lib/reading-delete";
 import { gradeLevelLabel } from "@/lib/grade-levels";
@@ -37,9 +37,9 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
   const { notice } = await searchParams;
   const found = await loadClass(id);
   const teacher = await getOrCreateTeacher();
-  const [readings, openChallenges, draftsToClear, capBadges] = await Promise.all([
+  const [readings, queueCount, draftsToClear, capBadges] = await Promise.all([
     listReadings(found.id, teacher.id),
-    countOpenChallenges(found.id, teacher.id),
+    countTeacherQueue(found.id, teacher.id),
     countDraftsClearedByGradeChange(found.id, teacher.id),
     getClassCapBadges(found.id, teacher.id),
   ]);
@@ -82,11 +82,11 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
           href={`/teacher/classes/${found.id}/challenges`}
           title="Challenges"
           detail={
-            openChallenges === 0
+            queueCount === 0
               ? "Nothing waiting"
-              : `${openChallenges} waiting for you`
+              : `${queueCount} waiting for you`
           }
-          count={openChallenges}
+          count={queueCount}
         />
       </nav>
 

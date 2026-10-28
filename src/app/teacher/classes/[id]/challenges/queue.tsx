@@ -1,8 +1,18 @@
 "use client";
 
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { pill, primaryButton, secondaryButton } from "@/components/ui";
-import { decisionMessage, parseDecisionChoice, type DecisionChoice, type QueueItem } from "@/lib/challenge-queue-core";
+import {
+  decisionMessage,
+  NO_NOTE_LABEL,
+  noNoteHelp,
+  parseDecisionChoice,
+  type DecisionChoice,
+  type NoNoteItem,
+  type QueueEntry,
+  type QueueItem,
+} from "@/lib/challenge-queue-core";
 import { ErrorMessage } from "@/components/error-message";
 import { MetaLine } from "@/components/meta-line";
 import type { DecideState } from "./state";
@@ -15,7 +25,7 @@ const secondaryButtonDisabled = `${secondaryButton} disabled:cursor-not-allowed 
 // go: after a decision the page refreshes, the card is gone, and the
 // region still says what happened. Focus moves to the heading so it isn't
 // lost with the card.
-export function ChallengeQueue({ action, items }: { action: Action; items: QueueItem[] }) {
+export function ChallengeQueue({ action, classId, entries }: { action: Action; classId: string; entries: QueueEntry[] }) {
   const [announcement, setAnnouncement] = useState("");
   const [focusHeading, setFocusHeading] = useState(0);
 
@@ -31,22 +41,58 @@ export function ChallengeQueue({ action, items }: { action: Action; items: Queue
       >
         {announcement}
       </p>
-      {items.length > 0 && (
+      {entries.length > 0 && (
         <ol className="flex flex-col gap-6">
-          {items.map((item) => (
-            <ChallengeCard
-              key={item.id}
-              action={action}
-              item={item}
-              onDecided={(message) => {
-                setAnnouncement(message);
-                setFocusHeading((n) => n + 1);
-              }}
-            />
-          ))}
+          {entries.map((entry) =>
+            entry.kind === "challenge" ? (
+              <ChallengeCard
+                key={entry.key}
+                action={action}
+                item={entry.item}
+                onDecided={(message) => {
+                  setAnnouncement(message);
+                  setFocusHeading((n) => n + 1);
+                }}
+              />
+            ) : (
+              <NoNoteRow key={entry.key} classId={classId} item={entry.item} />
+            ),
+          )}
         </ol>
       )}
     </>
+  );
+}
+
+// Out of tries, no note yet: one row, a short status line, and the way to
+// their answers. Nothing to decide until a note comes.
+function NoNoteRow({ classId, item }: { classId: string; item: NoNoteItem }) {
+  const headingId = `no-note-${item.studentId}-${item.readingId}`;
+  const answersHref = `/teacher/classes/${classId}/students/${item.studentId}?reading=${item.readingId}#reading-${item.readingId}`;
+  return (
+    <li aria-labelledby={headingId} className="flex flex-col gap-4 rounded-3xl border border-ink-200 bg-white p-5 sm:p-6">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <h2 id={headingId} className="min-w-0 text-xl font-semibold break-words text-ink-950">
+            <MetaLine as="span" parts={[item.studentName, item.readingTitle]} />
+          </h2>
+          <span className={`${pill} bg-warning-50 text-warning-900 text-base`}>
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-warning-500" /> {NO_NOTE_LABEL}
+          </span>
+        </div>
+        <MetaLine
+          className="text-base text-ink-700 tabular-nums"
+          parts={[
+            `${item.tries} of ${item.triesAllowed} ${item.triesAllowed === 1 ? "try" : "tries"} used`,
+            `${item.checks} of ${item.checksAllowed} checks used`,
+          ]}
+        />
+        <p className="text-base text-ink-700">{noNoteHelp(item.studentName)}</p>
+      </div>
+      <Link href={answersHref} className={`${secondaryButton} self-start`}>
+        See answers<span className="sr-only"> from {item.studentName} on {item.readingTitle}</span>
+      </Link>
+    </li>
   );
 }
 
