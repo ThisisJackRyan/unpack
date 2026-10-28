@@ -173,7 +173,7 @@ function SoloQuestions({
           <Banner tone="done" title="You passed! Nice work.">
             This reading is done. Here are your answers.
           </Banner>
-          <PassCelebration tryNumber={stage.attempt?.tryNumber} />
+          <PassCelebration tryNumber={stage.attempt?.tryNumber} readingId={readingId} />
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults={false} />}
           <NextSteps />
         </>

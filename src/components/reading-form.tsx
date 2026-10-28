@@ -11,7 +11,7 @@ import {
 import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { MaxLengthNote } from "@/components/max-length-note";
-import { field, primaryButton, secondaryButton } from "@/components/ui";
+import { field, optionCard, optionRadio, primaryButton, quietButton, secondaryButton } from "@/components/ui";
 import {
   BODY_TEXT_MAX_LENGTH,
   BODY_TEXT_MIN_LENGTH,
@@ -27,14 +27,11 @@ import {
 } from "./reading-form-state";
 
 const label = "text-lg font-semibold text-ink-950";
-const hint = "text-base text-ink-700";
+const hint = "text-lg text-ink-700";
 
-// A pill segmented control: a light gray track, the chosen option white.
-// The radio inside each option is visually hidden but still focusable, so
-// arrow keys move between options and the focus ring shows on the option.
-const track = "grid gap-1 rounded-2xl bg-ink-100 p-1";
-const option =
-  "flex min-h-12 cursor-pointer rounded-xl px-4 text-ink-700 transition-colors hover:text-ink-950 has-checked:bg-white has-checked:text-ink-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-ink-200 has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600";
+// Radio choices are cards side by side (optionCard in ui.ts): a visible
+// native radio, the chosen card tinted. Arrow keys move between options.
+const cards = "grid gap-3";
 
 const SOURCES = [
   { value: "link", label: "Paste a link" },
@@ -140,7 +137,8 @@ export function ReadingForm({
     : "flex flex-col gap-2";
   const linkOnly = "group-has-[#source-text:checked]/form:hidden";
   // A teacher's new reading: "Create & generate" (save, then write the
-  // shared set on the reading page) with "Save draft" beside it. A
+  // shared set on the reading page) with a quieter "Save draft" (a text
+  // style button) beside it. A
   // per-student reading has no set to write, so "Save draft" is the main
   // button there. CSS follows the checked mode radio, like the panels.
   const sharedOnly = "group-has-[#mode-per_student:checked]/form:hidden";
@@ -163,12 +161,9 @@ export function ReadingForm({
           <>
             <fieldset key={`source-${values.source}`} className="flex flex-col gap-2">
               <legend className={`${label} mb-2`}>Source</legend>
-              <div className={`${track} grid-cols-2`}>
+              <div className={`${cards} sm:grid-cols-2`}>
                 {SOURCES.map((s) => (
-                  <label
-                    key={s.value}
-                    className={`${option} items-center justify-center text-center text-base font-semibold`}
-                  >
+                  <label key={s.value} className={`${optionCard} items-center text-lg font-semibold`}>
                     <input
                       type="radio"
                       id={`source-${s.value}`}
@@ -177,7 +172,7 @@ export function ReadingForm({
                       defaultChecked={values.source === s.value}
                       onChange={(e) => setSource(e.currentTarget.value)}
                       aria-describedby={errors.source ? "source-error" : undefined}
-                      className="sr-only"
+                      className={optionRadio}
                     />
                     {s.label}
                   </label>
@@ -291,7 +286,7 @@ export function ReadingForm({
                 "body-count",
                 bodyError && "body-error",
               )}
-              className={`${field} min-h-72 py-3 text-base leading-relaxed`}
+              className={`${field} min-h-72 py-3 text-lg leading-relaxed`}
             />
             <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
               <p id="body-hint" className={hint}>
@@ -302,7 +297,7 @@ export function ReadingForm({
               <p
                 id="body-count"
                 aria-live="polite"
-                className={`text-base tabular-nums ${overLimit ? "font-semibold text-danger-700" : "text-ink-700"}`}
+                className={`text-lg tabular-nums ${overLimit ? "font-semibold text-danger-700" : "text-ink-700"}`}
               >
                 {bodyLength.toLocaleString("en-US")} /{" "}
                 {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
@@ -387,9 +382,9 @@ export function ReadingForm({
           {!solo && (
             <fieldset key={`mode-${values.questionMode}`} className="flex flex-col gap-2">
               <legend className={`${label} mb-2`}>Question mode</legend>
-              <div className={`${track} sm:grid-cols-2`}>
+              <div className={`${cards} sm:grid-cols-2`}>
                 {QUESTION_MODES.map((m) => (
-                  <label key={m} className={`${option} flex-col justify-center gap-0.5 py-3`}>
+                  <label key={m} className={`${optionCard} items-start`}>
                     <input
                       type="radio"
                       id={`mode-${m}`}
@@ -400,11 +395,13 @@ export function ReadingForm({
                         `mode-${m}-hint`,
                         errors.questionMode && "mode-error",
                       )}
-                      className="sr-only"
+                      className={`${optionRadio} mt-1`}
                     />
-                    <span className="text-base font-semibold">{questionModeLabel(m)}</span>
-                    <span id={`mode-${m}-hint`} className="text-base text-ink-700">
-                      {questionModeHint(m)}
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-lg font-semibold">{questionModeLabel(m)}</span>
+                      <span id={`mode-${m}-hint`} className="text-lg text-ink-700">
+                        {questionModeHint(m)}
+                      </span>
                     </span>
                   </label>
                 ))}
@@ -421,7 +418,7 @@ export function ReadingForm({
         {errors.form}
       </ErrorMessage>
 
-      <div className="flex flex-col-reverse gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:justify-end">
+      <div className="flex flex-col-reverse gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:items-center sm:justify-end">
         <Link href={cancelHref} className={secondaryButton}>
           Cancel
         </Link>
@@ -432,7 +429,7 @@ export function ReadingForm({
               name="then"
               value="save"
               disabled={pending}
-              className={`${secondaryButton} ${sharedOnly}`}
+              className={`${quietButton} ${sharedOnly}`}
             >
               {pending && then === "save" ? pendingLabel : "Save draft"}
             </button>

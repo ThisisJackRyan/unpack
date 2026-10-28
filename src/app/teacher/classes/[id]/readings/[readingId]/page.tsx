@@ -138,7 +138,7 @@ export default async function ReadingPage({ params, searchParams }: Props) {
                   Questions
                 </h2>
                 <MetaLine
-                  className="text-base text-ink-700"
+                  className="text-lg text-ink-700"
                   parts={[questionCountLabel(reading.questionCount), `Written for ${gradeLabel}`]}
                 />
               </div>
@@ -159,12 +159,12 @@ export default async function ReadingPage({ params, searchParams }: Props) {
                     </li>
                   ))}
                 </ol>
-                <p className="text-base text-ink-700">
+                <p className="text-lg text-ink-700">
                   Questions are locked once a reading is published.
                 </p>
               </>
             ) : (
-              <p className="text-base text-ink-700">
+              <p className="text-lg text-ink-700">
                 Each student gets their own set when they first open this reading.
               </p>
             )}
@@ -197,10 +197,10 @@ export default async function ReadingPage({ params, searchParams }: Props) {
 
       <section aria-labelledby="delete-reading-heading" className={`${card} flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6`}>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 id="delete-reading-heading" className="text-base font-semibold text-ink-950">
+          <h2 id="delete-reading-heading" className="text-lg font-semibold text-ink-950">
             Delete this reading
           </h2>
-          <p className="text-base text-ink-700">Removes it for everyone, with every student’s answers and tries.</p>
+          <p className="text-lg text-ink-700">Removes it for everyone, with every student’s answers and tries.</p>
         </div>
         <DeleteReadingButton action={deleteReadingAction.bind(null, found.id, reading.id)} title={reading.title} />
       </section>
@@ -234,7 +234,7 @@ function CapPanel({
         <h2 id="cap-heading" aria-live="polite" className="text-lg font-semibold text-ink-950">
           {capHeadline(view)}
         </h2>
-        <p className="text-base text-ink-700">{capDetail(view)}</p>
+        <p className="text-lg text-ink-700">{capDetail(view)}</p>
       </div>
       {(view.kind === "near" || view.kind === "full") && <RaiseCapButton action={raiseAction} raiseTo={view.raiseTo} />}
     </section>
@@ -250,12 +250,12 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
         <h2 id="student-sets-heading" className="text-xl font-semibold text-ink-950">
           Student questions
         </h2>
-        <p className="text-base text-ink-700">
+        <p className="text-lg text-ink-700">
           {sets.length === 1 ? "1 student has a set." : `${sets.length} students have a set.`}
         </p>
       </div>
       {sets.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-700">
+        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-lg text-ink-700">
           No student has opened this reading yet. Each student’s questions show up here after they open it.
         </p>
       ) : (
@@ -266,8 +266,8 @@ function StudentSets({ sets }: { sets: StudentSet[] }) {
                 <summary
                   className={`flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 hover:bg-ink-50 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden ${focusRing}`}
                 >
-                  <span className="min-w-0 text-base font-semibold break-words text-ink-950">{set.name}</span>
-                  <span className="flex shrink-0 items-center gap-3 text-base text-ink-700">
+                  <span className="min-w-0 text-lg font-semibold break-words text-ink-950">{set.name}</span>
+                  <span className="flex shrink-0 items-center gap-3 text-lg text-ink-700">
                     {questionCountLabel(set.questions.length)}
                     <span aria-hidden="true" className="transition-transform group-open:rotate-90">
                       ›
@@ -311,10 +311,10 @@ function StudentAnswers({
         <h2 id="student-answers-heading" className="text-xl font-semibold text-ink-950">
           Student answers
         </h2>
-        <p className="text-base text-ink-700">{passedSummary(status, readingId)}</p>
+        <p className="text-lg text-ink-700">{passedSummary(status, readingId)}</p>
       </div>
       {status.students.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-base text-ink-700">
+        <p className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-8 text-center text-lg text-ink-700">
           No students yet. Their answers show up here after they check them.
         </p>
       ) : (
@@ -323,10 +323,10 @@ function StudentAnswers({
             const cell = status.cells[cellKey(student.id, readingId)] ?? NOT_STARTED_CELL;
             const summary = (
               <>
-                <span className="min-w-0 text-base font-semibold break-words text-ink-950">{student.name}</span>
+                <span className="min-w-0 text-lg font-semibold break-words text-ink-950">{student.name}</span>
                 <span className="flex shrink-0 flex-wrap items-center justify-end gap-3">
                   {cell.status !== "not_started" && (
-                    <span className="text-base text-ink-700 tabular-nums">{triesLabel(cell)}</span>
+                    <span className="text-lg text-ink-700 tabular-nums">{triesLabel(cell)}</span>
                   )}
                   <StudentReadingStatusBadge audience="teacher" status={cell.status} size="sm" />
                 </span>
@@ -348,7 +348,7 @@ function StudentAnswers({
                     </summary>
                     <div className="flex flex-col gap-3 bg-ink-50 px-4 py-4">
                       <TeacherAnswerList questions={answersFor(answers, student.id, readingId)} headingLevel={3} />
-                      <Link href={`/teacher/classes/${classId}/students/${student.id}`} className={`${textLink} self-start text-base`}>
+                      <Link href={`/teacher/classes/${classId}/students/${student.id}`} className={`${textLink} self-start text-lg`}>
                         All of {student.name}’s readings
                       </Link>
                     </div>
@@ -366,8 +366,8 @@ function StudentAnswers({
 function Detail({ term, children }: { term: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-base font-medium text-ink-700">{term}</dt>
-      <dd className="text-base font-semibold text-ink-950">{children}</dd>
+      <dt className="text-lg font-medium text-ink-700">{term}</dt>
+      <dd className="text-lg font-semibold text-ink-950">{children}</dd>
     </div>
   );
 }

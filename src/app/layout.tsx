@@ -4,6 +4,7 @@ import { Geist, Geist_Mono, Nunito } from "next/font/google";
 import { ClerkAvatarAlt } from "@/components/clerk-avatar-alt";
 import { AFTER_AUTH_PATH, AFTER_SIGN_OUT_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 import { clerkAppearance } from "@/lib/clerk-appearance";
+import { clerkLocalization } from "@/lib/clerk-localization";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -55,9 +56,11 @@ export default function RootLayout({
             the app's colors, radius and type. Telemetry is off: nothing
             about our pages goes to Clerk's telemetry service, and its
             requests (blocked by many browser privacy tools) no longer log
-            console errors. */}
+            console errors. The account menu button is named "Account
+            menu". */}
         <ClerkProvider
           appearance={clerkAppearance}
+          localization={clerkLocalization}
           signInUrl={SIGN_IN_PATH}
           signUpUrl={SIGN_UP_PATH}
           signInFallbackRedirectUrl={AFTER_AUTH_PATH}

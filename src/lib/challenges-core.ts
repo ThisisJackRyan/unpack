@@ -59,27 +59,30 @@ const ELIGIBLE = `exists (
   select 1 from readings r join students s on s.class_id = r.class_id
   where r.id = $2::uuid and s.id = $1::uuid and r.status = 'published'
 )`;
+// PASSED_SQL, CHECKS_SQL, BLOCKING_SQL, and liveCheckSql are shared with
+// the teacher's one more try without a note (challenge-queue-core.ts), so
+// both read the student's state the same way. $1 student, $2 reading.
 const FAILS = `(select count(*) from attempts
   where student_id = $1::uuid and reading_id = $2::uuid and result = 'fail')`;
-const PASSED = `exists (
+export const PASSED_SQL = `exists (
   select 1 from attempts where student_id = $1::uuid and reading_id = $2::uuid and result = 'pass'
 )`;
 // Every effort check the model answered, failed ones included (the same
 // count the claim in submit-answers-core.ts limits; given-back checks
 // don't count).
-const CHECKS = `(select count(*) from effort_checks where student_id = $1::uuid and reading_id = $2::uuid and ${countedCheckSql()})`;
+export const CHECKS_SQL = `(select count(*) from effort_checks where student_id = $1::uuid and reading_id = $2::uuid and ${countedCheckSql()})`;
 const TRIES_ALLOWED = triesAllowedSql("$1::uuid", "$2::uuid");
 const CHECKS_ALLOWED = checksAllowedSql("$1::uuid", "$2::uuid");
 // A challenge that blocks a new one: open, approved, closed (the student
 // passed), or denied without one more try. Only a round denied with one
 // more try lets the student send another note, once out of tries again.
-const BLOCKING = `exists (
+export const BLOCKING_SQL = `exists (
   select 1 from challenges where student_id = $1::uuid and reading_id = $2::uuid
     and (status <> 'denied' or tries_allowed is null)
 )`;
 // An unfinished effort check younger than the stale timeout (parameter
 // $n), as in submit-answers-core.ts.
-function live(n: number): string {
+export function liveCheckSql(n: number): string {
   return `exists (
   select 1 from effort_checks
   where student_id = $1::uuid and reading_id = $2::uuid
@@ -103,10 +106,10 @@ export function challengeSendStatements(studentId: string, readingId: string, no
 select $1::uuid, $2::uuid, $3::text,
   (select coalesce(max(round), 0) + 1 from challenges where student_id = $1::uuid and reading_id = $2::uuid)
 where ${ELIGIBLE}
-and not ${PASSED}
-and not ${BLOCKING}
-and (${FAILS} >= ${TRIES_ALLOWED} or ${CHECKS} >= ${CHECKS_ALLOWED})
-and not ${live(4)}
+and not ${PASSED_SQL}
+and not ${BLOCKING_SQL}
+and (${FAILS} >= ${TRIES_ALLOWED} or ${CHECKS_SQL} >= ${CHECKS_ALLOWED})
+and not ${liveCheckSql(4)}
 returning id`,
       params: [studentId, readingId, note, EFFORT_CLAIM_STALE_SECONDS],
     },
@@ -118,8 +121,8 @@ returning id`,
 // the latest challenge that blocks a new one, if any.
 export function challengeDiagnosisStatement(studentId: string, readingId: string): Statement {
   return {
-    text: `select ${ELIGIBLE} as eligible, ${PASSED} as passed, ${FAILS}::int as fails, ${CHECKS}::int as checks,
-  ${TRIES_ALLOWED} as tries_allowed, ${CHECKS_ALLOWED} as checks_allowed, ${live(3)} as live,
+    text: `select ${ELIGIBLE} as eligible, ${PASSED_SQL} as passed, ${FAILS}::int as fails, ${CHECKS_SQL}::int as checks,
+  ${TRIES_ALLOWED} as tries_allowed, ${CHECKS_ALLOWED} as checks_allowed, ${liveCheckSql(3)} as live,
   (select status from challenges
     where student_id = $1::uuid and reading_id = $2::uuid and (status <> 'denied' or tries_allowed is null)
     order by round desc limit 1) as blocking`,

@@ -61,7 +61,7 @@ describe("classStatus", () => {
     const cell = classStatusCell({ passed: false, tries: 3, checks: 3, challenge: null });
     assert.equal(cell.status, "waiting");
     assert.equal(TEACHER_READING_STATUS_LABELS[cell.status], "Waiting for teacher");
-    assert.equal(STUDENT_READING_STATUS_LABELS[cell.status], "Waiting for your teacher");
+    assert.equal(STUDENT_READING_STATUS_LABELS[cell.status], "Send your teacher a note");
     // A used one more try, too.
     assert.equal(classStatusCell({ passed: false, tries: 4, checks: 4, challenge: "denied", extra_try: true, tries_allowed: 4, checks_allowed: 5 }).status, "waiting");
     assert.equal(classStatusCell({ passed: false, tries: 2, checks: 2, challenge: null }).status, "in_progress");

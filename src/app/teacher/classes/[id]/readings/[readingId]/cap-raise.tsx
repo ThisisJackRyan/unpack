@@ -17,7 +17,7 @@ export function RaiseCapButton({ action, raiseTo }: { action: Action; raiseTo: n
       <button type="submit" disabled={pending} className={primaryButton}>
         {pending ? "Raising…" : `Raise the limit to ${raiseTo}`}
       </button>
-      <div aria-live="polite" className="text-base font-medium text-primary-900 empty:hidden">
+      <div aria-live="polite" className="text-lg font-medium text-primary-900 empty:hidden">
         {pending ? "" : state.error ? <ErrorBox>{state.error}</ErrorBox> : (state.message ?? "")}
       </div>
     </form>

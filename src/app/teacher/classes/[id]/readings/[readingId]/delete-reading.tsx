@@ -45,13 +45,13 @@ export function DeleteReadingButton({ action, title }: { action: Action; title: 
           <h2 id="delete-reading-title" className="text-xl font-semibold break-words text-ink-950">
             Delete “{title}”?
           </h2>
-          <div id="delete-reading-body" className="flex flex-col gap-3 text-base text-ink-700">
+          <div id="delete-reading-body" className="flex flex-col gap-3 text-lg text-ink-700">
             <p>
               This deletes the reading, its questions, and every student’s answers and tries for it, including their
               notes to you. It can’t be undone.
             </p>
             <p>Students stay in the class, and their work on other readings is kept.</p>
-            <p className="text-base text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
+            <p className="text-lg text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
           </div>
           <ErrorMessage>
             {state.error ?? ""}

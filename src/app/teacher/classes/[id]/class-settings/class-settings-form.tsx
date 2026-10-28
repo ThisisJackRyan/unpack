@@ -58,7 +58,7 @@ export function ClassSettingsForm({
         <label htmlFor="class-grade" className="text-lg font-semibold text-ink-950">
           Grade level
         </label>
-        <p id="class-grade-help" className="text-base text-ink-700">
+        <p id="class-grade-help" className="text-lg text-ink-700">
           {CLASS_GRADE_HELP}
         </p>
         <select
@@ -83,7 +83,7 @@ export function ClassSettingsForm({
         {warn && isGradeLevel(picked) && (
           <p
             id="class-grade-warning"
-            className="flex gap-3 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-base text-warning-950"
+            className="flex gap-3 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-lg text-warning-950"
           >
             <span aria-hidden="true" className="mt-2 h-2 w-2 shrink-0 rounded-full bg-warning-500" />
             <span>{gradeChangeWarning(draftsToClear, picked)}</span>
@@ -92,7 +92,7 @@ export function ClassSettingsForm({
       </div>
 
       <div className="flex flex-col gap-4 pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <div aria-live="polite" className="text-base font-medium text-primary-900 empty:hidden">
+        <div aria-live="polite" className="text-lg font-medium text-primary-900 empty:hidden">
           {pending ? "" : state.error ? <ErrorBox>{state.error}</ErrorBox> : (state.message ?? "")}
         </div>
         <button type="submit" disabled={pending} className={`${primaryButton} sm:ml-auto`}>

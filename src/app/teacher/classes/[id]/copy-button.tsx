@@ -49,7 +49,7 @@ export function CopyButton({
         {copied ? COPY_STATUS_TEXT.copiedButton : COPY_STATUS_TEXT.idleButton}
         <span className="sr-only"> {label}</span>
       </button>
-      <p role="status" className="max-w-sm text-base font-medium text-ink-900">
+      <p role="status" className="max-w-sm text-lg font-medium text-ink-900">
         {copied && <span className="sr-only">{COPY_STATUS_TEXT.copiedAnnouncement}</span>}
         {status === "failed" && COPY_STATUS_TEXT.failed}
       </p>
