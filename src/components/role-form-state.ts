@@ -15,24 +15,9 @@ export type RoleFormState = {
   // Self-learner was refused by the age screen (now, or the cookie from
   // before): show the class note in place of the screen.
   ageGate?: true;
-  // /welcome: the under-13 answer deleted the account. The form signs the
-  // user out to this path (signOutTo below).
-  signOutTo?: string;
+  // An under-13 answer on /welcome that deletes the account is not a
+  // state: the action redirects to /join (see welcome-core.ts).
 };
-
-// Clerk's signOut, then its redirect. If it throws (the account is
-// already gone in Clerk, so the session may be too), go there anyway.
-export async function signOutTo(
-  path: string,
-  signOut: (options: { redirectUrl: string }) => Promise<unknown>,
-  navigate: (path: string) => void,
-): Promise<void> {
-  try {
-    await signOut({ redirectUrl: path });
-  } catch {
-    navigate(path);
-  }
-}
 
 // The age screen shows one note at a time: the neutral hint, or the red
 // error in its place while the error is active. Both selects'
