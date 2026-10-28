@@ -3,9 +3,13 @@
 // failed attempt with its answers, like the reading pages' `previous`. In
 // memory (one `next start` for the browser check), on globalThis so the
 // page and the action see the same map. QA only (the script's fixed
-// answers, nothing real): see src/lib/qa-routes.ts.
+// answers, nothing real): see src/lib/qa-routes.ts. Capped at
+// QA_TRIES_MAX_RUNS runs, the oldest dropped first, so a server left
+// running with the QA routes on can't grow without bound.
 
 import type { AttemptView } from "@/lib/reading-progress";
+
+export const QA_TRIES_MAX_RUNS = 200;
 
 const store = globalThis as typeof globalThis & { __unpackQaTries?: Map<string, AttemptView> };
 
@@ -20,5 +24,13 @@ export function qaLastTry(run: string): AttemptView | null {
 
 export function saveQaTry(run: string, texts: Record<string, string>): void {
   const answers = Object.fromEntries(Object.entries(texts).map(([id, text]) => [id, { text, pass: false, nudge: "QA tip." }]));
-  tries().set(run, { tryNumber: (qaLastTry(run)?.tryNumber ?? 0) + 1, result: "fail", answers });
+  const map = tries();
+  const tryNumber = (map.get(run)?.tryNumber ?? 0) + 1;
+  // Re-inserted, so the run is the newest: a Map keeps insertion order.
+  map.delete(run);
+  map.set(run, { tryNumber, result: "fail", answers });
+  for (const oldest of map.keys()) {
+    if (map.size <= QA_TRIES_MAX_RUNS) break;
+    map.delete(oldest);
+  }
 }
