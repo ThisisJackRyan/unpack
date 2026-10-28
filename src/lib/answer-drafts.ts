@@ -1,12 +1,16 @@
 // Unsent answer drafts, and the unsent note to the teacher, kept in the
 // browser (localStorage) so a reload, a closed tab or a dropped connection
 // doesn't lose what a student typed.
-// Keys hold ids only and values hold only the answer text: never a name
-// or anything else about the student. A draft belongs to one try, so a
-// check that saved (the page moves to the next try, or past answering)
-// makes the older drafts stale, and they're removed. Every storage call is
-// guarded: private mode, a blocked or a full localStorage just means no
-// drafts. Pure apart from the storage passed in, so tests cover it.
+// Keys hold ids only and values hold only the answer text and when it was
+// saved: never a name or anything else about the student. A draft belongs
+// to one try, so a check that saved (the page moves to the next try, or
+// past answering) makes the older drafts stale, and they're removed. A
+// draft older than DRAFT_TTL_DAYS counts as absent, and pruneDrafts (run
+// when a form loads) removes every expired unpack draft on the device, so
+// a reading left unfinished doesn't keep its text there for good. Every
+// storage call is guarded: private mode, a blocked or a full localStorage
+// just means no drafts. Pure apart from the storage and the time passed
+// in, so tests cover it.
 
 import { ANSWER_MAX_LENGTH, CHALLENGE_NOTE_MAX_LENGTH } from "./validate-answers";
 
@@ -23,6 +27,46 @@ export type DraftScope = DraftOwner & { tryNumber: number };
 export type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
 
 export const ANSWER_DRAFT_PREFIX = "unpack:answers:v1:";
+
+export const DRAFT_TTL_DAYS = 7;
+const DRAFT_TTL_MS = DRAFT_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+// The stored value: {"savedAt": epoch ms, "text": the text}. A value in
+// the earlier format (the bare text, no time) still loads, as if saved
+// now; pruneDrafts stamps it with the time it first sees it, so it
+// expires DRAFT_TTL_DAYS after that.
+export function encodeDraft(text: string, now: number): string {
+  return JSON.stringify({ savedAt: now, text });
+}
+
+type DecodedDraft = { text: string; savedAt: number | null };
+
+export function decodeDraft(raw: string): DecodedDraft {
+  if (raw.startsWith("{")) {
+    try {
+      const value = JSON.parse(raw) as unknown;
+      if (value && typeof value === "object") {
+        const { savedAt, text } = value as { savedAt?: unknown; text?: unknown };
+        if (typeof savedAt === "number" && Number.isFinite(savedAt) && typeof text === "string") return { text, savedAt };
+      }
+    } catch {
+      // Not ours: the bare text of an earlier draft.
+    }
+  }
+  return { text: raw, savedAt: null };
+}
+
+function isExpired(draft: DecodedDraft, now: number): boolean {
+  return draft.savedAt !== null && now - draft.savedAt > DRAFT_TTL_MS;
+}
+
+// The draft's text, or null when there is none or it has expired.
+function readDraft(storage: DraftStorage, key: string, now: number): string | null {
+  const raw = storage.getItem(key);
+  if (raw === null) return null;
+  const draft = decodeDraft(raw);
+  return isExpired(draft, now) ? null : draft.text;
+}
 
 // unpack:answers:v1:<mode>:<reading id>:<owner id>:
 export function draftOwnerPrefix(owner: DraftOwner): string {
@@ -51,10 +95,16 @@ export function browserDraftStorage(): DraftStorage | null {
 
 // Saves one answer's draft. False when it couldn't be saved (full or
 // unavailable storage); the answer box keeps working either way.
-export function saveDraft(storage: DraftStorage | null, scope: DraftScope, questionId: string, text: string): boolean {
+export function saveDraft(
+  storage: DraftStorage | null,
+  scope: DraftScope,
+  questionId: string,
+  text: string,
+  now: number = Date.now(),
+): boolean {
   if (!storage) return false;
   try {
-    storage.setItem(draftKey(scope, questionId), text.slice(0, ANSWER_MAX_LENGTH));
+    storage.setItem(draftKey(scope, questionId), encodeDraft(text.slice(0, ANSWER_MAX_LENGTH), now));
     return true;
   } catch {
     return false;
@@ -62,17 +112,18 @@ export function saveDraft(storage: DraftStorage | null, scope: DraftScope, quest
 }
 
 // This try's drafts for the given questions, by question id. A question
-// without a draft is left out.
+// without a draft (or with an expired one) is left out.
 export function loadDrafts(
   storage: DraftStorage | null,
   scope: DraftScope,
   questionIds: readonly string[],
+  now: number = Date.now(),
 ): Record<string, string> {
   const drafts: Record<string, string> = {};
   if (!storage) return drafts;
   for (const id of questionIds) {
     try {
-      const text = storage.getItem(draftKey(scope, id));
+      const text = readDraft(storage, draftKey(scope, id), now);
       if (text !== null) drafts[id] = text.slice(0, ANSWER_MAX_LENGTH);
     } catch {
       // Unreadable: no draft for this one.
@@ -100,6 +151,31 @@ export function clearDrafts(storage: DraftStorage | null, owner: DraftOwner, kee
   }
 }
 
+// Removes every expired answer and note draft on this device (any reading,
+// any owner), and stamps earlier-format drafts with `now`. Returns how many
+// were removed.
+export function pruneDrafts(storage: DraftStorage | null, now: number = Date.now()): number {
+  if (!storage) return 0;
+  try {
+    const expired: string[] = [];
+    const unstamped: [string, string][] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (!key || !(key.startsWith(ANSWER_DRAFT_PREFIX) || key.startsWith(NOTE_DRAFT_PREFIX))) continue;
+      const raw = storage.getItem(key);
+      if (raw === null) continue;
+      const draft = decodeDraft(raw);
+      if (isExpired(draft, now)) expired.push(key);
+      else if (draft.savedAt === null) unstamped.push([key, draft.text]);
+    }
+    for (const key of expired) storage.removeItem(key);
+    for (const [key, text] of unstamped) storage.setItem(key, encodeDraft(text, now));
+    return expired.length;
+  } catch {
+    return 0;
+  }
+}
+
 // The answer boxes' starting values: the page's prefill (the last try's
 // answers), with this try's drafts on top for the questions that can
 // still be edited. A draft is always newer than the prefill, because it
@@ -119,7 +195,8 @@ export function withDrafts(
 // The note to the teacher (the challenge note), one per reading and
 // student, in its own key space so clearing the answer drafts (which
 // happens on the very page that shows the note box) leaves it alone. The
-// value is the note text only. Cleared once the note is sent, and when the
+// value is the note text and when it was saved, and it expires like an
+// answer draft. Cleared once the note is sent, and when the
 // page no longer offers the note box (sent from another tab, decided, or
 // passed).
 export const NOTE_DRAFT_PREFIX = "unpack:note:v1:";
@@ -131,21 +208,27 @@ export function noteDraftKey(owner: DraftOwner): string {
 
 // False when it couldn't be saved; an empty note is saved too, so a
 // cleared note stays cleared after a reload.
-export function saveNoteDraft(storage: DraftStorage | null, owner: DraftOwner, text: string): boolean {
+export function saveNoteDraft(
+  storage: DraftStorage | null,
+  owner: DraftOwner,
+  text: string,
+  now: number = Date.now(),
+): boolean {
   if (!storage) return false;
   try {
-    storage.setItem(noteDraftKey(owner), text.slice(0, CHALLENGE_NOTE_MAX_LENGTH));
+    storage.setItem(noteDraftKey(owner), encodeDraft(text.slice(0, CHALLENGE_NOTE_MAX_LENGTH), now));
     return true;
   } catch {
     return false;
   }
 }
 
-// The saved note, or null when there is none (or it can't be read).
-export function loadNoteDraft(storage: DraftStorage | null, owner: DraftOwner): string | null {
+// The saved note, or null when there is none (or it has expired, or it
+// can't be read).
+export function loadNoteDraft(storage: DraftStorage | null, owner: DraftOwner, now: number = Date.now()): string | null {
   if (!storage) return null;
   try {
-    const text = storage.getItem(noteDraftKey(owner));
+    const text = readDraft(storage, noteDraftKey(owner), now);
     return text === null ? null : text.slice(0, CHALLENGE_NOTE_MAX_LENGTH);
   } catch {
     return null;

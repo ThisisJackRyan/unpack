@@ -22,6 +22,7 @@ import {
   clearDrafts,
   clearNoteDraft,
   loadDrafts,
+  pruneDrafts,
   saveDraft,
   withDrafts,
   type DraftOwner,
@@ -74,10 +75,11 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
 
   // After hydration (localStorage is browser only): this try's unsent
   // drafts go over the prefill, and older tries' drafts are dropped (that
-  // check saved).
+  // check saved), as are expired drafts on this device.
   useEffect(() => {
     const storage = browserDraftStorage();
     const owner = { mode, readingId, ownerId };
+    pruneDrafts(storage);
     clearDrafts(storage, owner, tryNumber);
     const ids = questionIds.split(",");
     const saved = loadDrafts(storage, { ...owner, tryNumber }, ids);

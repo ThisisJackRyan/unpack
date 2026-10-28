@@ -6,11 +6,15 @@ import {
   browserDraftStorage,
   clearDrafts,
   clearNoteDraft,
+  decodeDraft,
+  DRAFT_TTL_DAYS,
   draftKey,
+  encodeDraft,
   loadDrafts,
   loadNoteDraft,
   NOTE_DRAFT_PREFIX,
   noteDraftKey,
+  pruneDrafts,
   saveDraft,
   saveNoteDraft,
   withDrafts,
@@ -66,8 +70,10 @@ describe("saveDraft and loadDrafts", () => {
     // Another try or another student on the same device sees nothing.
     assert.deepEqual(loadDrafts(s, scope(2), [Q1, Q2]), {});
     assert.deepEqual(loadDrafts(s, scope(1, OTHER), [Q1, Q2]), {});
-    // The stored value is the text, nothing else.
-    assert.deepEqual([...s.map.values()], ["Bees make honey."]);
+    // The stored value is the text and when it was saved, nothing else.
+    const [stored] = [...s.map.values()];
+    assert.deepEqual(Object.keys(JSON.parse(stored)).sort(), ["savedAt", "text"]);
+    assert.equal(decodeDraft(stored).text, "Bees make honey.");
   });
 
   it("keeps an emptied box as an empty draft", () => {
@@ -168,10 +174,82 @@ describe("note drafts", () => {
 
   it("the note form restores, saves on every change, and clears after a send", () => {
     const source = readFileSync(new URL("../app/c/r/[readingId]/challenge-form.tsx", import.meta.url), "utf8");
-    assert.match(source, /loadNoteDraft\(browserDraftStorage\(\)/);
+    assert.match(source, /pruneDrafts\(storage\);\n    const saved = loadNoteDraft\(storage,/);
     assert.match(source, /saveNoteDraft\(browserDraftStorage\(\)/);
     assert.match(source, /if \(!next\.error\) clearNoteDraft\(/);
     const page = readFileSync(new URL("../app/c/r/[readingId]/page.tsx", import.meta.url), "utf8");
     assert.match(page, /keepNote=\{stage\.kind === "out_of_tries" \|\| stage\.kind === "check_limit"\}/);
+  });
+});
+
+// N1 (PR 16 review): drafts expire after DRAFT_TTL_DAYS.
+describe("draft expiry", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const T0 = Date.UTC(2026, 9, 1, 12);
+  const owner = { mode: "class" as const, readingId: READING, ownerId: STUDENT };
+
+  it("is 7 days", () => {
+    assert.equal(DRAFT_TTL_DAYS, 7);
+  });
+
+  it("an answer or note draft older than 7 days loads as absent; at 7 days it still loads", () => {
+    const s = memoryStorage();
+    saveDraft(s, scope(1), Q1, "Bees make honey.", T0);
+    saveNoteDraft(s, owner, "Please look.", T0);
+    assert.deepEqual(loadDrafts(s, scope(1), [Q1], T0 + 7 * DAY), { [Q1]: "Bees make honey." });
+    assert.equal(loadNoteDraft(s, owner, T0 + 7 * DAY), "Please look.");
+    assert.deepEqual(loadDrafts(s, scope(1), [Q1], T0 + 7 * DAY + 1), {});
+    assert.equal(loadNoteDraft(s, owner, T0 + 7 * DAY + 1), null);
+  });
+
+  it("saving again restarts the clock", () => {
+    const s = memoryStorage();
+    saveDraft(s, scope(1), Q1, "first", T0);
+    saveDraft(s, scope(1), Q1, "second", T0 + 6 * DAY);
+    assert.deepEqual(loadDrafts(s, scope(1), [Q1], T0 + 10 * DAY), { [Q1]: "second" });
+  });
+
+  it("pruneDrafts removes expired answer and note drafts of every reading and owner, and nothing else", () => {
+    const s = memoryStorage();
+    saveDraft(s, scope(1), Q1, "old", T0);
+    saveDraft(s, scope(2, OTHER), Q2, "old too", T0);
+    saveNoteDraft(s, { ...owner, readingId: OTHER }, "old note", T0);
+    saveDraft(s, scope(1), Q2, "fresh", T0 + 5 * DAY);
+    saveNoteDraft(s, owner, "fresh note", T0 + 5 * DAY);
+    s.setItem("someone:else", "kept");
+    assert.equal(pruneDrafts(s, T0 + 8 * DAY), 3);
+    assert.deepEqual(
+      [...s.map.keys()].sort(),
+      [draftKey(scope(1), Q2), noteDraftKey(owner), "someone:else"].sort(),
+    );
+  });
+
+  it("an earlier-format draft (bare text, no time) loads as fresh, and the prune stamps it so it expires 7 days later", () => {
+    const s = memoryStorage();
+    s.setItem(draftKey(scope(1), Q1), "typed before the change");
+    s.setItem(noteDraftKey(owner), "old note");
+    assert.deepEqual(loadDrafts(s, scope(1), [Q1], T0), { [Q1]: "typed before the change" });
+    assert.equal(loadNoteDraft(s, owner, T0), "old note");
+    assert.equal(pruneDrafts(s, T0), 0);
+    assert.deepEqual(decodeDraft(s.getItem(draftKey(scope(1), Q1)) ?? ""), { text: "typed before the change", savedAt: T0 });
+    assert.equal(loadNoteDraft(s, owner, T0 + 7 * DAY), "old note");
+    assert.equal(pruneDrafts(s, T0 + 7 * DAY + 1), 2);
+    assert.equal(s.map.size, 0);
+  });
+
+  it("text that only looks like JSON is still text", () => {
+    assert.deepEqual(decodeDraft("{not json"), { text: "{not json", savedAt: null });
+    assert.deepEqual(decodeDraft('{"text":"x"}'), { text: '{"text":"x"}', savedAt: null });
+    assert.deepEqual(decodeDraft(encodeDraft("{a}", T0)), { text: "{a}", savedAt: T0 });
+  });
+
+  it("tolerates missing or throwing storage", () => {
+    assert.equal(pruneDrafts(null), 0);
+    assert.equal(pruneDrafts(throwingStorage()), 0);
+  });
+
+  it("both forms prune before they restore", () => {
+    const form = readFileSync(new URL("../components/answer-form.tsx", import.meta.url), "utf8");
+    assert.match(form, /pruneDrafts\(storage\);\n    clearDrafts\(storage, owner, tryNumber\);/);
   });
 });

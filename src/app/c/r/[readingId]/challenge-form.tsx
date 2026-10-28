@@ -6,7 +6,14 @@ import { MaxLengthNote } from "@/components/max-length-note";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { primaryButtonLarge } from "@/components/ui";
 import { answerBox, CharacterCount, fieldError, Spinner } from "@/components/answer-parts";
-import { browserDraftStorage, clearNoteDraft, loadNoteDraft, saveNoteDraft, type DraftOwner } from "@/lib/answer-drafts";
+import {
+  browserDraftStorage,
+  clearNoteDraft,
+  loadNoteDraft,
+  pruneDrafts,
+  saveNoteDraft,
+  type DraftOwner,
+} from "@/lib/answer-drafts";
 import { CHALLENGE_NOTE_MAX_LENGTH, type ChallengeFormState } from "./form-state";
 
 const initialState: ChallengeFormState = {};
@@ -34,9 +41,12 @@ export function ChallengeForm({
   }, initialState);
   const [note, setNote] = useState("");
 
-  // After hydration (localStorage is browser only): the unsent note.
+  // After hydration (localStorage is browser only): the unsent note, once
+  // expired drafts on this device are gone.
   useEffect(() => {
-    const saved = loadNoteDraft(browserDraftStorage(), { mode, readingId, ownerId });
+    const storage = browserDraftStorage();
+    pruneDrafts(storage);
+    const saved = loadNoteDraft(storage, { mode, readingId, ownerId });
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a one-time restore from browser storage
     if (saved !== null) setNote(saved);
   }, [mode, readingId, ownerId]);
