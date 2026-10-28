@@ -135,16 +135,19 @@ function deps(clerk: ReturnType<typeof fakeClerk>, db: ReturnType<typeof fakeDb>
 }
 
 const EXPECT = { expectDb: { host: "localhost", name: "unpack_test" }, expectInstance: "ins_test123" };
-const DRY: Options = { apply: false, minAgeDays: DEFAULT_MIN_AGE_DAYS, limit: DEFAULT_LIMIT, ...EXPECT, expectCount: null };
-// --apply with --expect-count=count.
-const apply = (count: number): Options => ({ ...DRY, apply: true, expectCount: count });
+const DRY: Options = { apply: false, minAgeDays: DEFAULT_MIN_AGE_DAYS, limit: DEFAULT_LIMIT, ...EXPECT, expectCount: null, expectIds: null };
+const digestOf = (ids: string[]) => candidatesDigest(ids.map((id) => ({ id })) as Candidate[]);
+// --apply with --expect-count and --expect-ids for exactly these
+// candidate ids.
+const apply = (ids: string[]): Options => ({ ...DRY, apply: true, expectCount: ids.length, expectIds: digestOf(ids) });
 const EXPECT_ARGS = ["--expect-db=localhost/unpack_test", "--expect-instance=ins_test123"];
 const ENV_LINES = ["Clerk: instance ins_test123 (development), key type sk_test.", "Database: host localhost, database unpack_test."];
 const ok = (r: Partial<SweepResultLike>) => ({ checked: 0, candidates: 0, deleted: 0, skippedHasRole: 0, stoppedStatus: null, aborted: null, ...r });
 type SweepResultLike = Awaited<ReturnType<typeof runSweep>>;
 
 describe("parseOptions", () => {
-  const base = { ...EXPECT, expectCount: null };
+  const base = { ...EXPECT, expectCount: null, expectIds: null };
+  const IDS = "--expect-ids=0123456789ab";
 
   it("is a dry run by default", () => {
     assert.deepEqual(parseOptions(EXPECT_ARGS), { apply: false, minAgeDays: 7, limit: 25, ...base });
@@ -152,13 +155,21 @@ describe("parseOptions", () => {
   });
 
   it("takes --apply with --expect-count, --min-age-days, and --limit", () => {
-    assert.deepEqual(parseOptions([...EXPECT_ARGS, "--apply", "--expect-count=3"]), { apply: true, minAgeDays: 7, limit: 25, ...base, expectCount: 3 });
-    assert.deepEqual(parseOptions(["--min-age-days=30", "--limit=3", "--apply", "--expect-count=0", ...EXPECT_ARGS]), {
+    assert.deepEqual(parseOptions([...EXPECT_ARGS, "--apply", "--expect-count=3", IDS]), {
+      apply: true,
+      minAgeDays: 7,
+      limit: 25,
+      ...base,
+      expectCount: 3,
+      expectIds: "0123456789ab",
+    });
+    assert.deepEqual(parseOptions(["--min-age-days=30", "--limit=3", "--apply", "--expect-count=0", IDS, ...EXPECT_ARGS]), {
       apply: true,
       minAgeDays: 30,
       limit: 3,
       ...base,
       expectCount: 0,
+      expectIds: "0123456789ab",
     });
     assert.deepEqual(parseOptions([...EXPECT_ARGS, "--min-age-days=7"]), { apply: false, minAgeDays: 7, limit: 25, ...base });
     assert.deepEqual(parseOptions([...EXPECT_ARGS, `--limit=${MAX_LIMIT}`]), { apply: false, minAgeDays: 7, limit: MAX_LIMIT, ...base });
@@ -179,9 +190,19 @@ describe("parseOptions", () => {
   });
 
   it("--apply needs --expect-count, and --expect-count needs --apply", () => {
-    assert.ok("error" in parseOptions([...EXPECT_ARGS, "--apply"]));
+    assert.ok("error" in parseOptions([...EXPECT_ARGS, "--apply", IDS]));
     assert.ok("error" in parseOptions([...EXPECT_ARGS, "--expect-count=3"]));
-    for (const bad of ["", "-1", "1.5", "x"]) assert.ok("error" in parseOptions([...EXPECT_ARGS, "--apply", `--expect-count=${bad}`]), bad);
+    for (const bad of ["", "-1", "1.5", "x"]) assert.ok("error" in parseOptions([...EXPECT_ARGS, "--apply", IDS, `--expect-count=${bad}`]), bad);
+  });
+
+  it("--apply needs --expect-ids (the dry run's 12-character digest), and --expect-ids needs --apply", () => {
+    const missing = parseOptions([...EXPECT_ARGS, "--apply", "--expect-count=3"]);
+    assert.ok("error" in missing && missing.error.startsWith("--apply needs --expect-ids=<digest>"));
+    assert.ok("error" in parseOptions([...EXPECT_ARGS, IDS]));
+    for (const bad of ["", "0123456789a", "0123456789abc", "0123456789AB", "0123456789ag", "x"]) {
+      assert.ok("error" in parseOptions([...EXPECT_ARGS, "--apply", "--expect-count=3", `--expect-ids=${bad}`]), bad);
+    }
+    assert.ok("error" in parseOptions([...EXPECT_ARGS, "--apply", "--expect-count=3", IDS, IDS]));
   });
 
   it(`never goes under the ${MIN_AGE_FLOOR_DAYS} day floor, and refuses a bad number`, () => {
@@ -444,7 +465,7 @@ describe("runSweep", () => {
       `Id digest: ${candidatesDigest([{ id: "user_pending" }, { id: "user_none" }, { id: "user_null" }] as Candidate[])} (sha256 of the sorted Clerk ids, first 12 characters).`,
       "Dry run: nothing deleted. --apply would delete up to 3 of these, oldest first (--limit=25).",
       "To apply, check the list above, then run with the same DATABASE_URL and CLERK_SECRET_KEY:",
-      "  pnpm ops:sweep-roleless-clerk-users --apply --expect-db=localhost/unpack_test --expect-instance=ins_test123 --min-age-days=7 --limit=25 --expect-count=3",
+      `  pnpm ops:sweep-roleless-clerk-users --apply --expect-db=localhost/unpack_test --expect-instance=ins_test123 --min-age-days=7 --limit=25 --expect-count=3 --expect-ids=${digestOf(["user_none", "user_null", "user_pending"])}`,
     ]);
     assertNothingPersonal(lines);
   });
@@ -453,7 +474,7 @@ describe("runSweep", () => {
     const clerk = fakeClerk(clerkUsers());
     const db = fakeDb({ user_null: null, user_teacher: "teacher" }, listed());
     const lines: string[] = [];
-    const result = await runSweep(apply(3), deps(clerk, db, lines));
+    const result = await runSweep(apply(["user_none", "user_null", "user_pending"]), deps(clerk, db, lines));
     const expected = ["user_none", "user_null", "user_pending"];
     assert.deepEqual(clerk.deletes(), expected);
     assert.ok(clerk.calls.filter((c) => c.method === "DELETE").every((c) => c.url.startsWith("https://api.clerk.com/v1/users/")));
@@ -469,7 +490,7 @@ describe("runSweep", () => {
     const clerk = fakeClerk([clerkUser("user_back", 90, { signInDays: 40, activeDays: 6 }), clerkUser("user_signin", 90, { signInDays: 2 })]);
     const db = fakeDb({ user_back: null, user_signin: null });
     const lines: string[] = [];
-    const result = await runSweep(apply(0), deps(clerk, db, lines));
+    const result = await runSweep(apply([]), deps(clerk, db, lines));
     assert.deepEqual(db.lookups, []);
     assert.deepEqual(clerk.deletes(), []);
     assert.deepEqual(db.deletedLocal, []);
@@ -481,7 +502,7 @@ describe("runSweep", () => {
     const user = { ...clerkUser("user_odd", 90), last_active_at: "2026-01-01" };
     const clerk = fakeClerk([user]);
     const db = fakeDb({ user_odd: null });
-    const result = await runSweep(apply(0), deps(clerk, db, []));
+    const result = await runSweep(apply([]), deps(clerk, db, []));
     assert.equal(result.candidates, 0);
     assert.deepEqual(clerk.deletes(), []);
   });
@@ -489,7 +510,7 @@ describe("runSweep", () => {
   it("a 404 from Clerk counts as done", async () => {
     const clerk = fakeClerk([clerkUser("user_gone", 10), clerkUser("user_teacher", 10)], () => 404);
     const db = fakeDb({ user_teacher: "teacher" });
-    const result = await runSweep(apply(1), deps(clerk, db, []));
+    const result = await runSweep(apply(["user_gone"]), deps(clerk, db, []));
     assert.equal(result.deleted, 1);
     assert.deepEqual(db.confirmed, ["user_gone"]);
   });
@@ -498,7 +519,7 @@ describe("runSweep", () => {
     const clerk = fakeClerk([clerkUser("user_1", 40), clerkUser("user_2", 30), clerkUser("user_3", 20), clerkUser("user_teacher", 20)]);
     const db = fakeDb({ user_teacher: "teacher" });
     const lines: string[] = [];
-    const result = await runSweep({ ...apply(3), limit: 2 }, deps(clerk, db, lines));
+    const result = await runSweep({ ...apply(["user_1", "user_2", "user_3"]), limit: 2 }, deps(clerk, db, lines));
     assert.deepEqual(clerk.deletes(), ["user_1", "user_2"]);
     assert.equal(result.deleted, 2);
     assert.equal(lines.at(-1), "Deleted 2 accounts; 0 skipped (got a role); 1 left for a later run.");
@@ -514,7 +535,7 @@ describe("runSweep", () => {
       return found;
     };
     const lines: string[] = [];
-    const result = await runSweep({ ...apply(2), limit: 1 }, deps(clerk, db, lines));
+    const result = await runSweep({ ...apply(["user_a", "user_b"]), limit: 1 }, deps(clerk, db, lines));
     assert.deepEqual(clerk.deletes(), ["user_b"]);
     assert.equal(db.roles.user_a, "teacher");
     assert.deepEqual(result, ok({ checked: 2, candidates: 2, deleted: 1, skippedHasRole: 1 }));
@@ -525,7 +546,7 @@ describe("runSweep", () => {
     const clerk = fakeClerk([clerkUser("user_self", 400), clerkUser("user_none", 30)]);
     const db = fakeDb({ user_self: "self_learner" });
     const lines: string[] = [];
-    const result = await runSweep(apply(1), deps(clerk, db, lines));
+    const result = await runSweep(apply(["user_none"]), deps(clerk, db, lines));
     assert.deepEqual(clerk.deletes(), ["user_none"]);
     assert.deepEqual(db.deletedLocal, ["user_none"]);
     assert.equal(db.roles.user_self, "self_learner");
@@ -542,7 +563,7 @@ describe("runSweep", () => {
       db.roles.user_a = "self_learner";
       return found;
     };
-    const result = await runSweep(apply(1), deps(clerk, db, []));
+    const result = await runSweep(apply(["user_a"]), deps(clerk, db, []));
     assert.deepEqual(clerk.deletes(), []);
     assert.equal(db.roles.user_a, "self_learner");
     assert.deepEqual(result, ok({ checked: 1, candidates: 1, skippedHasRole: 1 }));
@@ -554,7 +575,7 @@ describe("runSweep", () => {
     );
     const db = fakeDb({ user_teacher: "teacher" });
     const lines: string[] = [];
-    const result = await runSweep(apply(3), deps(clerk, db, lines));
+    const result = await runSweep(apply(["user_1", "user_2", "user_3"]), deps(clerk, db, lines));
     assert.deepEqual(clerk.deletes(), ["user_1", "user_2"]);
     assert.deepEqual(db.confirmed, ["user_1"]);
     assert.equal(result.stoppedStatus, 500);
@@ -566,20 +587,20 @@ describe("runSweep", () => {
   it("a failed list stops before any lookup or delete", async () => {
     const fetchFn: FetchLike = async () => ({ ok: false, status: 401, json: async () => ({}) });
     const db = fakeDb({});
-    await assert.rejects(runSweep(apply(0), { ...deps(fakeClerk([]), db, []), fetchFn }), /HTTP 401/);
+    await assert.rejects(runSweep(apply([]), { ...deps(fakeClerk([]), db, []), fetchFn }), /HTTP 401/);
     assert.deepEqual(db.lookups, []);
     assert.deepEqual(db.deletedLocal, []);
     // The instance answers, the users list fails.
     const clerk = fakeClerk([]);
     const listFails: FetchLike = async (url, init) => (url.includes("/v1/users?") ? { ok: false, status: 503, json: async () => ({}) } : clerk.fetchFn(url, init));
-    await assert.rejects(runSweep(apply(0), { ...deps(clerk, db, []), fetchFn: listFails }), /HTTP 503/);
+    await assert.rejects(runSweep(apply([]), { ...deps(clerk, db, []), fetchFn: listFails }), /HTTP 503/);
     assert.deepEqual(db.lookups, []);
   });
 
   it("nothing old enough: no lookup at all", async () => {
     const clerk = fakeClerk([clerkUser("user_new", 0)]);
     const db = fakeDb({});
-    const result = await runSweep(apply(0), deps(clerk, db, []));
+    const result = await runSweep(apply([]), deps(clerk, db, []));
     assert.deepEqual(db.lookups, []);
     assert.equal(result.candidates, 0);
     assert.deepEqual(clerk.deletes(), []);
@@ -595,8 +616,8 @@ describe("runSweep", () => {
 
   it("environment mismatch: prints the pair, then refuses before listing a user", async () => {
     const cases: { name: string; options: Options; over: Partial<SweepDeps>; instance?: unknown; why: RegExp }[] = [
-      { name: "wrong --expect-db", options: { ...apply(1), expectDb: { host: "localhost", name: "unpack_other" } }, over: {}, why: /Database mismatch/ },
-      { name: "wrong --expect-instance", options: { ...apply(1), expectInstance: "ins_other" }, over: {}, why: /Clerk instance mismatch/ },
+      { name: "wrong --expect-db", options: { ...apply(["user_x"]), expectDb: { host: "localhost", name: "unpack_other" } }, over: {}, why: /Database mismatch/ },
+      { name: "wrong --expect-instance", options: { ...apply(["user_x"]), expectInstance: "ins_other" }, over: {}, why: /Clerk instance mismatch/ },
       { name: "live key, test database", options: DRY, over: { secretKey: "sk_live_secret_value" }, instance: { id: "ins_test123", environment_type: "production" }, why: /sk_live key with a local or test database/ },
       { name: "test key, production instance", options: DRY, over: {}, instance: { id: "ins_test123", environment_type: "production" }, why: /Live\/test mismatch/ },
       { name: "unknown key type", options: DRY, over: { secretKey: "secret_value" }, why: /neither/ },
@@ -627,7 +648,7 @@ describe("runSweep", () => {
     const clerk = fakeClerk([clerkUser("user_1", 30), clerkUser("user_2", 20), clerkUser("user_young", 1)]);
     const db = fakeDb({ user_young: "teacher" });
     const lines: string[] = [];
-    const result = await runSweep(apply(2), deps(clerk, db, lines));
+    const result = await runSweep(apply(["user_a", "user_b"]), deps(clerk, db, lines));
     assert.deepEqual(result, ok({ checked: 3, aborted: "shape" }));
     assert.match(lines.at(-1) ?? "", /^Refused: None of the 2 aged Clerk users has a teachers row/);
     assert.equal(lines.some((l) => l.startsWith("  user_")), false);
@@ -640,7 +661,7 @@ describe("runSweep", () => {
     const clerk = fakeClerk(users);
     const db = fakeDb({ user_0: "teacher", user_1: "teacher", user_2: "self_learner", user_3: null });
     const lines: string[] = [];
-    const result = await runSweep(apply(7), deps(clerk, db, lines));
+    const result = await runSweep(apply(["user_0", "user_1", "user_2", "user_3", "user_4", "user_5", "user_6"]), deps(clerk, db, lines));
     assert.equal(result.aborted, "shape");
     assert.match(lines.at(-1) ?? "", /6 of 10 aged Clerk users have no teachers row, over the 50% limit/);
     assertUntouched(clerk, db, true);
@@ -650,7 +671,7 @@ describe("runSweep", () => {
     const users = Array.from({ length: 10 }, (_, i) => clerkUser(`user_${i}`, 30));
     const clerk = fakeClerk(users);
     const db = fakeDb({ user_0: "teacher", user_1: "teacher", user_2: "teacher", user_3: "teacher", user_4: null });
-    const result = await runSweep(apply(6), deps(clerk, db, []));
+    const result = await runSweep(apply(["user_4", "user_5", "user_6", "user_7", "user_8", "user_9"]), deps(clerk, db, []));
     assert.deepEqual(result, ok({ checked: 10, candidates: 6, deleted: 6 }));
   });
 
@@ -659,12 +680,33 @@ describe("runSweep", () => {
       const clerk = fakeClerk([clerkUser("user_none", 30), clerkUser("user_null", 20), clerkUser("user_teacher", 20), clerkUser("user_x", 20)]);
       const db = fakeDb({ user_null: null, user_teacher: "teacher" });
       const lines: string[] = [];
-      const result = await runSweep(apply(count), deps(clerk, db, lines));
+      const result = await runSweep({ ...apply(["user_none", "user_null", "user_x"]), expectCount: count }, deps(clerk, db, lines));
       assert.deepEqual(result, ok({ checked: 4, candidates: 3, aborted: "count" }));
       assert.equal(lines.at(-1), `Refused: --expect-count=${count}, but this run found 3. Run the dry run again and check the list. Nothing changed.`);
       assertUntouched(clerk, db, true);
       assert.equal(db.roles.user_null, null);
     }
+  });
+
+  it("--apply without the matching --expect-ids aborts before any delete, printing only the two digests", async () => {
+    const found = digestOf(["user_none", "user_null", "user_x"]);
+    // Same count, different accounts (user_y in place of user_x).
+    const other = digestOf(["user_none", "user_null", "user_y"]);
+    for (const expectIds of [other, "000000000000"]) {
+      const clerk = fakeClerk([clerkUser("user_none", 30), clerkUser("user_null", 20), clerkUser("user_teacher", 20), clerkUser("user_x", 20)]);
+      const db = fakeDb({ user_null: null, user_teacher: "teacher" });
+      const lines: string[] = [];
+      const result = await runSweep({ ...apply(["user_none", "user_null", "user_x"]), expectIds }, deps(clerk, db, lines));
+      assert.deepEqual(result, ok({ checked: 4, candidates: 3, aborted: "ids" }));
+      assert.equal(lines.at(-1), `Refused: --expect-ids=${expectIds}, but this run's ids digest to ${found}. Run the dry run again and check the list. Nothing changed.`);
+      assertUntouched(clerk, db, true);
+      assert.equal(db.roles.user_null, null);
+    }
+    // The matching digest applies.
+    const clerk = fakeClerk([clerkUser("user_none", 30), clerkUser("user_null", 20), clerkUser("user_teacher", 20), clerkUser("user_x", 20)]);
+    const db = fakeDb({ user_null: null, user_teacher: "teacher" });
+    const result = await runSweep(apply(["user_none", "user_null", "user_x"]), deps(clerk, db, []));
+    assert.deepEqual(result, ok({ checked: 4, candidates: 3, deleted: 3 }));
   });
 
   it("the printed --apply command parses back to this run's options and count", async () => {
@@ -674,7 +716,7 @@ describe("runSweep", () => {
     await runSweep({ ...DRY, minAgeDays: 30, limit: 5 }, deps(clerk, db, lines));
     const command = (lines.at(-1) ?? "").trim();
     assert.ok(command.startsWith("pnpm ops:sweep-roleless-clerk-users "), command);
-    assert.deepEqual(parseOptions(command.split(" ").slice(2)), { ...apply(1), minAgeDays: 30, limit: 5 });
+    assert.deepEqual(parseOptions(command.split(" ").slice(2)), { ...apply(["user_none"]), minAgeDays: 30, limit: 5 });
   });
 
   it("a dry run with no candidates prints no --apply command", async () => {

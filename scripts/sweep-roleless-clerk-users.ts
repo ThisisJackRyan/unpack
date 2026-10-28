@@ -7,7 +7,8 @@
 //
 //   DATABASE_URL=... CLERK_SECRET_KEY=... pnpm ops:sweep-roleless-clerk-users \
 //     --expect-db=<host>/<dbname> --expect-instance=<ins_id>
-//   (then the --apply command the dry run prints, with --expect-count=N)
+//   (then the --apply command the dry run prints, with --expect-count=N
+//   and --expect-ids=<digest>)
 //
 // Guards, each refusing before anything changes:
 // - Environment, before any Clerk user is listed or any row looked up:
@@ -23,6 +24,10 @@
 //   have none (the wrong database for this instance looks like that).
 // - Count, with --apply: --expect-count=N is required and must equal the
 //   candidates this run found.
+// - Ids, with --apply: --expect-ids=<digest> is required and must equal
+//   the id digest of the candidates this run found (the same digest the
+//   dry run prints). A mismatch prints only the two digests and exits 1;
+//   a missing one is refused with the usage (exit 2).
 //
 // Dry run by default: pages through every Clerk user (Backend API, GET
 // /v1/users; only id, created_at, last_sign_in_at and last_active_at are

@@ -62,7 +62,7 @@ export const SCRIPT = "pnpm ops:sweep-roleless-clerk-users";
 
 export const USAGE =
   `Usage: ${SCRIPT} --expect-db=<host>/<dbname> --expect-instance=<ins_id> ` +
-  "[--apply --expect-count=N] " +
+  "[--apply --expect-count=N --expect-ids=<digest>] " +
   `[--min-age-days=N (default ${DEFAULT_MIN_AGE_DAYS}, at least ${MIN_AGE_FLOOR_DAYS})] ` +
   `[--limit=N (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT})]`;
 
@@ -73,10 +73,12 @@ export type Options = {
   minAgeDays: number;
   limit: number;
   // The database and Clerk instance the operator means (required), and,
-  // with --apply, how many candidates the dry run showed.
+  // with --apply, how many candidates the dry run showed and their id
+  // digest (candidatesDigest).
   expectDb: DatabaseRef;
   expectInstance: string;
   expectCount: number | null;
+  expectIds: string | null;
 };
 
 function intValue(arg: string, prefix: string): number | null {
@@ -85,10 +87,12 @@ function intValue(arg: string, prefix: string): number | null {
 }
 
 const INSTANCE_ID = /^ins_[A-Za-z0-9]{1,64}$/;
+// candidatesDigest's shape: 12 lowercase hex characters.
+const IDS_DIGEST = /^[0-9a-f]{12}$/;
 
 // Dry run unless --apply. --expect-db and --expect-instance are always
-// required; --expect-count is required with --apply and refused without
-// it. Anything unknown, repeated, or out of range is refused.
+// required; --expect-count and --expect-ids are required with --apply and
+// refused without it. Anything unknown, repeated, or out of range is refused.
 export function parseOptions(argv: readonly string[]): Options | { error: string } | { help: true } {
   let apply = false;
   let minAgeDays = DEFAULT_MIN_AGE_DAYS;
@@ -96,6 +100,7 @@ export function parseOptions(argv: readonly string[]): Options | { error: string
   let expectDb: DatabaseRef | null = null;
   let expectInstance: string | null = null;
   let expectCount: number | null = null;
+  let expectIds: string | null = null;
   const seen = new Set<string>();
   for (const arg of argv) {
     const name = arg.split("=")[0];
@@ -124,13 +129,18 @@ export function parseOptions(argv: readonly string[]): Options | { error: string
     } else if (arg.startsWith("--expect-count=")) {
       expectCount = intValue(arg, "--expect-count=");
       if (expectCount === null) return { error: `--expect-count must be a whole number. ${USAGE}` };
+    } else if (arg.startsWith("--expect-ids=")) {
+      expectIds = arg.slice("--expect-ids=".length);
+      if (!IDS_DIGEST.test(expectIds)) return { error: `--expect-ids must be the 12-character id digest the dry run printed. ${USAGE}` };
     } else return { error: `Unknown argument. ${USAGE}` };
   }
   if (!expectDb) return { error: `--expect-db=<host>/<dbname> is required. ${USAGE}` };
   if (!expectInstance) return { error: `--expect-instance=<ins_id> is required. ${USAGE}` };
   if (apply && expectCount === null) return { error: `--apply needs --expect-count=N, the count the dry run showed. ${USAGE}` };
+  if (apply && expectIds === null) return { error: `--apply needs --expect-ids=<digest>, the id digest the dry run showed. ${USAGE}` };
   if (!apply && expectCount !== null) return { error: `--expect-count only goes with --apply. ${USAGE}` };
-  return { apply, minAgeDays, limit, expectDb, expectInstance, expectCount };
+  if (!apply && expectIds !== null) return { error: `--expect-ids only goes with --apply. ${USAGE}` };
+  return { apply, minAgeDays, limit, expectDb, expectInstance, expectCount, expectIds };
 }
 
 // The host and database name from DATABASE_URL, never the user or
@@ -299,13 +309,14 @@ export function sweepShapeRefusal(aged: readonly ClerkUserRef[], roleRows: reado
   return null;
 }
 
-// The exact --apply command for what this dry run found (no environment
-// values: the operator runs it with the same DATABASE_URL and
-// CLERK_SECRET_KEY).
-export function applyCommand(options: Options, count: number): string {
+// The exact --apply command for what this dry run found: its count and
+// its id digest (no environment values: the operator runs it with the
+// same DATABASE_URL and CLERK_SECRET_KEY).
+export function applyCommand(options: Options, count: number, digest: string): string {
   return (
     `${SCRIPT} --apply --expect-db=${options.expectDb.host}/${options.expectDb.name} ` +
-    `--expect-instance=${options.expectInstance} --min-age-days=${options.minAgeDays} --limit=${options.limit} --expect-count=${count}`
+    `--expect-instance=${options.expectInstance} --min-age-days=${options.minAgeDays} --limit=${options.limit} ` +
+    `--expect-count=${count} --expect-ids=${digest}`
   );
 }
 
@@ -368,7 +379,7 @@ export type SweepResult = {
   // The HTTP status of the Clerk delete that stopped the run.
   stoppedStatus: number | null;
   // Set when a guard refused the run before anything changed.
-  aborted: "environment" | "shape" | "count" | null;
+  aborted: "environment" | "shape" | "count" | "ids" | null;
 };
 
 // DELETE /v1/users/{id}. A 404 means already gone in Clerk: done.
@@ -390,6 +401,11 @@ async function deleteInClerk(deps: SweepDeps, clerkUserId: string): Promise<{ ok
 //   database (sweepShapeRefusal).
 // - count: with --apply, refuses unless --expect-count is exactly the
 //   number of candidates found by this run.
+// - ids: with --apply, refuses unless --expect-ids is exactly the digest
+//   of this run's candidates (candidatesDigest, as the dry run printed
+//   it): every id the run may delete is one of them, so the same digest
+//   means the same accounts the operator checked, not only as many. The
+//   refusal prints the two digests only.
 // Dry run: lists the candidates and the exact --apply command, writes
 // nothing, and never sends a DELETE. Apply: for each candidate, oldest
 // first, until `limit` Clerk deletes are done:
@@ -438,9 +454,10 @@ export async function runSweep(options: Options, deps: SweepDeps): Promise<Sweep
   result.candidates = candidates.length;
   print(`${plural(candidates.length, "role-less account", "role-less accounts")} (no teacher or self-learner role):`);
   for (const candidate of candidates) print(candidateLine(candidate, now));
+  const digest = candidatesDigest(candidates);
   if (candidates.length > 0) {
     print(kindTotalsLine(candidates));
-    print(`Id digest: ${candidatesDigest(candidates)} (sha256 of the sorted Clerk ids, first 12 characters).`);
+    print(`Id digest: ${digest} (sha256 of the sorted Clerk ids, first 12 characters).`);
   }
 
   if (!options.apply) {
@@ -451,7 +468,7 @@ export async function runSweep(options: Options, deps: SweepDeps): Promise<Sweep
     const would = Math.min(candidates.length, options.limit);
     print(`Dry run: nothing deleted. --apply would delete up to ${would} of these, oldest first (--limit=${options.limit}).`);
     print("To apply, check the list above, then run with the same DATABASE_URL and CLERK_SECRET_KEY:");
-    print(`  ${applyCommand(options, candidates.length)}`);
+    print(`  ${applyCommand(options, candidates.length, digest)}`);
     return result;
   }
 
@@ -459,6 +476,12 @@ export async function runSweep(options: Options, deps: SweepDeps): Promise<Sweep
     return abort(
       "count",
       `--expect-count=${options.expectCount}, but this run found ${candidates.length}. Run the dry run again and check the list.`,
+    );
+  }
+  if (options.expectIds !== digest) {
+    return abort(
+      "ids",
+      `--expect-ids=${options.expectIds}, but this run's ids digest to ${digest}. Run the dry run again and check the list.`,
     );
   }
 

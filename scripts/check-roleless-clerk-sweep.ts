@@ -29,8 +29,10 @@
 // (g) High share: 10 aged ids, 6 with no teachers row (over 50%), aborts
 //     --apply with nothing changed.
 // (h) Normal run: 10 aged ids, 5 with no row (exactly 50%), proceeds: a
-//     wrong --expect-count is refused first with nothing changed, then the
-//     count the dry run printed deletes the 5 and keeps the teachers.
+//     wrong --expect-count, a missing --expect-ids, and an --expect-ids
+//     for other accounts (same count) are each refused with nothing
+//     changed, then the --apply command the dry run printed (its count and
+//     id digest) deletes the 5 and keeps the teachers.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-roleless-clerk-sweep
 //
@@ -44,7 +46,17 @@ import { hashClerkUserId } from "@/lib/deleted-accounts";
 import { neonExecutor } from "@/lib/neon-executor";
 import { prepareDbCheck } from "./lib/db-check";
 import type { FetchLike } from "./lib/pending-clerk-deletes";
-import { DEFAULT_LIMIT, DEFAULT_MIN_AGE_DAYS, describeDatabaseUrl, runSweep, type Options, type SweepDeps } from "./lib/roleless-clerk-sweep";
+import {
+  candidatesDigest,
+  DEFAULT_LIMIT,
+  DEFAULT_MIN_AGE_DAYS,
+  describeDatabaseUrl,
+  parseOptions,
+  runSweep,
+  type Candidate,
+  type Options,
+  type SweepDeps,
+} from "./lib/roleless-clerk-sweep";
 import { sweepDbDeps } from "./lib/roleless-clerk-sweep-db";
 
 const { fetchEndpoint } = prepareDbCheck();
@@ -112,8 +124,12 @@ const DRY: Options = {
   expectDb: THIS_DB,
   expectInstance: FAKE_INSTANCE,
   expectCount: null,
+  expectIds: null,
 };
-const applyCount = (count: number): Options => ({ ...DRY, apply: true, expectCount: count });
+const digestOf = (ids: readonly string[]) => candidatesDigest(ids.map((id) => ({ id })) as Candidate[]);
+// --apply with --expect-count and --expect-ids for exactly these
+// candidate ids, as the dry run would print them.
+const applyIds = (ids: readonly string[]): Options => ({ ...DRY, apply: true, expectCount: ids.length, expectIds: digestOf(ids) });
 
 async function insertAccount(clerkUserId: string, role: "teacher" | "self_learner" | null): Promise<void> {
   await sql.query(
@@ -178,7 +194,7 @@ async function checkDryRunAndRace(): Promise<void> {
     await sql.query(`update teachers set role = 'teacher' where clerk_user_id = $1::text`, [noRole]);
     return found;
   };
-  const applied = await runSweep(applyCount(3), raceDeps);
+  const applied = await runSweep(applyIds([noRole, noRow, pending]), raceDeps);
   check(applied.skippedHasRole === 1 && applied.deleted === 2, `1 skipped, 2 deleted (got ${applied.skippedHasRole}, ${applied.deleted})`);
   check(apply.deletes.join(",") === [noRow, pending].join(","), "Clerk DELETE only for the no-row and pending ids");
   check((await roleOf(noRole)) === "teacher" && (await listState(noRole)) === "none", "the raced account keeps its row and role, nothing listed");
@@ -193,7 +209,7 @@ async function checkDeleteThenLateEvents(): Promise<void> {
   const noRole = id("late");
   await insertAccount(noRole, null);
   const clerk = fakeClerk([{ id: noRole, ageDays: 8 }]);
-  const result = await runSweep(applyCount(1), deps(clerk.fetchFn, []));
+  const result = await runSweep(applyIds([noRole]), deps(clerk.fetchFn, []));
   check(result.deleted === 1 && clerk.deletes.join() === noRole, "deleted in Clerk");
   check((await roleOf(noRole)) === undefined && (await listState(noRole)) === "confirmed", "row gone, hash confirmed");
   const created = await handleClerkEvent(
@@ -227,7 +243,7 @@ async function checkSelfLearnerNeverSwept(): Promise<void> {
     await sql.query(`update teachers set role = 'self_learner', age_confirmed_at = now() where clerk_user_id = $1::text`, [becomes]);
     return found;
   };
-  const result = await runSweep(applyCount(1), raceDeps);
+  const result = await runSweep(applyIds([becomes]), raceDeps);
   check(result.candidates === 1 && result.skippedHasRole === 1 && result.deleted === 0, `only the no-role row was a candidate, then skipped (got ${result.candidates}, ${result.skippedHasRole}, ${result.deleted})`);
   check(!clerk.deletes.includes(self) && !clerk.deletes.includes(becomes), "no Clerk DELETE for either self-learner");
   check((await roleOf(self)) === "self_learner" && (await ageConfirmed(self)), "the aged self-learner keeps its row, role and age_confirmed_at");
@@ -268,10 +284,10 @@ async function checkEnvironmentMismatch(): Promise<void> {
   ];
   const before = await snapshot([teacher, noRole, noRow]);
   const cases: { name: string; options: Options; secretKey?: string; environmentType?: string }[] = [
-    { name: "wrong --expect-db", options: { ...applyCount(2), expectDb: { host: THIS_DB.host, name: `${THIS_DB.name}_other` } } },
-    { name: "wrong --expect-instance", options: { ...applyCount(2), expectInstance: "ins_someotherinstance" } },
-    { name: "sk_live key with this test database", options: applyCount(2), secretKey: "sk_live_fake", environmentType: "production" },
-    { name: "sk_test key, Clerk says production", options: applyCount(2), environmentType: "production" },
+    { name: "wrong --expect-db", options: { ...applyIds(["test_sweep_a", "test_sweep_b"]), expectDb: { host: THIS_DB.host, name: `${THIS_DB.name}_other` } } },
+    { name: "wrong --expect-instance", options: { ...applyIds(["test_sweep_a", "test_sweep_b"]), expectInstance: "ins_someotherinstance" } },
+    { name: "sk_live key with this test database", options: applyIds(["test_sweep_a", "test_sweep_b"]), secretKey: "sk_live_fake", environmentType: "production" },
+    { name: "sk_test key, Clerk says production", options: applyIds(["test_sweep_a", "test_sweep_b"]), environmentType: "production" },
   ];
   for (const c of cases) {
     const clerk = fakeClerk(users, c.environmentType);
@@ -292,7 +308,7 @@ async function checkZeroMatch(): Promise<void> {
   const ids = [id("zero1"), id("zero2"), id("zero3")];
   const clerk = fakeClerk(ids.map((clerkUserId) => ({ id: clerkUserId, ageDays: 30 })));
   const lines: string[] = [];
-  const result = await runSweep(applyCount(3), deps(clerk.fetchFn, lines));
+  const result = await runSweep({ ...applyIds([]), expectCount: 3 }, deps(clerk.fetchFn, lines));
   check(result.aborted === "shape" && result.candidates === 0, `aborted (${lines.at(-1) ?? ""})`);
   check(clerk.deletes.length === 0, "no DELETE sent");
   check((await snapshot(ids)) === ids.map(() => "undefined:none").join(","), "nothing listed, no row made");
@@ -307,7 +323,7 @@ async function checkHighShare(): Promise<void> {
   const before = await snapshot(all);
   const clerk = fakeClerk(all.map((clerkUserId) => ({ id: clerkUserId, ageDays: 30 })));
   const lines: string[] = [];
-  const result = await runSweep(applyCount(7), deps(clerk.fetchFn, lines));
+  const result = await runSweep({ ...applyIds([]), expectCount: 7 }, deps(clerk.fetchFn, lines));
   check(result.aborted === "shape", `aborted (${lines.at(-1) ?? ""})`);
   check(clerk.deletes.length === 0, "no DELETE sent");
   check((await snapshot(all)) === before, "database unchanged");
@@ -324,16 +340,35 @@ async function checkNormalRun(): Promise<void> {
   const dryLines: string[] = [];
   const dry = await runSweep(DRY, deps(fakeClerk(users).fetchFn, dryLines));
   check(dry.aborted === null && dry.candidates === 5, `dry run proceeds with 5 candidates (got ${dry.candidates})`);
-  check((dryLines.at(-1) ?? "").trim().endsWith("--expect-count=5"), "dry run prints the --apply command with --expect-count=5");
+  const command = (dryLines.at(-1) ?? "").trim();
+  check(command.endsWith(`--expect-count=5 --expect-ids=${digestOf(noRow)}`), "dry run prints the --apply command with --expect-count=5 and the id digest");
 
   const before = await snapshot(all);
   const wrong = fakeClerk(users);
-  const refused = await runSweep(applyCount(4), deps(wrong.fetchFn, []));
+  const refused = await runSweep({ ...applyIds(noRow), expectCount: 4 }, deps(wrong.fetchFn, []));
   check(refused.aborted === "count" && wrong.deletes.length === 0, "a wrong --expect-count is refused, no DELETE");
   check((await snapshot(all)) === before, "database unchanged after the refused count");
 
+  const withoutIds = parseOptions(command.split(" ").slice(2).filter((arg) => !arg.startsWith("--expect-ids=")));
+  check("error" in withoutIds && withoutIds.error.startsWith("--apply needs --expect-ids"), "--apply without --expect-ids is refused before anything runs");
+
+  // Same count, one id different: a digest over other accounts.
+  const otherIds = fakeClerk(users);
+  const otherLines: string[] = [];
+  const mismatch = await runSweep({ ...applyIds([...noRow.slice(1), id("normal_other")]) }, deps(otherIds.fetchFn, otherLines));
+  check(mismatch.aborted === "ids" && otherIds.deletes.length === 0, "a different --expect-ids (same count) is refused, no DELETE");
+  check(
+    (otherLines.at(-1) ?? "") ===
+      `Refused: --expect-ids=${digestOf([...noRow.slice(1), id("normal_other")])}, but this run's ids digest to ${digestOf(noRow)}. Run the dry run again and check the list. Nothing changed.`,
+    "the refusal prints the two digests only",
+  );
+  check((await snapshot(all)) === before, "database unchanged after the refused ids");
+
+  // The dry run's own command, parsed as the script would.
+  const parsed = parseOptions(command.split(" ").slice(2));
+  if ("error" in parsed || "help" in parsed) throw new Error("the dry run's --apply command did not parse");
   const right = fakeClerk(users);
-  const applied = await runSweep(applyCount(5), deps(right.fetchFn, []));
+  const applied = await runSweep(parsed, deps(right.fetchFn, []));
   check(applied.aborted === null && applied.deleted === 5 && right.deletes.join(",") === noRow.join(","), `the 5 no-row ids deleted (got ${applied.deleted})`);
   check((await snapshot(teachers)) === teachers.map(() => "teacher:none").join(","), "teachers untouched");
   check((await snapshot(noRow)) === noRow.map(() => "undefined:confirmed").join(","), "deleted hashes confirmed");
