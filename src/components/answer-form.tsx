@@ -27,6 +27,7 @@ import {
   withDrafts,
   type DraftOwner,
 } from "@/lib/answer-drafts";
+import { browserSessionStore, markJustChecked } from "@/lib/celebration";
 import type { AnswerFormState } from "./answer-form-state";
 import { LimitNotice } from "./limit-notice";
 import { MaxLengthNote } from "./max-length-note";
@@ -91,6 +92,9 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
     e.preventDefault();
     if (pending) return;
     const data = new FormData(e.currentTarget);
+    // A pass swaps this form for the result in place: the celebration
+    // takes this mark and scrolls into view.
+    markJustChecked(browserSessionStore(), readingId);
     startTransition(() => dispatch(data));
   }
 

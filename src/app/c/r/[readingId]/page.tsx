@@ -176,7 +176,7 @@ function QuestionsStage({
           <Banner tone="done" title={stage.byTeacher ? "Your teacher accepted your answers." : "You passed! Nice work."}>
             {stage.byTeacher ? "This reading is done. Nice work sticking with it!" : "This reading is done. Here are your answers."}
           </Banner>
-          {!stage.byTeacher && <PassCelebration tryNumber={stage.attempt?.tryNumber} />}
+          {!stage.byTeacher && <PassCelebration tryNumber={stage.attempt?.tryNumber} readingId={readingId} />}
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults={false} />}
         </>
       );
