@@ -372,10 +372,15 @@ async function checkSecondTab() {
     for (let i = 0; i < 2; i++) await submit(student, "fail", 5);
     for (let i = 2; i < EFFORT_CHECK_LIMIT - 1; i++) await submit(student, "error", 5);
     const c = await counts(student);
-    // The last allowed check, slow.
-    const last = submit(student, outcome, 1500);
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    const live = await counts(student);
+    // The last allowed check, slow. Wait until its claim is counted (not a
+    // fixed delay, which a busy machine can outrun), so the notes below
+    // all land while it runs.
+    const last = submit(student, outcome, 4000);
+    let live = await counts(student);
+    for (let waited = 0; live.checks < EFFORT_CHECK_LIMIT && waited < 2000; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      live = await counts(student);
+    }
     const settled = await Promise.allSettled(Array.from({ length: N }, () => send(student, "Please look.")));
     const { statuses, thrown } = tally(settled as PromiseSettledResult<ChallengeResult>[]);
     const during = await counts(student);
