@@ -19,7 +19,7 @@ const ID = "00000000-0000-4000-8000-000000000001";
 
 // Mid-month, October 2026 (UTC).
 const NOW = new Date("2026-10-15T12:00:00Z");
-const fresh = { ageConfirmed: false, ageGated: false, now: NOW };
+const fresh = { role: null, ageConfirmed: false, ageGated: false, now: NOW };
 const OLD_ENOUGH = { birthMonth: "9", birthYear: "2013" };
 const UNDER = { birthMonth: "10", birthYear: "2013" };
 const NO_AGE = { birthMonth: null, birthYear: null };
@@ -62,13 +62,34 @@ describe("parseRoleChoice", () => {
     for (const age of [OLD_ENOUGH, UNDER, NO_AGE]) {
       assert.deepEqual(parseRoleChoice({ role: "self_learner", ...age }, gated), { ok: false, ageGate: "kept" });
     }
-    // Teacher is not age gated (unchanged from PR 13).
-    assert.deepEqual(parseRoleChoice({ role: "teacher", ...NO_AGE }, gated), { ok: true, role: "teacher", confirmAge: false });
+  });
+
+  it("with the cookie and no role yet, refuses teacher too (and any other choice)", () => {
+    const gated = { ...fresh, ageGated: true };
+    for (const role of ["teacher", "self_learner", null, "admin"]) {
+      for (const age of [OLD_ENOUGH, UNDER, NO_AGE]) {
+        assert.deepEqual(parseRoleChoice({ role, ...age }, gated), { ok: false, ageGate: "kept" });
+      }
+    }
+    // Without the cookie a role-less account picks teacher as before.
+    assert.deepEqual(parseRoleChoice({ role: "teacher", ...NO_AGE }, fresh), { ok: true, role: "teacher", confirmAge: false });
+  });
+
+  it("an account that has a role is unaffected by the cookie for teacher", () => {
+    for (const role of ["teacher", "self_learner"] as const) {
+      const holder = { ...fresh, role, ageConfirmed: role === "self_learner", ageGated: true };
+      assert.deepEqual(parseRoleChoice({ role: "teacher", ...NO_AGE }, holder), { ok: true, role: "teacher", confirmAge: false });
+    }
+    // A self-learner (confirmed before) still saves self-learner.
+    assert.deepEqual(
+      parseRoleChoice({ role: "self_learner", ...NO_AGE }, { ...fresh, role: "self_learner", ageConfirmed: true, ageGated: true }),
+      { ok: true, role: "self_learner", confirmAge: false },
+    );
   });
 
   it("doesn't ask again when the account confirmed before, cookie or not", () => {
     for (const ageGated of [false, true]) {
-      assert.deepEqual(parseRoleChoice({ role: "self_learner", ...NO_AGE }, { ...fresh, ageConfirmed: true, ageGated }), {
+      assert.deepEqual(parseRoleChoice({ role: "self_learner", ...NO_AGE }, { ...fresh, role: "teacher", ageConfirmed: true, ageGated }), {
         ok: true,
         role: "self_learner",
         confirmAge: false,
@@ -171,9 +192,9 @@ describe("setRoleOutcome", () => {
 });
 
 describe("parseSettingsRoleChoice (the switch confirm)", () => {
-  const teacher = { role: "teacher" as const, ...fresh, ageConfirmed: true };
-  const newTeacher = { role: "teacher" as const, ...fresh };
-  const learner = { role: "self_learner" as const, ...fresh, ageConfirmed: true };
+  const teacher = { ...fresh, role: "teacher" as const, ageConfirmed: true };
+  const newTeacher = { ...fresh, role: "teacher" as const };
+  const learner = { ...fresh, role: "self_learner" as const, ageConfirmed: true };
 
   it("refuses a teacher's switch to self-learner without the confirm", () => {
     for (const confirmSwitch of [null, "", "no", "YES", "true"]) {

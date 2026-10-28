@@ -43,7 +43,7 @@ export async function chooseRoleCore(formData: FormData, deps: ChooseRoleDeps): 
   const role = formData.get("role");
   const choice = parseRoleChoice(
     { role, birthMonth: formData.get(BIRTH_MONTH_FIELD), birthYear: formData.get(BIRTH_YEAR_FIELD) },
-    { ageConfirmed: account.ageConfirmed, ageGated: deps.ageGated, now: deps.now },
+    { role: account.role, ageConfirmed: account.ageConfirmed, ageGated: deps.ageGated, now: deps.now },
   );
   const kept = typeof role === "string" ? role : undefined;
   if (!choice.ok) {

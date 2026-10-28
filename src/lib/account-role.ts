@@ -13,11 +13,14 @@
 //   statement that refuses self_learner without a confirmation (now or
 //   earlier), and the teachers_self_learner_age_check constraint is the
 //   backstop. Teachers don't get the screen (unchanged from PR 13).
-// - An under-13 answer sets the age gate cookie (age-screen.ts). While it
-//   is on the device, self-learner is refused without asking again, on
-//   /welcome and in /settings alike, so picking teacher first and then
-//   switching doesn't get around it. An account that confirmed earlier
-//   isn't asked, so the cookie doesn't change anything for it.
+// - An under-13 answer sets the age gate cookie (age-screen.ts). On
+//   /welcome (no role yet) it also deletes the account right away
+//   (under-13-account.ts). While the cookie is on the device, an account
+//   with no role can't choose at all (teacher included): only the class
+//   note and /join. An account that already has a role is unaffected,
+//   except that self-learner stays refused in /settings without asking
+//   again, so a teacher can't get around it. An account that confirmed
+//   earlier isn't asked, so the cookie doesn't change anything for it.
 // - Switching in /settings keeps every row: it only changes which home the
 //   account sees. Classes stay with the account while it is a self-learner
 //   (and come back when it switches back); self-learner readings stay while
@@ -92,6 +95,8 @@ export type RoleChoice =
 
 // What the account and the device already say about the age screen.
 export type AgeContext = {
+  // The account's role now (null: the first-run choice on /welcome).
+  role: AccountRole | null;
   // The account confirmed before (a switch back to self-learner doesn't
   // ask again).
   ageConfirmed: boolean;
@@ -102,8 +107,10 @@ export type AgeContext = {
 
 // Reads the choice form (raw FormData values). The age answer only
 // matters for self-learner, and is never read when the account confirmed
-// before or the cookie is set.
+// before or the cookie is set. With the cookie and no role yet, every
+// choice is refused, teacher too.
 export function parseRoleChoice(input: { role: unknown; birthMonth: unknown; birthYear: unknown }, ctx: AgeContext): RoleChoice {
+  if (ctx.ageGated && ctx.role === null) return { ok: false, ageGate: "kept" };
   if (!isAccountRole(input.role)) return { ok: false, errors: { role: ROLE_REQUIRED_MESSAGE } };
   const role = input.role;
   if (role === "teacher" || ctx.ageConfirmed) return { ok: true, role, confirmAge: false };
@@ -133,7 +140,7 @@ export type SettingsRoleChoice =
 // doesn't ask to confirm again, and an under-13 answer is never saved.
 export function parseSettingsRoleChoice(
   input: { role: unknown; birthMonth: unknown; birthYear: unknown; confirmSwitch: unknown },
-  account: { role: AccountRole | null } & AgeContext,
+  account: AgeContext,
 ): SettingsRoleChoice {
   const choice = parseRoleChoice(input, account);
   if (!choice.ok) return choice;

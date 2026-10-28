@@ -56,3 +56,17 @@ describe("signOutTo", () => {
     assert.match(source, /\{!onlyNote && \(\n\s+<fieldset/);
   });
 });
+
+describe("the teacher pick with the age gate cookie (no role yet)", () => {
+  it("/welcome shows only the class note: no role choices, no submit button", () => {
+    const picker = readFileSync(new URL("./role-picker.tsx", import.meta.url), "utf8");
+    assert.match(picker, /const onlyNote = Boolean\(leaving\) \|\| \(firstRun && gated\);/);
+    assert.match(picker, /const gateShown = gated && \(role === "self_learner" \|\| onlyNote\);/);
+    assert.match(picker, /\{!warning && !gateShown && \(/);
+    const welcome = readFileSync(new URL("../app/welcome/page.tsx", import.meta.url), "utf8");
+    assert.match(welcome, /ageGated=\{ageGated\}\n\s+birthYears=\{birthYearOptions\(new Date\(\)\)\}\n\s+firstRun\n/);
+    // /settings (a role holder) never passes firstRun.
+    const settings = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
+    assert.doesNotMatch(settings, /firstRun/);
+  });
+});

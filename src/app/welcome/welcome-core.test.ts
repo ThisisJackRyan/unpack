@@ -83,6 +83,15 @@ describe("chooseRoleCore", () => {
     assert.deepEqual([calls.setAgeGate, calls.local.length, calls.clerk.length, calls.save.length], [0, 0, 0, 0]);
   });
 
+  it("with the cookie set and no role yet, teacher is refused on the server too: nothing saved or deleted", async () => {
+    const { deps, calls } = spies({ ageGated: true });
+    for (const fields of [{ role: "teacher" }, { role: "teacher", ...OLD_ENOUGH }, {}] as Record<string, string>[]) {
+      const result = await chooseRoleCore(form(fields), deps);
+      assert.deepEqual(result, { state: { role: fields.role, ageGate: true } });
+    }
+    assert.deepEqual([calls.setAgeGate, calls.local.length, calls.clerk.length, calls.save.length], [0, 0, 0, 0]);
+  });
+
   it("13+ saves self-learner with the confirmation and goes home; nothing is deleted", async () => {
     const { deps, calls } = spies();
     assert.deepEqual(await chooseRoleCore(form({ role: "self_learner", ...OLD_ENOUGH }), deps), { redirect: "/learn" });

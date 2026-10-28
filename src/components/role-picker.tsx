@@ -25,7 +25,9 @@ const CHOICES: { role: AccountRole; title: string; line: string }[] = [
 // cookie from before), the class note with a link to /join takes its
 // place, with no way to send self-learner again. On /welcome a fresh
 // under-13 answer has deleted the account (state.signOutTo): the note
-// stays while the form signs the user out to /join.
+// stays while the form signs the user out to /join. firstRun (/welcome):
+// with the cookie, an account with no role gets only the class note, no
+// choices at all (the action refuses teacher too).
 //
 // confirmSwitch (/settings, for a teacher): choosing "reading for myself"
 // and pressing the button first shows an amber note that the classes stay
@@ -41,6 +43,7 @@ export function RolePicker({
   ageGated,
   birthYears,
   confirmSwitch = false,
+  firstRun = false,
 }: {
   action: (state: RoleFormState, formData: FormData) => Promise<RoleFormState>;
   legend: string;
@@ -53,6 +56,8 @@ export function RolePicker({
   // The year select's options (birthYearOptions, worked out on the server).
   birthYears: number[];
   confirmSwitch?: boolean;
+  // /welcome: the account has no role yet.
+  firstRun?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   const [role, setRole] = useState<string | null>(state.role ?? initialRole);
@@ -72,7 +77,7 @@ export function RolePicker({
   const askAge = !ageConfirmed && !gated;
   const leaving = state.signOutTo;
   // Only the class note: nothing left to choose.
-  const onlyNote = Boolean(leaving);
+  const onlyNote = Boolean(leaving) || (firstRun && gated);
   const gateShown = gated && (role === "self_learner" || onlyNote);
   const ageError = ageErrorCleared ? undefined : errors.age;
   const age = ageNote(ageError);
