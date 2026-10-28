@@ -25,7 +25,8 @@
     "db:recompute-name-keys": "node --import ./scripts/ts-paths.mjs scripts/recompute-name-keys.ts",
     "ops:list-pending-clerk-deletes": "node --import ./scripts/ts-paths.mjs scripts/list-pending-clerk-deletes.ts",
     "ops:sweep-roleless-clerk-users": "node --import ./scripts/ts-paths.mjs scripts/sweep-roleless-clerk-users.ts",
-    "browser:check-answer-timeout": "node --import ./scripts/ts-paths.mjs scripts/browser-check-answer-timeout.ts"
+    "browser:check-answer-timeout": "node --import ./scripts/ts-paths.mjs scripts/browser-check-answer-timeout.ts",
+    "browser:check-create-guard": "node --import ./scripts/ts-paths.mjs scripts/browser-check-create-guard.ts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "4.0.127",
