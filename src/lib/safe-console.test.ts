@@ -261,6 +261,7 @@ describe("sanitizeLogArgs", () => {
     target.error("%s", error);
     target.error(`wrapped: ${format(error)}`);
     target.warn({ error, sessionHash: "kept: not an error" });
+    // eslint-disable-next-line unpack/no-raw-error-log -- a raw error through the wrapper, on purpose
     target.log([error]);
     target.info("x", error);
     target.debug(error);
