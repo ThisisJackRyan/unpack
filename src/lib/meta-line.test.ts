@@ -75,10 +75,15 @@ describe("meta line", () => {
 
   // No list or meta line anywhere builds its own separator: no "·" or "•"
   // outside the shared helper, and no sr-only comma standing in for one.
+  // article-title.ts only reads "·" in web page titles, never shows it.
   it("no hand-rolled separators are left in any page or component", () => {
     const root = new URL("../", import.meta.url);
     const files = (readdirSync(root, { recursive: true }) as string[]).filter(
-      (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !/meta-line\.tsx?$/.test(f),
+      (f) =>
+        /\.tsx?$/.test(f) &&
+        !/\.test\.tsx?$/.test(f) &&
+        !/meta-line\.tsx?$/.test(f) &&
+        f !== "lib/article-title.ts",
     );
     assert.ok(files.length > 50, `scanned ${files.length} files`);
     for (const f of files) {

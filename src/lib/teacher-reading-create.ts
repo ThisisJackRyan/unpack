@@ -9,9 +9,10 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { readingSaveFailedState } from "./create-guard";
 import { withDeadline } from "./deadline";
-import { resolveReadingSource, type ReadingSourceLogFields } from "./reading-source";
+import { resolveReadingSource, type FetchedArticle, type ReadingSourceLogFields } from "./reading-source";
 import type { ReadingDraft } from "./readings";
 import { safeErrorFields } from "./safe-error-fields";
+import type { StripFallbackLog } from "./strip-fallback-log";
 import { validateReadingForm, type ReadingFormInput } from "./validate-reading";
 
 export const CLASS_NOT_FOUND_MESSAGE = "We couldn’t find this class.";
@@ -24,12 +25,15 @@ export type TeacherCreateDeps = {
   recordLinkFetch: (teacherId: string) => Promise<boolean>;
   // The note at the link limit, with its retry time (a read).
   linkLimitedMessage: (teacherId: string) => Promise<string>;
-  fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
+  // An article over the length limit comes back trimmed (trim-article.ts).
+  fetchArticle: (url: string) => Promise<FetchedArticle>;
   // The one write that makes the reading (undefined: not this teacher's
   // class, nothing inserted).
   insertReading: (classId: string, teacherId: string, draft: ReadingDraft) => Promise<{ id: string } | undefined>;
   // Safe fields only.
   log: (message: string, fields: ReadingSourceLogFields) => void;
+  // logStripFallback: one info line when the text is the unstripped page.
+  logStripFallback: (fields: StripFallbackLog) => void;
 };
 
 export type TeacherCreateResult = { state: ReadingFormState } | { readingId: string; draft: ReadingDraft };
@@ -69,14 +73,21 @@ export async function createTeacherReadingWith(
     questionMode: data.questionMode,
   };
 
+  // Once, after the insert, with the reading's id when there is one.
+  const noteStripFallback = (readingId?: string) => {
+    if (resolved.stripFallback) deps.logStripFallback({ reason: resolved.stripFallback, path: "class", readingId });
+  };
+
   // The first write. Not bounded: see create-guard.ts.
   let created: { id: string } | undefined;
   try {
     created = await deps.insertReading(classId, teacher.id, draft);
   } catch (error) {
     deps.log("insertReading failed", safeErrorFields(error));
+    noteStripFallback();
     return { state: readingSaveFailedState(values) };
   }
+  noteStripFallback(created?.id);
   if (!created) return { state: { errors: { form: CLASS_NOT_FOUND_MESSAGE }, values } };
   return { readingId: created.id, draft };
 }

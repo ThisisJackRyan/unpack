@@ -295,14 +295,14 @@ async function checkIsolation() {
       + (select count(*)::int from self_attempts where reading_id = ${aReading} and account_id <> ${aId})
       + (select count(*)::int from questions where reading_id = ${teacherReadingId}) - 1 as n`);
   check(leaks.n === 0, `nothing was written by the refused calls (${leaks.n})`);
-  const teacherCreate = await createSelfReading(teacherId, { title: "x", bodyText: BODY, sourceUrl: null, gradeLevel: "5", questionCount: 3 });
+  const teacherCreate = await createSelfReading(teacherId, { title: "x", bodyText: BODY, sourceUrl: null, bodyTrimmed: false, gradeLevel: "5", questionCount: 3 });
   check(teacherCreate.status === "not_allowed", `a teacher can't create a self-learner reading: ${teacherCreate.status}`);
   await sql`delete from self_readings where account_id = ${aId}`;
 }
 
 async function checkAllowance() {
   console.log("\n== (c) ALLOWANCE ==");
-  const draft = (i: number) => ({ title: `Burst ${i}`, bodyText: BODY, sourceUrl: null, gradeLevel: "5" as const, questionCount: 3 });
+  const draft = (i: number) => ({ title: `Burst ${i}`, bodyText: BODY, sourceUrl: null, bodyTrimmed: false, gradeLevel: "5" as const, questionCount: 3 });
   const outcomes = await Promise.all(Array.from({ length: CREATES }, (_, i) => createSelfReading(aId, draft(i))));
   const created = outcomes.filter((o) => o.status === "created").length;
   const limited = outcomes.filter((o) => o.status === "limit_reached").length;
@@ -343,7 +343,7 @@ async function checkAllowance() {
 async function checkFailedGenerations() {
   console.log("\n== (c2) FAILED GENERATIONS DON'T USE A SLOT ==");
   const cId = await newAccount("test_self_c", "self_learner");
-  const draft = (i: number) => ({ title: `Slot ${i}`, bodyText: BODY, sourceUrl: null, gradeLevel: "5" as const, questionCount: 3 });
+  const draft = (i: number) => ({ title: `Slot ${i}`, bodyText: BODY, sourceUrl: null, bodyTrimmed: false, gradeLevel: "5" as const, questionCount: 3 });
   const failing = async (): Promise<string[]> => {
     throw new QuestionWriterError("failed", "a fake outage");
   };
@@ -406,7 +406,7 @@ async function checkFailedGenerations() {
 async function checkRateLimitedKeepsSlot() {
   console.log("\n== (c3) RATE-LIMITED OPENS KEEP THEIR SLOT ==");
   const dId = await newAccount("test_self_d", "self_learner");
-  const draft = (i: number) => ({ title: `Loop ${i}`, bodyText: BODY, sourceUrl: null, gradeLevel: "5" as const, questionCount: 3 });
+  const draft = (i: number) => ({ title: `Loop ${i}`, bodyText: BODY, sourceUrl: null, bodyTrimmed: false, gradeLevel: "5" as const, questionCount: 3 });
   // At the question limit: the limiter's own rows, inside its window.
   await sql`
     insert into question_generation_attempts (teacher_id)
@@ -714,9 +714,10 @@ async function checkFailedCreates() {
     getAllowance: (id) => getAllowance(id),
     recordLinkFetch: (id) => recordLinkFetchAttempt(id),
     linkLimitedMessage: async () => "limited",
-    fetchArticle: async (url) => ({ title: "From the page", text: BODY, url }),
+    fetchArticle: async (url) => ({ title: "From the page", text: BODY, url, trimmed: false }),
     createSelfReading: (id, draft) => createSelfReading(id, draft),
     log: () => {},
+    logStripFallback: () => {},
   });
   const run = (input: ReadingFormInput, deps: SelfCreateDeps) =>
     keepingAlive(() =>
@@ -783,9 +784,10 @@ async function checkFailedCreates() {
     ownsClass: async () => true,
     recordLinkFetch: async () => true,
     linkLimitedMessage: async () => "limited",
-    fetchArticle: async (url) => ({ title: "Page", text: BODY, url }),
+    fetchArticle: async (url) => ({ title: "Page", text: BODY, url, trimmed: false }),
     insertReading: (c, t, draft) => insertReading(c, t, draft),
     log: () => {},
+    logStripFallback: () => {},
     ...over,
   });
   const teacherFailures: { name: string; over: Partial<TeacherCreateDeps> }[] = [

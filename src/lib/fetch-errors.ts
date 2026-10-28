@@ -7,8 +7,7 @@ export type FetchArticleErrorKind =
   | "too_large"
   | "not_html"
   | "http_error"
-  | "extract_failed"
-  | "too_long";
+  | "extract_failed";
 
 // Carries no part of the link (no host, path, or URL): the failure is
 // logged by kind, and by HTTP status for a non-2xx reply.

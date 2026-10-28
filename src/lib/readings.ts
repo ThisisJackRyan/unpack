@@ -26,6 +26,8 @@ export type ReadingDraft = ReadingSettings & {
   title: string;
   bodyText: string;
   sourceUrl: string | null;
+  // A linked article cut to the length limit (see trim-article.ts).
+  bodyTrimmed: boolean;
 };
 
 export type ReadingListItem = Pick<
@@ -105,8 +107,8 @@ export async function insertReading(
   const sql = getSql();
   const rows = await sql`
     insert into readings
-      (class_id, title, source_url, body_text, grade_level, question_count, question_mode, status)
-    select c.id, ${draft.title}, ${draft.sourceUrl}, ${draft.bodyText},
+      (class_id, title, source_url, body_text, body_trimmed, grade_level, question_count, question_mode, status)
+    select c.id, ${draft.title}, ${draft.sourceUrl}, ${draft.bodyText}, ${draft.bodyTrimmed},
       ${draft.gradeLevel}::grade_level, ${draft.questionCount},
       ${draft.questionMode}::question_mode, 'draft'
     from classes c
@@ -126,7 +128,7 @@ export async function saveReadingEdit(
   classId: string,
   readingId: string,
   teacherId: string,
-  edit: Omit<ReadingDraft, "sourceUrl">,
+  edit: Omit<ReadingDraft, "sourceUrl" | "bodyTrimmed">,
   execute: StatementExecutor = neonExecutor,
 ): Promise<boolean> {
   if (!isUuid(classId) || !isUuid(readingId)) return false;

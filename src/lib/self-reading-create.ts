@@ -16,8 +16,9 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { withDeadline } from "./deadline";
 import { readingSaveFailedState } from "./create-guard";
-import { resolveReadingSource, type ReadingSourceLogFields } from "./reading-source";
+import { resolveReadingSource, type FetchedArticle, type ReadingSourceLogFields } from "./reading-source";
 import { safeErrorFields } from "./safe-error-fields";
+import type { StripFallbackLog } from "./strip-fallback-log";
 import { createOutcomeRedirect, type CreateOutcome, type CreateRedirect, type SelfReadingDraft } from "./self-allowance";
 import { validateSoloReadingForm } from "./self-reading-form";
 import type { ReadingFormInput } from "./validate-reading";
@@ -30,11 +31,14 @@ export type SelfCreateDeps = {
   recordLinkFetch: (accountId: string) => Promise<boolean>;
   // The note at the link limit, with its retry time (a read).
   linkLimitedMessage: (accountId: string) => Promise<string>;
-  fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
+  // An article over the length limit comes back trimmed (trim-article.ts).
+  fetchArticle: (url: string) => Promise<FetchedArticle>;
   // The create transaction: the insert and the slot count together.
   createSelfReading: (accountId: string, draft: SelfReadingDraft) => Promise<CreateOutcome>;
   // Safe fields only.
   log: (message: string, fields: ReadingSourceLogFields) => void;
+  // logStripFallback: one info line when the text is the unstripped page.
+  logStripFallback: (fields: StripFallbackLog) => void;
 };
 
 export type SelfCreateResult = { state: ReadingFormState } | { redirect: CreateRedirect };
@@ -71,6 +75,11 @@ export async function createSelfReadingWith(
   });
   if (!resolved.ok) return { state: { errors: resolved.errors, values, suggestText: resolved.suggestText, limit: resolved.limit } };
 
+  // Once, after the insert, with the reading's id when there is one.
+  const noteStripFallback = (readingId?: string) => {
+    if (resolved.stripFallback) deps.logStripFallback({ reason: resolved.stripFallback, path: "self", readingId });
+  };
+
   // The first write that uses a slot. Not bounded: see create-guard.ts.
   let outcome: CreateOutcome;
   try {
@@ -81,7 +90,9 @@ export async function createSelfReadingWith(
     });
   } catch (error) {
     deps.log("createSelfReading failed", safeErrorFields(error));
+    noteStripFallback();
     return { state: readingSaveFailedState(values) };
   }
+  noteStripFallback(outcome.status === "created" ? outcome.id : undefined);
   return { redirect: createOutcomeRedirect(outcome) };
 }

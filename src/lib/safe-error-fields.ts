@@ -70,7 +70,6 @@ export const FIXED_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "fetch article failed: not_html",
   "fetch article failed: http_error",
   "fetch article failed: extract_failed",
-  "fetch article failed: too_long",
 ]);
 
 // The classes whose message safeErrorFields keeps, when it is one of

@@ -257,9 +257,12 @@ where reading_id = $1::uuid and student_id is null
       ],
     },
     {
+      // A trimmed article stays flagged only while its text is unchanged:
+      // edited text is the teacher's own.
       text: `update readings r set
   title = $8::text,
   body_text = $4::text,
+  body_trimmed = r.body_trimmed and r.body_text = $4::text,
   grade_level = $5::grade_level,
   question_count = $6::int,
   question_mode = $7::question_mode
