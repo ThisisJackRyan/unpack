@@ -28,6 +28,7 @@ import {
   ALREADY_PASSED_MESSAGE,
   CHECK_BUSY_MESSAGE,
   CHECK_FAILED_MESSAGE,
+  CHECK_TIMED_OUT_MESSAGE,
   CHECKS_PAUSED_MESSAGE,
   claimOutcome,
   carryLockedStatement,
@@ -376,6 +377,8 @@ export function soloSubmitMessage(status: Exclude<SubmitResult["status"], "check
       return SOLO_CHECKS_USED_MESSAGE;
     case "check_failed":
       return CHECK_FAILED_MESSAGE;
+    case "timed_out":
+      return CHECK_TIMED_OUT_MESSAGE;
     case "paused":
       return CHECKS_PAUSED_MESSAGE;
     case "stale":

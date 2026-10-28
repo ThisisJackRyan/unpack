@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
-import { EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
-import { QuestionWriterError } from "./ai/questions";
+import { checkEffort, EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
+import type { ModelReply } from "./ai/model";
+import { QuestionWriterError, type QuestionModel } from "./ai/questions";
+import { DeadlineError } from "./deadline";
 import type { Statement } from "./link-rate-limit";
 import {
   ALREADY_PASSED_MESSAGE,
   CHECK_BUSY_MESSAGE,
   CHECK_FAILED_MESSAGE,
+  CHECK_TIMED_OUT_MESSAGE,
   CHECKS_PAUSED_MESSAGE,
   claimOutcome,
   claimStatements,
@@ -18,6 +22,7 @@ import {
   EFFORT_GIVEN_BACK_WINDOW_LIMIT,
   EFFORT_GIVEN_BACK_WINDOW_MINUTES,
   effortFailureCounts,
+  refreshesPage,
   OUT_OF_TRIES_MESSAGE,
   pausedUntilStatement,
   postgresAttemptStore,
@@ -456,6 +461,102 @@ describe("submitAnswersWith", () => {
     assert.equal(checks[0].outcome, "error");
   });
 
+  it("a model call that hangs past the deadline is timed_out: no try used, the check given back", async () => {
+    const { store, attempts, checks } = fakeStore();
+    // AbortSignal.timeout's timer doesn't hold the event loop open (see
+    // effort-check.test.ts).
+    const keepAlive = setInterval(() => {}, 1_000);
+    try {
+      // The real checker over a call that never settles and ignores its
+      // signal (a stuck request, or a stuck gateway token lookup).
+      const hanging: QuestionModel = { model: "m", create: () => new Promise<ModelReply>(() => {}) };
+      const errors: unknown[] = [];
+      const r = await submitAnswersWith(STUDENT, READING, ANSWERS, {
+        store,
+        check: (input, hooks) => checkEffort(hanging, input, { deadlineMs: 20, onModelResponse: hooks?.onModelResponse }),
+        newId,
+        onError: (e) => errors.push(e),
+      });
+      assert.deepEqual(r, { status: "timed_out", counted: false });
+      assert.equal(errors.length, 1, "logged once");
+    } finally {
+      clearInterval(keepAlive);
+    }
+    assert.equal(attempts.length, 0, "no try saved");
+    assert.deepEqual(checks.map((c) => [c.finished, c.outcome]), [[true, "given_back"]]);
+    // The next check is still try 1 of 3, right away.
+    const next = await submit(store, fakeChecker().check);
+    assert.equal(next.status === "checked" && next.tryNumber, 1);
+  });
+
+  it("a timeout after an unusable reply is timed_out too, and counts as a check (counted: true)", async () => {
+    const { store, attempts, checks } = fakeStore();
+    const deadline = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    const r = await submit(store, fakeChecker(() => deadline, 5, true).check);
+    assert.deepEqual(r, { status: "timed_out", counted: true });
+    assert.equal(attempts.length, 0);
+    assert.equal(checks[0].outcome, "error");
+  });
+
+  it("a counted timeout can be the last check: the page must move on (the action re-renders)", async () => {
+    const { store, attempts } = fakeStore();
+    for (let i = 0; i < EFFORT_CHECK_LIMIT - 1; i++) {
+      assert.equal((await submit(store, fakeChecker(badOutput).check)).status, "check_failed");
+    }
+    const deadline = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    const last = await submit(store, fakeChecker(() => deadline, 5, true).check);
+    assert.deepEqual(last, { status: "timed_out", counted: true });
+    // That was the limit: the answer form would be stale, so the action
+    // refreshes on `counted`, and the next submit is refused.
+    assert.equal((await submit(store, fakeChecker().check)).status, "too_many_checks");
+    assert.equal(attempts.length, 0);
+  });
+
+  it("a plain failure is still check_failed, not timed_out", async () => {
+    const { store } = fakeStore();
+    assert.deepEqual(await submit(store, fakeChecker(() => new Error("fetch failed")).check), { status: "check_failed" });
+  });
+
+  it("a lookup that fails before the claim propagates, with no check claimed and no try saved", async () => {
+    const { store, attempts, checks } = fakeStore();
+    const down = new Error("fetch failed");
+    store.loadContext = async () => {
+      throw down;
+    };
+    const checker = fakeChecker();
+    await assert.rejects(submit(store, checker.check), (e: unknown) => e === down);
+    assert.equal(checks.length, 0, "no effort_checks row");
+    assert.equal(attempts.length, 0);
+    assert.equal(checker.calls(), 0);
+  });
+
+  it("a lookup that hangs past the pre-check deadline is a DeadlineError, with nothing written", async () => {
+    const { store, attempts, checks } = fakeStore();
+    store.loadContext = () => new Promise(() => {});
+    const checker = fakeChecker();
+    const preCheck = new AbortController();
+    const r = submitAnswersWith(STUDENT, READING, ANSWERS, { store, check: checker.check, newId, preCheck: preCheck.signal });
+    preCheck.abort();
+    await assert.rejects(r, DeadlineError);
+    assert.equal(checks.length, 0, "no effort_checks row");
+    assert.equal(attempts.length, 0);
+    assert.equal(checker.calls(), 0);
+  });
+
+  it("the pre-check deadline ends at the claim: a slow check after it still saves the try", async () => {
+    const { store, attempts } = fakeStore();
+    const preCheck = new AbortController();
+    const checker = fakeChecker();
+    const slow: EffortChecker = async (input, hooks) => {
+      // Past the pre-check deadline, mid check.
+      preCheck.abort();
+      return checker.check(input, hooks);
+    };
+    const r = await submitAnswersWith(STUDENT, READING, ANSWERS, { store, check: slow, newId, preCheck: preCheck.signal });
+    assert.equal(r.status === "checked" && r.tryNumber, 1);
+    assert.equal(attempts.length, 1);
+  });
+
   it("a failure with no model reply is given back: never toward the limit, only the short window", async () => {
     const { store, attempts, checks, advance } = fakeStore();
     // Not set up (no credentials), out of credits (402 maps to
@@ -599,6 +700,42 @@ describe("submitAnswersWith", () => {
   });
 });
 
+describe("refreshesPage", () => {
+  it("re-renders after a saved try, a counted timeout, and whenever the page may have moved on", () => {
+    const yes: SubmitResult[] = [
+      { status: "checked", passed: false, tryNumber: 1, results: [] },
+      { status: "already_passed" },
+      { status: "out_of_tries" },
+      { status: "too_many_checks" },
+      { status: "check_failed" },
+      // A reply, then a retry that ran out of time: it counted, and may
+      // have been the last check (the page shows the note to the teacher).
+      { status: "timed_out", counted: true },
+    ];
+    for (const result of yes) assert.equal(refreshesPage(result), true, result.status);
+  });
+
+  it("skips the re-render when nothing changed", () => {
+    const no: SubmitResult[] = [
+      { status: "timed_out", counted: false },
+      { status: "invalid", errors: {} },
+      { status: "stale" },
+      { status: "not_found" },
+      { status: "busy" },
+      { status: "paused", retryAt: null },
+    ];
+    for (const result of no) assert.equal(refreshesPage(result), false, result.status);
+  });
+
+  it("is what both answer actions use to revalidate", () => {
+    for (const actions of ["src/app/c/r/[readingId]/actions.ts", "src/app/learn/r/[readingId]/actions.ts"]) {
+      const source = readFileSync(actions, "utf8");
+      assert.match(source, /if \(refreshesPage\(result\)\)/, actions);
+      assert.doesNotMatch(source, /result\.counted/, `${actions}: no second copy of the branch`);
+    }
+  });
+});
+
 describe("limits", () => {
   it("allow 6 checks per student per reading, with a stale timeout past the deadline", () => {
     assert.equal(EFFORT_CHECK_LIMIT, 6);
@@ -615,11 +752,13 @@ describe("messages", () => {
     assert.equal(submitMessage("busy"), CHECK_BUSY_MESSAGE);
     assert.equal(submitMessage("too_many_checks"), TOO_MANY_CHECKS_MESSAGE);
     assert.equal(submitMessage("check_failed"), CHECK_FAILED_MESSAGE);
+    assert.equal(submitMessage("timed_out"), CHECK_TIMED_OUT_MESSAGE);
     assert.equal(submitMessage("stale"), ANSWERS_STALE_MESSAGE);
-    const all = [ALREADY_PASSED_MESSAGE, OUT_OF_TRIES_MESSAGE, CHECK_BUSY_MESSAGE, TOO_MANY_CHECKS_MESSAGE, CHECK_FAILED_MESSAGE];
+    const all = [ALREADY_PASSED_MESSAGE, OUT_OF_TRIES_MESSAGE, CHECK_BUSY_MESSAGE, TOO_MANY_CHECKS_MESSAGE, CHECK_FAILED_MESSAGE, CHECK_TIMED_OUT_MESSAGE];
     assert.equal(new Set(all).size, all.length);
     assert.match(TOO_MANY_CHECKS_MESSAGE, /Send a note to your teacher/);
     assert.match(CHECK_FAILED_MESSAGE, /Wait a minute, then try again\. This didn’t use up a try\./);
+    assert.equal(CHECK_TIMED_OUT_MESSAGE, "That took too long. Try again. This didn’t use up a try.");
   });
 });
 

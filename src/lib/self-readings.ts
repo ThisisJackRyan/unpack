@@ -114,6 +114,8 @@ export type SelfOptions = {
   write?: SelfQuestionWriter;
   check?: EffortChecker;
   execute?: StatementExecutor;
+  // The answer action's pre-check deadline (see answer-check-guard.ts).
+  preCheck?: AbortSignal;
 };
 
 export async function getOrCreateSelfQuestions(
@@ -144,6 +146,7 @@ export async function submitSelfAnswers(
     store: postgresSelfAttemptStore(options.execute ?? neonExecutor),
     check: options.check ?? modelChecker,
     newId: randomUUID,
+    preCheck: options.preCheck,
     onError: (error) =>
       logModelError("submitSelfAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
   });

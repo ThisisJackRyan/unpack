@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { TURNSTILE_RESPONSE_FIELD, verifyJoinBotCheck } from "@/lib/join-bot-check";
 import type { Statement } from "@/lib/link-rate-limit";
-import { joinClassWith } from "@/lib/student-join-core";
+import { joinClassWith, NAME_TAKEN_MESSAGE } from "@/lib/student-join-core";
 import {
   JOIN_BLOCKED_CONFIG_TAG,
   JOIN_DISABLED_MESSAGE,
@@ -167,5 +167,18 @@ describe("joinClassCore: the same spies do see a join that isn't blocked", () =>
     assert.equal(calls.fetch, 0);
     assert.equal(calls.joinClass, 1);
     assert.equal(calls.statements.length, 1);
+  });
+});
+
+describe("joinClassCore: a name already taken", () => {
+  // On the first-name field (the form sets aria-invalid and the error's
+  // aria-describedby from it), never on the last letters.
+  it("puts the message on the first name, with the values kept", async () => {
+    const { deps } = spies({ NODE_ENV: "development" });
+    deps.joinClass = async () => ({ status: "name_taken" });
+    const result = await joinClassCore(form(), deps);
+    assert.deepEqual(result, {
+      state: { errors: { firstName: NAME_TAKEN_MESSAGE }, values: { code: "ABC234", firstName: "Maya", lastInitials: "Ro" } },
+    });
   });
 });

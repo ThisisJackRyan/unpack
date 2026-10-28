@@ -31,6 +31,10 @@ export const ANSWER_EMPTY_MESSAGE = "Write an answer here first.";
 export const ANSWER_TOO_LONG_MESSAGE = "This answer is too long. Make it shorter.";
 export const ANSWERS_STALE_MESSAGE = "This page is out of date. Reload it and try again.";
 export const ANSWERS_FIX_MESSAGE = "Some answers need a fix. Look below.";
+// A check that ran past its deadline ("timed_out" in submit-answers-core.ts),
+// or a check request that never came back (see answer-form-state.ts). Here,
+// not in the core, so the answer form can show it without the AI imports.
+export const CHECK_TIMED_OUT_MESSAGE = "That took too long. Try again. This didn’t use up a try.";
 export const NOTE_EMPTY_MESSAGE = "Write a note to your teacher first.";
 export const NOTE_TOO_LONG_MESSAGE = "This note is too long. Make it shorter.";
 

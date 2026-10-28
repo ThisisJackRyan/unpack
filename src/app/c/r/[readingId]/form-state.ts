@@ -8,6 +8,6 @@ export {
   MAX_TRIES,
 } from "@/lib/validate-answers";
 
-export type { AnswerFormState } from "@/components/answer-form-state";
+export { TIMED_OUT_STATE, type AnswerFormState } from "@/components/answer-form-state";
 
 export type ChallengeFormState = { error?: string };

@@ -111,8 +111,9 @@ const execute = throttled(DB_CONCURRENCY);
 // last one with a nudge; "first" passes only the first one.
 // "error": the model replied, but not usably (counts toward the check
 // limit). "outage": it never replied (given back; see
-// submit-answers-core.ts).
-type Mode = "pass" | "fail" | "first" | "error" | "outage";
+// submit-answers-core.ts). "timeout": it never replied before the deadline
+// (given back, reported as timed_out).
+type Mode = "pass" | "fail" | "first" | "error" | "outage" | "timeout";
 let modelCalls = 0;
 // The question ids of the last check, in order.
 let lastChecked: string[] = [];
@@ -122,6 +123,7 @@ function fakeChecker(mode: Mode, delayMs = DELAY_MS) {
     lastChecked = input.items.map((item) => item.questionId);
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     if (mode === "outage") throw new Error("fake model outage");
+    if (mode === "timeout") throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
     if (mode === "error") {
       hooks?.onModelResponse();
       throw new Error("fake unusable reply");
@@ -319,6 +321,49 @@ async function checkModelFailureAndLimit() {
   check(outcome.outcome === "error", `failed check outcome: ${outcome.outcome}`);
   const next = await submit(student, "fail", { delayMs: 20 });
   check(next.status === "checked" && next.tryNumber === 1, `next submit uses try 1: ${next.status}`);
+
+  const slow = await newStudent();
+  const timedOut = await submit(slow, "timeout", { delayMs: 20 });
+  c = await counts(slow);
+  const slowOutcome = await one<{ outcome: string }>(sql`
+    select outcome from effort_checks where student_id = ${slow} and reading_id = ${readingId}`);
+  check(
+    timedOut.status === "timed_out" && !timedOut.counted && c.attempts === 0 && c.live === 0 && slowOutcome.outcome === "given_back",
+    `timeout: ${timedOut.status}, attempts ${c.attempts}, live ${c.live}, outcome ${slowOutcome.outcome}`,
+  );
+  const afterTimeout = await submit(slow, "fail", { delayMs: 20 });
+  check(afterTimeout.status === "checked" && afterTimeout.tryNumber === 1, `after a timeout, the next submit uses try 1: ${afterTimeout.status}`);
+
+  // The request dying before the claim (the database down, or the
+  // lookups past the action's pre-check deadline): no effort_checks row,
+  // no try, and the next submit starts fresh.
+  const early = await newStudent();
+  const entries = answers(await openQuestionIds(execute, early, readingId));
+  const earlyCalls = modelCalls;
+  const down = await submitAnswers(early, readingId, entries, {
+    check: fakeChecker("pass"),
+    execute: async () => {
+      throw new Error("fake database down");
+    },
+  }).then(
+    () => "returned",
+    (e: Error) => e.message,
+  );
+  const late = await submitAnswers(early, readingId, entries, {
+    check: fakeChecker("pass"),
+    execute,
+    preCheck: AbortSignal.abort(),
+  }).then(
+    () => "returned",
+    (e: Error) => e.name,
+  );
+  c = await counts(early);
+  check(
+    down === "fake database down" && late === "DeadlineError" && c.checks === 0 && c.attempts === 0 && modelCalls === earlyCalls,
+    `before the claim: ${down}, ${late}, checks ${c.checks}, attempts ${c.attempts}, model calls ${modelCalls - earlyCalls}`,
+  );
+  const afterEarly = await submit(early, "fail", { delayMs: 5 });
+  check(afterEarly.status === "checked" && afterEarly.tryNumber === 1, `after a failure before the claim, try 1: ${afterEarly.status}`);
 
   const limited = await newStudent();
   for (let i = 0; i < EFFORT_CHECK_LIMIT; i++) await submit(limited, "error", { delayMs: 5 });
