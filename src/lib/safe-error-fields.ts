@@ -8,10 +8,9 @@
 // - name: the error's name (or its constructor's, when the name is the
 //   generic "Error"), or the value's type for a non-Error. Identifier-like
 //   names only.
-// - code: a short uppercase code (a SQLSTATE like "23505" or "57P01", a
-//   Node code like "ETIMEDOUT" or "UND_ERR_SOCKET") or a finite integer
-//   (an HTTP status), when there is one. Anything else (lowercase, mixed
-//   case, an id-shaped value) is dropped.
+// - code: a SQLSTATE, a Node or undici code, or a small integer (see
+//   isSafeCode). Anything else (lowercase, mixed case, a phone number,
+//   an id- or key-shaped value) is dropped.
 // - causes: name and code of each error under it, nearest first, through
 //   `cause` (drizzle, the AI SDK, fetch) or `sourceError` (Neon), at most
 //   MAX_CAUSES deep, and cycle safe.
@@ -86,7 +85,36 @@ const MESSAGE_ALLOWED = [
 ];
 
 const NAME_PATTERN = /^[A-Za-z_$][\w$.]{0,79}$/;
-const CODE_PATTERN = /^[A-Z0-9_]{1,40}$/;
+// The code rule. A code is kept when it is:
+// - an integer from 0 to 9999 (an HTTP status, an exit code), never a
+//   longer number such as a phone number;
+// - a SQLSTATE: exactly five digits or uppercase letters ("23505",
+//   "57014", "40P01", "22P02");
+// - or a named code under 40 characters ("ECONNRESET",
+//   "UND_ERR_CONNECT_TIMEOUT", "ERR_HTTP2_STREAM_ERROR"): words of
+//   uppercase letters joined by underscores, the first starting with a
+//   letter. Digits only at a word's end (after its letters) or as a whole
+//   word, at most MAX_CODE_DIGITS of them, and no word longer than
+//   MAX_CODE_WORD letters. That drops a key or token: a digit between
+//   letters ("AKIAIOSFODNN7EXAMPLE"), a long run of letters, or many
+//   digits. An AWS key id prefix (AKIA, ASIA) on anything long is
+//   dropped too.
+const MAX_CODE_INTEGER = 9999;
+const MAX_CODE_LENGTH = 39;
+const MAX_CODE_DIGITS = 4;
+const MAX_CODE_WORD = 20;
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+const NAMED_CODE_PATTERN = /^[A-Z]+[0-9]*(_([A-Z]+[0-9]*|[0-9]+))*$/;
+const KEY_ID_PATTERN = /^(AKIA|ASIA)[A-Z0-9]{12,}$/;
+
+export function isSafeCode(code: unknown): code is string | number {
+  if (typeof code === "number") return Number.isInteger(code) && code >= 0 && code <= MAX_CODE_INTEGER;
+  if (typeof code !== "string") return false;
+  if (SQLSTATE_PATTERN.test(code)) return true;
+  if (code.length > MAX_CODE_LENGTH || !NAMED_CODE_PATTERN.test(code) || KEY_ID_PATTERN.test(code)) return false;
+  if ((code.match(/[0-9]/g)?.length ?? 0) > MAX_CODE_DIGITS) return false;
+  return code.split("_").every((word) => word.replace(/[0-9]+$/, "").length <= MAX_CODE_WORD);
+}
 
 const TIMEOUT_NAMES = new Set([
   "AbortError",
@@ -158,8 +186,7 @@ function codeOf(value: unknown): string | number | undefined {
   if (value === null || typeof value !== "object") return undefined;
   try {
     const { code } = value as { code?: unknown };
-    if (typeof code === "number" && Number.isInteger(code)) return code;
-    if (typeof code === "string" && CODE_PATTERN.test(code)) return code;
+    if (isSafeCode(code)) return code;
   } catch {
     // A throwing getter or trap: no code.
   }
