@@ -234,7 +234,7 @@ describe("soloStage and messages", () => {
   });
 
   it("no message mentions a teacher or a note", () => {
-    for (const s of ["already_passed", "out_of_tries", "busy", "too_many_checks", "check_failed", "stale", "not_found"] as const) {
+    for (const s of ["already_passed", "out_of_tries", "busy", "too_many_checks", "check_failed", "timed_out", "stale", "not_found"] as const) {
       assert.equal(/teacher|note/i.test(soloSubmitMessage(s)), false, s);
     }
   });

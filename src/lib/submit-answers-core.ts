@@ -52,7 +52,9 @@
 //    an open challenge in the same transaction (status closed), so the
 //    teacher's queue never asks about a student who has since passed.
 // 5. On a model error or timeout, finish the claim with no attempt: the try
-//    isn't used up. Whether the check still counts toward
+//    isn't used up. A timeout (EFFORT_CHECK_DEADLINE_MS, or a per-request
+//    timeout that ended the call) is reported as "timed_out", anything
+//    else as "check_failed", so the student is told which. Whether the check still counts toward
 //    EFFORT_CHECK_LIMIT depends on whether the model replied
 //    (effortFailureCounts):
 //    - It replied, but not usably (no tool call, the wrong answers, a
@@ -88,7 +90,7 @@
 // Every database error propagates, so the caller fails closed.
 
 import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
-import { EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
+import { EffortCheckError, effortErrorKind, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { dateFromRow } from "./local-time";
@@ -97,6 +99,7 @@ import { checksAllowedSql, countedCheckSql, effortLockStatement, limitsFromRow, 
 import type { StudentQuestion } from "./student-questions-core";
 import {
   ANSWERS_STALE_MESSAGE,
+  CHECK_TIMED_OUT_MESSAGE,
   EFFORT_CHECK_LIMIT,
   validateAnswers,
   type AnswerEntry,
@@ -105,8 +108,8 @@ import {
 } from "./validate-answers";
 
 // Defined in validate-answers.ts (see there); re-exported for callers that
-// think of it as a submit rule.
-export { EFFORT_CHECK_LIMIT };
+// think of them as submit rules.
+export { CHECK_TIMED_OUT_MESSAGE, EFFORT_CHECK_LIMIT };
 
 // Longer than the most a check can take (the deadline ends it, validation
 // retry, SDK retries, and backoff included), plus 30s for the commit and
@@ -210,7 +213,8 @@ export type SubmitResult =
   | { status: "busy" }
   | { status: "too_many_checks" }
   | { status: "paused"; retryAt: Date | null }
-  | { status: "check_failed" };
+  | { status: "check_failed" }
+  | { status: "timed_out" };
 
 // Whether a failed check counts toward EFFORT_CHECK_LIMIT (step 5 above):
 // only when the model replied at least once. Unusable output is only ever
@@ -288,7 +292,7 @@ export async function submitAnswersWith(
   } catch (error) {
     deps.onError?.(error);
     await store.release(studentId, readingId, claimId, !effortFailureCounts(error, modelResponded));
-    return { status: "check_failed" };
+    return { status: effortErrorKind(error) === "timeout" ? "timed_out" : "check_failed" };
   }
 
   // The locked questions passed already, so the try passes when every
@@ -692,6 +696,8 @@ export function submitMessage(status: Exclude<SubmitResult["status"], "checked" 
       return TOO_MANY_CHECKS_MESSAGE;
     case "check_failed":
       return CHECK_FAILED_MESSAGE;
+    case "timed_out":
+      return CHECK_TIMED_OUT_MESSAGE;
     case "paused":
       return CHECKS_PAUSED_MESSAGE;
     case "stale":

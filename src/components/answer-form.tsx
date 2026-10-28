@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { NoCopyTextarea } from "@/components/no-copy";
 import { card, pill, primaryButtonLarge } from "@/components/ui";
@@ -28,7 +29,7 @@ import {
   type DraftOwner,
 } from "@/lib/answer-drafts";
 import { browserSessionStore, markJustChecked } from "@/lib/celebration";
-import type { AnswerFormState } from "./answer-form-state";
+import { withCheckFallback, type AnswerFormState } from "./answer-form-state";
 import { LimitNotice } from "./limit-notice";
 import { MaxLengthNote } from "./max-length-note";
 
@@ -55,9 +56,11 @@ function prefill(questions: StudentQuestion[], previous: AttemptView | null): Re
 
 // Every question with an answer box, and one button that checks them all.
 // The form submits through a transition (not the form action prop), so
-// React doesn't reset the boxes after a check.
+// React doesn't reset the boxes after a check. A check request that fails
+// outright shows a message here, not the page's error boundary (see
+// withCheckFallback).
 export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, previous, drafts }: Props) {
-  const [state, dispatch, pending] = useActionState(action, initialState);
+  const [state, dispatch, pending] = useActionState(withCheckFallback(action, unstable_rethrow), initialState);
   const [values, setValues] = useState(() => prefill(questions, previous));
   // A new try (the page re-renders after a check): start from its answers.
   const [shownTry, setShownTry] = useState(tryNumber);

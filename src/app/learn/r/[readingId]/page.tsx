@@ -25,7 +25,8 @@ import { submitSelfAnswersAction } from "./actions";
 
 // The first open writes the questions (QUESTION_WRITE_DEADLINE_MS, 110s,
 // at the latest), and the answer check runs in this page's server action
-// (EFFORT_CHECK_DEADLINE_MS, 60s): the student reading page's budget.
+// (EFFORT_CHECK_DEADLINE_MS, 60s): the student reading page's budget (see
+// there).
 export const maxDuration = 150;
 
 type Props = { params: Promise<{ readingId: string }> };

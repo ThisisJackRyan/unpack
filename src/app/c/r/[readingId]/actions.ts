@@ -1,17 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { isQuestionWritingConfigured } from "@/lib/ai/client";
 import { sendChallenge, type ChallengeResult } from "@/lib/challenges";
 import { CHALLENGE_FAILED_MESSAGE, challengeMessage } from "@/lib/challenges-core";
 import { getStudentSession } from "@/lib/student-auth";
-import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
+import { submitAnswers } from "@/lib/submit-answers";
 import { CHECK_FAILED_MESSAGE, submitMessage } from "@/lib/submit-answers-core";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
-import type { AnswerFormState, ChallengeFormState } from "./form-state";
+import { TIMED_OUT_STATE, type AnswerFormState, type ChallengeFormState } from "./form-state";
 
 const SUBMIT_FAILED_MESSAGE = "Something went wrong. Try again.";
 
@@ -31,27 +31,33 @@ function refresh(readingId: string) {
 // Checks every answer at once (one effort check) and saves the try. All
 // the rules (session, class, published, these exact questions, 3 tries,
 // one check at a time, the check limit) are enforced server side in
-// submitAnswers; the form's own limits are only a convenience.
+// submitAnswers; the form's own limits are only a convenience. Never
+// throws, except Next's redirect: any error (the session lookup, the
+// database, the model) is a message in the form, which keeps the answers.
 export async function submitAnswersAction(
   readingId: string,
   _prev: AnswerFormState,
   formData: FormData,
 ): Promise<AnswerFormState> {
+  try {
+    return await checkAnswers(readingId, formData);
+  } catch (error) {
+    // redirect("/join") (no session) is an error Next must handle.
+    unstable_rethrow(error);
+    // Fail closed: nothing is checked when the database can't say it's OK.
+    logError("submitAnswersAction: submit failed", error, readingId);
+    return { message: SUBMIT_FAILED_MESSAGE };
+  }
+}
+
+async function checkAnswers(readingId: string, formData: FormData): Promise<AnswerFormState> {
   const session = await getStudentSession();
   if (!session) redirect("/join");
   // Without AI Gateway credentials every check would fail (given back,
   // but filling the outage window), so don't start one.
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
-  let result: SubmitResult;
-  try {
-    result = await submitAnswers(session.student.id, readingId, answerEntries(formData.entries()));
-  } catch (error) {
-    // Fail closed: nothing is checked when the database can't say it's OK.
-    logError("submitAnswersAction: submit failed", error, readingId);
-    return { message: SUBMIT_FAILED_MESSAGE };
-  }
-
+  const result = await submitAnswers(session.student.id, readingId, answerEntries(formData.entries()));
   switch (result.status) {
     case "checked":
       refresh(readingId);
@@ -68,6 +74,10 @@ export async function submitAnswersAction(
       // with its answers and this message.
       refresh(readingId);
       return { message: submitMessage(result.status) };
+    case "timed_out":
+      // Never counts toward the check limit, so the page can't have moved
+      // on: no re-render at the end of an already slow request.
+      return TIMED_OUT_STATE;
     case "paused":
       // An outage: a short break, with when checking frees up again.
       return { limit: withRetryAt(submitMessage(result.status), result.retryAt, await requestRetryClock()) };

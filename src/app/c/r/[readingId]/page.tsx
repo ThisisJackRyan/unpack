@@ -36,7 +36,10 @@ import { StudentReadingStatusBadge } from "@/components/student-reading-status-b
 // at the latest, attempts and retries included. 150 leaves room for the
 // lookups and the commit, the same budget as the teacher reading page. The
 // answer check runs in this page's server action, and its deadline
-// (EFFORT_CHECK_DEADLINE_MS, 60s) fits well inside it too.
+// (EFFORT_CHECK_DEADLINE_MS, 60s, every model call and retry included)
+// fits well inside it too, so a slow check ends as "timed_out", not as a
+// stopped function. Over 60s needs Fluid compute on Vercel Hobby (up to
+// 300s); src/lib/function-budget.test.ts checks these numbers.
 export const maxDuration = 150;
 
 type Props = { params: Promise<{ readingId: string }> };
