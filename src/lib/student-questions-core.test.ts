@@ -222,7 +222,7 @@ describe("getOrCreateStudentQuestionsWith", () => {
       store,
       write: failing.write,
       newToken,
-      onError: (f) => logged.push(f),
+      onErrorFields: (f) => logged.push(f),
     });
     assert.deepEqual(result, {
       status: "error",
@@ -420,7 +420,7 @@ describe("which failures count toward the throttle", () => {
           store,
           write: failing.write,
           newToken,
-          onError: (f) => logged.push(f),
+          onErrorFields: (f) => logged.push(f),
         });
       // More than the lifetime cap, one full window at a time.
       for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT + 2; i++) {

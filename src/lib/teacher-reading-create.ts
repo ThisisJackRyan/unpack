@@ -9,7 +9,7 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { readingSaveFailedState } from "./create-guard";
 import { withDeadline } from "./deadline";
-import { resolveReadingSource, type FetchedArticle } from "./reading-source";
+import { resolveReadingSource, type FetchedArticle, type ReadingSourceLogFields } from "./reading-source";
 import type { ReadingDraft } from "./readings";
 import { safeErrorFields } from "./safe-error-fields";
 import type { StripFallbackLog } from "./strip-fallback-log";
@@ -31,7 +31,7 @@ export type TeacherCreateDeps = {
   // class, nothing inserted).
   insertReading: (classId: string, teacherId: string, draft: ReadingDraft) => Promise<{ id: string } | undefined>;
   // Safe fields only.
-  log: (message: string, fields: Record<string, unknown>) => void;
+  log: (message: string, fields: ReadingSourceLogFields) => void;
   // logStripFallback: one info line when the text is the unstripped page.
   logStripFallback: (fields: StripFallbackLog) => void;
 };

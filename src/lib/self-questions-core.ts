@@ -124,7 +124,7 @@ export type SelfQuestionDeps = {
   // The account's plan allowance; the free plan by default.
   allowance?: ReadingAllowance;
   // Safe fields only (never the text or prompts).
-  onError?: (fields: Record<string, unknown>) => void;
+  onErrorFields?: (fields: Record<string, unknown>) => void;
 };
 
 export type SelfQuestionsResult =
@@ -178,7 +178,7 @@ export async function getOrCreateSelfQuestionsWith(
   try {
     prompts = await deps.write(context);
   } catch (error) {
-    deps.onError?.(questionErrorLogFields(error));
+    deps.onErrorFields?.(questionErrorLogFields(error));
     // The only place a slot is released: a write was attempted and failed
     // (a timeout, a 402, a provider error, anything the write throws). So
     // while writes keep failing, an account's readings are capped by the

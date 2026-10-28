@@ -57,6 +57,23 @@ describe("withRejectionFallback", () => {
     assert.deepEqual(kinds, ["no_reply", "no_reply", "app_updated"]);
   });
 
+  it("logs the kind and the error's name only, never its message", async () => {
+    const logged: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => logged.push(args);
+    try {
+      for (const error of [new TypeError("FAKE pasted text"), unrecognized()]) {
+        await withRejectionFallback(async () => Promise.reject(error), () => "fallback", rethrowNext)("prev", new FormData());
+      }
+    } finally {
+      console.error = original;
+    }
+    assert.deepEqual(logged, [
+      ["form action rejected", { kind: "no_reply", name: "TypeError" }],
+      ["form action rejected", { kind: "app_updated", name: "UnrecognizedActionError" }],
+    ]);
+  });
+
   it("lets Next's redirect and not-found through", async () => {
     for (const digest of ["NEXT_REDIRECT;replace;/learn/r/1;303;", "NEXT_HTTP_ERROR_FALLBACK;404"]) {
       const action = withRejectionFallback(async () => Promise.reject(Object.assign(new Error("next"), { digest })), () => "fallback", rethrowNext);

@@ -142,7 +142,7 @@ export async function getOrCreateSelfQuestions(
     },
     newToken: randomUUID,
     configured: options.write ? true : isQuestionWritingConfigured(),
-    onError: (fields) => logModelError("getOrCreateSelfQuestions: write failed", { ...fields, readingId }),
+    onErrorFields: (fields) => logModelError("getOrCreateSelfQuestions: write failed", { ...fields, readingId }),
   });
 }
 

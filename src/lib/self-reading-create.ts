@@ -16,7 +16,7 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { withDeadline } from "./deadline";
 import { readingSaveFailedState } from "./create-guard";
-import { resolveReadingSource, type FetchedArticle } from "./reading-source";
+import { resolveReadingSource, type FetchedArticle, type ReadingSourceLogFields } from "./reading-source";
 import { safeErrorFields } from "./safe-error-fields";
 import type { StripFallbackLog } from "./strip-fallback-log";
 import { createOutcomeRedirect, type CreateOutcome, type CreateRedirect, type SelfReadingDraft } from "./self-allowance";
@@ -36,7 +36,7 @@ export type SelfCreateDeps = {
   // The create transaction: the insert and the slot count together.
   createSelfReading: (accountId: string, draft: SelfReadingDraft) => Promise<CreateOutcome>;
   // Safe fields only.
-  log: (message: string, fields: Record<string, unknown>) => void;
+  log: (message: string, fields: ReadingSourceLogFields) => void;
   // logStripFallback: one info line when the text is the unstripped page.
   logStripFallback: (fields: StripFallbackLog) => void;
 };

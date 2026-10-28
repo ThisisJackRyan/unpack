@@ -12,7 +12,7 @@ import { DeadlineError } from "./deadline";
 import { FetchArticleError } from "./fetch-errors";
 import { JoinCodeExhaustedError } from "./join-code";
 import { resolveReadingSource } from "./reading-source";
-import { MAX_CAUSES, safeErrorFields } from "./safe-error-fields";
+import { isSafeCode, MAX_CAUSES, safeErrorFields } from "./safe-error-fields";
 import { createSelfReadingWith } from "./self-reading-create";
 import { createTeacherReadingWith } from "./teacher-reading-create";
 import { deleteUnder13Account } from "./under-13-account";
@@ -148,11 +148,63 @@ describe("safeErrorFields cause chain", () => {
     assert.deepEqual(safeErrorFields(Object.assign(new Error("x"), { code: 42 })).code, 42);
   });
 
-  it("keeps only uppercase codes and integers, dropping id-shaped and mixed-case values", () => {
-    for (const code of ["23505", "57P01", "22P02", "ETIMEDOUT", "ECONNREFUSED", "UND_ERR_SOCKET", 404, 0]) {
+  it("keeps SQLSTATEs, Node and undici codes, and every code the app checks for", () => {
+    for (const code of [
+      // SQLSTATE: unique, check, query_canceled, admin_shutdown,
+      // deadlock, invalid_text_representation, foreign key.
+      "23505",
+      "23514",
+      "57014",
+      "57P01",
+      "40P01",
+      "22P02",
+      "23503",
+      // Node and undici.
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "ETIMEDOUT",
+      "ESOCKETTIMEDOUT",
+      "ENOTFOUND",
+      "ABORT_ERR",
+      "ERR_INVALID_URL",
+      "ERR_HTTP2_STREAM_ERROR",
+      "UND_ERR_SOCKET",
+      "UND_ERR_CONNECT_TIMEOUT",
+      "UND_ERR_HEADERS_TIMEOUT",
+      "UND_ERR_BODY_TIMEOUT",
+      "B1",
+    ]) {
+      assert.equal(isSafeCode(code), true, code);
       assert.equal(safeErrorFields(Object.assign(new Error("x"), { code })).code, code);
     }
-    for (const code of [CLERK_ID, "etimedout", "EConnRefused", "invalid_request", "E".repeat(41), 1.5, Number.NaN, Infinity]) {
+  });
+
+  it("drops a phone number, a key id, and long or digit-heavy tokens", () => {
+    for (const code of [
+      5551234567,
+      "5551234567",
+      "AKIAIOSFODNN7EXAMPLE",
+      "ASIAIOSFODNNEXAMPLEX",
+      "AKIAIOSFODNNEXAMPLE7",
+      // 30 characters, letters and digits mixed.
+      "X7K2P9Q4M1N8R5T3V6W0Y2Z4A8B1C3",
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZABCD",
+      "ERR_12345",
+      "ERR_1234_5678",
+      "_ERR",
+      "ERR__X",
+      "1ERR",
+    ]) {
+      assert.equal(isSafeCode(code), false, String(code));
+      assert.equal("code" in safeErrorFields(Object.assign(new Error("x"), { code })), false, String(code));
+    }
+  });
+
+  it("keeps only uppercase codes and integers, dropping id-shaped and mixed-case values", () => {
+    for (const code of ["23505", "57P01", "22P02", "ETIMEDOUT", "ECONNREFUSED", "UND_ERR_SOCKET", 404, 0, 9999]) {
+      assert.equal(safeErrorFields(Object.assign(new Error("x"), { code })).code, code);
+    }
+    for (const code of [CLERK_ID, "etimedout", "EConnRefused", "invalid_request", "E".repeat(41), 1.5, Number.NaN, Infinity, -1, 10000]) {
       assert.equal("code" in safeErrorFields(Object.assign(new Error("x"), { code })), false, String(code));
     }
     const nested = new Error("x", { cause: Object.assign(new Error("y"), { code: CLERK_ID }) });
@@ -259,6 +311,11 @@ describe("safeErrorFields message", () => {
       new NeonDbError(`connection string: postgresql://${CLERK_ID}@db.invalid`),
       // An own error is only allowed at the top, not as a cause.
       new Error(READING_TEXT, { cause: new JoinCodeExhaustedError() }),
+      // An allowed class whose message isn't exactly a listed one.
+      Object.assign(new DeadlineError(), { message: `pre-check deadline passed for ${CLERK_ID}` }),
+      Object.assign(new FetchArticleError("blocked"), { message: READING_TEXT }),
+      // A listed message on a class that isn't allowed.
+      new Error("pre-check deadline passed"),
       READING_TEXT,
       { message: READING_TEXT, name: CLERK_ID },
       null,

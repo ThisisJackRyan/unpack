@@ -207,7 +207,7 @@ describe("verifyJoinBotCheck", () => {
       const refused: Record<string, unknown>[] = [];
       const result = await verifyJoinBotCheck(
         { token: "tok" },
-        { env, fetch: fetchFn, logError: (tag, fields) => errors.push([tag, fields]), onFailure: (f) => refused.push(f) },
+        { env, fetch: fetchFn, logError: (tag, fields) => errors.push([tag, fields]), onFailureFields: (f) => refused.push(f) },
       );
       assert.deepEqual(result, { ok: false, reason: "misconfigured" });
       assert.equal(calls.length, 0);
@@ -290,7 +290,7 @@ describe("verifyJoinBotCheck", () => {
     for (const reply of [{ success: true, action: "" }, { success: true }, { success: true, action: null }]) {
       const { fetchFn: f } = fakeFetch(() => json(reply));
       const logged: Record<string, unknown>[] = [];
-      assert.deepEqual(await verifyJoinBotCheck({ token: "tok" }, { env: REAL, fetch: f, onFailure: (x) => logged.push(x) }), {
+      assert.deepEqual(await verifyJoinBotCheck({ token: "tok" }, { env: REAL, fetch: f, onFailureFields: (x) => logged.push(x) }), {
         ok: false,
         reason: "rejected",
       });
@@ -314,7 +314,7 @@ describe("verifyJoinBotCheck", () => {
     for (const hostname of ["evil.example.com", "", undefined, 42]) {
       const { fetchFn } = fakeFetch(() => json({ success: true, action: TURNSTILE_ACTION, hostname }));
       const logged: Record<string, unknown>[] = [];
-      assert.deepEqual(await verifyJoinBotCheck({ token: "tok" }, { env, fetch: fetchFn, onFailure: (x) => logged.push(x) }), {
+      assert.deepEqual(await verifyJoinBotCheck({ token: "tok" }, { env, fetch: fetchFn, onFailureFields: (x) => logged.push(x) }), {
         ok: false,
         reason: "rejected",
       });
@@ -341,7 +341,7 @@ describe("verifyJoinBotCheck", () => {
   it("on, success: false: refuses and logs only the error codes", async () => {
     const { fetchFn } = fakeFetch(() => json({ success: false, "error-codes": ["timeout-or-duplicate"] }));
     const logged: Record<string, unknown>[] = [];
-    const result = await verifyJoinBotCheck({ token: "secret-token" }, { env: ON, fetch: fetchFn, onFailure: (f) => logged.push(f) });
+    const result = await verifyJoinBotCheck({ token: "secret-token" }, { env: ON, fetch: fetchFn, onFailureFields: (f) => logged.push(f) });
     assert.deepEqual(result, { ok: false, reason: "rejected" });
     assert.deepEqual(logged, [{ reason: "rejected", errorCodes: ["timeout-or-duplicate"] }]);
     assert.doesNotMatch(JSON.stringify(logged), /secret-token|1x0000/);
@@ -380,7 +380,7 @@ describe("verifyJoinBotCheck", () => {
     const keepAlive = setTimeout(() => {}, 5_000);
     const result = await verifyJoinBotCheck(
       { token: "tok" },
-      { env: ON, fetch: fetchFn, timeoutMs: 20, onFailure: (f) => logged.push(f) },
+      { env: ON, fetch: fetchFn, timeoutMs: 20, onFailureFields: (f) => logged.push(f) },
     );
     clearTimeout(keepAlive);
     assert.deepEqual(result, { ok: false, reason: "unavailable" });
