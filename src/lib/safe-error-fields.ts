@@ -16,8 +16,8 @@
 //   `cause` (drizzle, the AI SDK, fetch) or `sourceError` (Neon), at most
 //   MAX_CAUSES deep, and cycle safe.
 // - timedOut: true when any level is an abort or a timeout.
-// - message: only for the app's own errors in MESSAGE_ALLOWED, whose
-//   messages are fixed strings with no user input.
+// - message: only for the app's own errors in MESSAGE_ALLOWED, and only
+//   when the message is exactly one of FIXED_ERROR_MESSAGES.
 // Never SQL, params, detail, hint, where, stacks, or the error stringified.
 // Callers add their own ids (classId, readingId: app uuids).
 //
@@ -48,9 +48,35 @@ export const MAX_CAUSES = 4;
 // being read.
 export const UNLOGGABLE_NAME = "UnloggableError";
 
-// Messages built only from fixed text and enums. QuestionWriterError and
-// EffortCheckError are left out: their reason can quote a schema problem
-// in the model's output.
+// The only error messages a log may print: fixed text with no user
+// input, matched exactly (never by prefix or pattern), here and in
+// safe-console.ts's error lines. Each is spelled out, so a change to a
+// class's message drops it from the logs until it is listed here.
+export const FIXED_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // A missing AI Gateway key.
+  "AI_GATEWAY_API_KEY is not set",
+  // DeadlineError (deadline.ts).
+  "pre-check deadline passed",
+  // DbReadTimeoutError (db/read-timeout.ts).
+  "database read timed out",
+  // JoinCodeExhaustedError (join-code.ts, MAX_ATTEMPTS 5).
+  "Could not generate a unique join code in 5 attempts",
+  // ClerkUserNoEmailError (clerk-user-errors.ts).
+  "Clerk user has no email address",
+  // FetchArticleError (fetch-errors.ts): one per FetchArticleErrorKind.
+  "fetch article failed: invalid_url",
+  "fetch article failed: blocked",
+  "fetch article failed: timeout",
+  "fetch article failed: too_large",
+  "fetch article failed: not_html",
+  "fetch article failed: http_error",
+  "fetch article failed: extract_failed",
+  "fetch article failed: too_long",
+]);
+
+// The classes whose message safeErrorFields keeps, when it is one of
+// FIXED_ERROR_MESSAGES. QuestionWriterError and EffortCheckError are left
+// out: their reason can quote a schema problem in the model's output.
 const MESSAGE_ALLOWED = [
   DeadlineError,
   DbReadTimeoutError,
@@ -171,7 +197,7 @@ function allowedMessage(error: unknown): string | undefined {
   try {
     if (!MESSAGE_ALLOWED.some((allowed) => error instanceof allowed)) return undefined;
     const { message } = error as Error;
-    return typeof message === "string" ? message : undefined;
+    return typeof message === "string" && FIXED_ERROR_MESSAGES.has(message) ? message : undefined;
   } catch {
     return undefined;
   }

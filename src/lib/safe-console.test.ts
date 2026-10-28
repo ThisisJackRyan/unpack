@@ -9,6 +9,10 @@ import { DrizzleQueryError, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as nextLog from "next/dist/build/output/log.js";
 import { students } from "@/db/schema";
+import { DbReadTimeoutError } from "@/db/read-timeout";
+import { ClerkUserNoEmailError } from "./clerk-user-errors";
+import { DeadlineError } from "./deadline";
+import { FetchArticleError } from "./fetch-errors";
 import { JoinCodeExhaustedError } from "./join-code";
 import { hashSessionToken } from "./student-session-token";
 import {
@@ -24,7 +28,7 @@ import {
   sanitizeLogArg,
   sanitizeLogArgs,
 } from "./safe-console";
-import { safeErrorFields } from "./safe-error-fields";
+import { FIXED_ERROR_MESSAGES, safeErrorFields } from "./safe-error-fields";
 
 // Obviously fake values, never real people.
 const CLERK_ID = "user_2FAKECLERKID123";
@@ -177,13 +181,13 @@ describe("sanitizeLogArgs", () => {
     }
   });
 
-  it("keeps harmless fixed text, Error lines included", () => {
+  it("keeps harmless fixed text, and an Error line with an allow-listed message", () => {
     for (const text of [
       "Error: AI_GATEWAY_API_KEY is not set",
+      "DeadlineError: pre-check deadline passed",
+      "JoinCodeExhaustedError: Could not generate a unique join code in 5 attempts",
       "where: createReading",
       "  where: createReading",
-      "TypeError: Failed to fetch",
-      "AbortError: This operation was aborted",
       "createReading: insertReading failed",
       "join_blocked_config",
       "qa-create-action started run=self-network-ConnectionClosed-12",
@@ -196,6 +200,45 @@ describe("sanitizeLogArgs", () => {
       assert.equal(redactLogText(text), text, text);
       assert.equal(sanitizeLogArg(text), text, text);
     }
+  });
+
+  it("redacts every Error line whose message isn't exactly an allow-listed one", () => {
+    for (const text of [
+      // Letters only, but a name and a title.
+      "TypeError: Student Maya Ro joined The Very Hungry Caterpillar",
+      "TypeError: Failed to fetch",
+      "AbortError: This operation was aborted",
+      // An allow-listed message with text after it.
+      "Error: AI_GATEWAY_API_KEY is not set for maya@x.com",
+      "Error: AI_GATEWAY_API_KEY is not set extra",
+      "Error: AI_GATEWAY_API_KEY is not set.",
+      // Or before it.
+      "Error: Maya AI_GATEWAY_API_KEY is not set",
+      "Error:  AI_GATEWAY_API_KEY is not set",
+      "Error: ",
+      // One fine line does not keep another.
+      "Error: AI_GATEWAY_API_KEY is not set\nTypeError: Student Maya Ro",
+    ]) {
+      assert.equal(looksLikeErrorDump(text), true, text);
+      assert.equal(sanitizeLogArg(text), REDACTED_TEXT, text);
+    }
+  });
+
+  it("FIXED_ERROR_MESSAGES holds our own classes' messages exactly", () => {
+    const own = [
+      new DeadlineError(),
+      new DbReadTimeoutError(1000),
+      new JoinCodeExhaustedError(),
+      new ClerkUserNoEmailError(),
+      ...(["invalid_url", "blocked", "timeout", "too_large", "not_html", "http_error", "extract_failed", "too_long"] as const).map(
+        (kind) => new FetchArticleError(kind),
+      ),
+    ];
+    for (const error of own) {
+      assert.ok(FIXED_ERROR_MESSAGES.has(error.message), error.message);
+      assert.equal(redactLogText(String(error)), String(error));
+    }
+    assert.equal(FIXED_ERROR_MESSAGES.size, own.length + 1);
   });
 
   it("redacts a bare Postgres message that can echo row values", () => {
@@ -219,6 +262,7 @@ describe("sanitizeLogArgs", () => {
       'Error: invalid value "FAKE"',
       "Error: no row for id 12",
       "Error: fetch failed: https://fake.example.invalid/x",
+      `Error: no user for ${LETTERS_CLERK_ID}`,
     ]) {
       assert.equal(looksLikeErrorDump(text), true, text);
       assert.equal(sanitizeLogArg(text), REDACTED_TEXT, text);
@@ -236,7 +280,6 @@ describe("sanitizeLogArgs", () => {
       // A Clerk id with no digit at all.
       [`lookup ${LETTERS_CLERK_ID}`, `lookup ${REDACTED_PART}`],
       ["session sess_FakeSessionIdLettersOnly done", `session ${REDACTED_PART} done`],
-      [`Error: no user for ${LETTERS_CLERK_ID}`, `Error: no user for ${REDACTED_PART}`],
       [`hash ${TOKEN_HASH}`, `hash ${REDACTED_PART}`],
       ["auth Bearer abc.def.ghi", `auth ${REDACTED_PART}`],
       ["key sk_live_FAKE1234567890", `key ${REDACTED_PART}`],

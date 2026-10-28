@@ -259,6 +259,11 @@ describe("safeErrorFields message", () => {
       new NeonDbError(`connection string: postgresql://${CLERK_ID}@db.invalid`),
       // An own error is only allowed at the top, not as a cause.
       new Error(READING_TEXT, { cause: new JoinCodeExhaustedError() }),
+      // An allowed class whose message isn't exactly a listed one.
+      Object.assign(new DeadlineError(), { message: `pre-check deadline passed for ${CLERK_ID}` }),
+      Object.assign(new FetchArticleError("blocked"), { message: READING_TEXT }),
+      // A listed message on a class that isn't allowed.
+      new Error("pre-check deadline passed"),
       READING_TEXT,
       { message: READING_TEXT, name: CLERK_ID },
       null,

@@ -21,9 +21,11 @@
 // - any other object (a Map, a Set, a Date, a URL, a class instance) with
 //   its class name only, { redacted: "Map", size: 2 } or
 //   { redacted: "Box" }: its contents are never printed;
-// - text, by redactLogText: an error dump or a database message that can
-//   echo a row becomes REDACTED_TEXT, and a URL, an email, an IP, or a
-//   token-shaped value inside other text becomes REDACTED_PART.
+// - text, by redactLogText: an error dump, a database message that can
+//   echo a row, or an error line ("TypeError: ...") whose message isn't
+//   one of FIXED_ERROR_MESSAGES becomes REDACTED_TEXT, and a URL, an
+//   email, an IP, or a token-shaped value inside other text becomes
+//   REDACTED_PART.
 // Other arguments (numbers, booleans, functions) are passed through.
 //
 // It never throws: a getter or proxy trap that throws, or a toString that
@@ -35,7 +37,7 @@
 // guard for a caught error is the lint rule (unpack/no-raw-error-log),
 // which keeps raw errors, and text taken from them, away from log calls.
 
-import { safeErrorFields } from "./safe-error-fields";
+import { FIXED_ERROR_MESSAGES, safeErrorFields } from "./safe-error-fields";
 
 export const CONSOLE_METHODS = ["error", "warn", "log", "info", "debug", "trace", "dir", "assert"] as const;
 
@@ -103,11 +105,10 @@ const DATABASE_MESSAGE_PATTERNS = [
 
 // "SomeError: message" (or "Error [CODE]: message") at a line start: what
 // String(error) and a stack's first line look like. Kept only when the
-// message is fixed text: letters, spaces, underscores, and plain
-// punctuation. A digit, a quote, or anything that frames a value
-// (= : / @ $ { [ < and the like) redacts the whole text.
+// message is exactly one of FIXED_ERROR_MESSAGES (safe-error-fields.ts);
+// any other message redacts the whole text, however plain it looks: a
+// name, a title, or a reading's sentence is letters and commas too.
 const ERROR_LINE = /^\s*[A-Za-z]*(Error|Exception)(\s\[[\w-]+\])?: (.*)$/gm;
-const FIXED_TEXT = /^[A-Za-z_ ,.;!?()’-]*$/;
 
 // Parts of other text that are data: replaced, the rest kept.
 const PART_PATTERNS = [
@@ -135,20 +136,20 @@ const PART_PATTERNS = [
   /(?=[A-Za-z0-9+/_-]*[a-z])(?=[A-Za-z0-9+/_-]*[A-Z])(?=[A-Za-z0-9+/_-]*\d)[A-Za-z0-9+/_-]{40,}={0,2}/g,
 ];
 
-function hasUnfixedErrorLine(text: string): boolean {
+function hasUnlistedErrorLine(text: string): boolean {
   for (const match of text.matchAll(ERROR_LINE)) {
-    if (!FIXED_TEXT.test(match[3])) return true;
+    if (!FIXED_ERROR_MESSAGES.has(match[3])) return true;
   }
   return false;
 }
 
 // True when the whole text is to go: an error dump, a database message,
-// or an error line whose message isn't fixed text.
+// or an error line whose message isn't one of FIXED_ERROR_MESSAGES.
 export function looksLikeErrorDump(text: string): boolean {
   return (
     DUMP_PATTERNS.some((pattern) => pattern.test(text)) ||
     DATABASE_MESSAGE_PATTERNS.some((pattern) => pattern.test(text)) ||
-    hasUnfixedErrorLine(text)
+    hasUnlistedErrorLine(text)
   );
 }
 
