@@ -109,8 +109,9 @@ export function instanceAgeMs(): number | undefined {
 // data is loaded. questionsMs covers resolving the questions (the shared
 // read, or the per-student lookup and any write); totalMs covers the
 // page's server data from its start (session, reading, questions,
-// progress). readingId only when it is a uuid (it comes from the URL).
-// Fields are picked by name, so an extra property is never logged.
+// progress). readingId is the loaded reading's id, absent when none was
+// found (a 404); the URL param is never logged. Fields are picked by
+// name, so an extra property is never logged.
 export function logPageReady(
   fields: {
     readingId?: string;
