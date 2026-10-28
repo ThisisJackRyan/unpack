@@ -1,10 +1,12 @@
 // The pure parts of scripts/list-pending-clerk-deletes.ts: argument
-// parsing, the report lines, the Clerk paging, and the hash matching.
+// parsing, the report lines, the Clerk paging (shared with
+// scripts/lib/roleless-clerk-sweep.ts), and the hash matching.
 // Tests cover them (pending-clerk-deletes.test.ts).
 //
 // Nothing personal is ever printed: a pending row is shown as a short
-// prefix of its hash and its age; a Clerk user only as its id (read from
-// the user object and nothing else).
+// prefix of its hash and its age; a Clerk user only as its id (only the
+// id and three timestamps, created_at, last_sign_in_at and last_active_at,
+// are read from the user object).
 
 import { hashClerkUserId } from "@/lib/deleted-accounts";
 
@@ -87,18 +89,50 @@ export class ClerkListError extends Error {
   name = "ClerkListError";
 }
 
-export type FetchLike = (url: string, init: { headers: Record<string, string> }) => Promise<{
+export type FetchLike = (url: string, init: { method?: "DELETE"; headers: Record<string, string> }) => Promise<{
   ok: boolean;
   status: number;
   json: () => Promise<unknown>;
 }>;
 
-// Every Clerk user id, page by page (oldest first, so a user created
-// while this runs only adds to the last page). Reads only `id` from each
-// user object. Throws with the HTTP status only (never the body, which
+// A Clerk user as the ops scripts see it: the id, when it was created
+// (Clerk's created_at, milliseconds), and when it was last seen: the
+// latest of created_at, last_sign_in_at and last_active_at. Nothing else.
+// createdAt is null if created_at is not a number. lastSeenAt is null if
+// createdAt is, or if last_sign_in_at or last_active_at is anything but a
+// number or null (missing or garbage: unknown, so never old enough); a
+// null last_* just falls back to created_at.
+export type ClerkUserRef = { id: string; createdAt: number | null; lastSeenAt: number | null };
+
+function timestamp(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function clerkUserRef(user: unknown): ClerkUserRef | null {
+  const {
+    id,
+    created_at: rawCreated,
+    last_sign_in_at: rawSignIn,
+    last_active_at: rawActive,
+  } = (user ?? {}) as { id?: unknown; created_at?: unknown; last_sign_in_at?: unknown; last_active_at?: unknown };
+  if (typeof id !== "string" || !id) return null;
+  const createdAt = timestamp(rawCreated);
+  let lastSeenAt = createdAt;
+  for (const raw of [rawSignIn, rawActive]) {
+    if (raw === null || lastSeenAt === null) continue;
+    const at = timestamp(raw);
+    lastSeenAt = at === null ? null : Math.max(lastSeenAt, at);
+  }
+  return { id, createdAt, lastSeenAt };
+}
+
+// Every Clerk user, page by page (oldest first, so a user created while
+// this runs only adds to the last page). Reads only `id`, `created_at`,
+// `last_sign_in_at` and `last_active_at` from each user object
+// (clerkUserRef). Throws with the HTTP status only (never the body, which
 // could hold user data, nor the key).
-export async function listClerkUserIds(fetchFn: FetchLike, secretKey: string, pageSize = CLERK_PAGE_SIZE): Promise<string[]> {
-  const ids: string[] = [];
+export async function listClerkUsers(fetchFn: FetchLike, secretKey: string, pageSize = CLERK_PAGE_SIZE): Promise<ClerkUserRef[]> {
+  const users: ClerkUserRef[] = [];
   for (let offset = 0; ; offset += pageSize) {
     const url = `${CLERK_USERS_URL}?limit=${pageSize}&offset=${offset}&order_by=%2Bcreated_at`;
     const response = await fetchFn(url, { headers: { authorization: `Bearer ${secretKey}` } });
@@ -107,9 +141,14 @@ export async function listClerkUserIds(fetchFn: FetchLike, secretKey: string, pa
     const page = Array.isArray(body) ? body : ((body as { data?: unknown })?.data ?? []);
     if (!Array.isArray(page)) throw new ClerkListError("Clerk users list: unexpected response shape");
     for (const user of page) {
-      const id = (user as { id?: unknown })?.id;
-      if (typeof id === "string" && id) ids.push(id);
+      const ref = clerkUserRef(user);
+      if (ref) users.push(ref);
     }
-    if (page.length < pageSize) return ids;
+    if (page.length < pageSize) return users;
   }
+}
+
+// Every Clerk user id (listClerkUsers, ids only).
+export async function listClerkUserIds(fetchFn: FetchLike, secretKey: string, pageSize = CLERK_PAGE_SIZE): Promise<string[]> {
+  return (await listClerkUsers(fetchFn, secretKey, pageSize)).map((u) => u.id);
 }

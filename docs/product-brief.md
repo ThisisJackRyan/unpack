@@ -18,7 +18,7 @@ Students read an article, then answer a short AI-generated questionnaire, and th
 6. After 3 tries, the student can send their teacher a **note**. The teacher can **Accept** it (the reading counts as Passed) or **Deny** it, optionally giving **one more try**. Without a note, the teacher can press **Give one more try** on the queue's "Out of tries, no note yet" row: it is saved as a denied round with an empty note, the student gets 1 more try (+2 checks), and the row leaves the queue. Extra tries are the teacher's call, one at a time, with no cap.
 
 ## Self-learner loop (PR 13)
-1. After signing in, a new account picks "I’m a teacher" or "I’m reading for myself" (confirming they're 13 or older). It can switch later in Settings; nothing is deleted on a switch.
+1. After signing in, a new account picks "I’m a teacher" or "I’m reading for myself" (confirming they're 13 or older). It can switch later in Settings; nothing is deleted on a switch. A Clerk account that never picks a teacher or self-learner role (for example, someone who stopped at the age step on `/welcome`) is deleted from Clerk, its email included, without any warning, once it was created and last used at least 7 days ago, by the manual ops sweep (`pnpm ops:sweep-roleless-clerk-users`, run by hand). Only a hash of its Clerk id is kept, for 30 days after the delete.
 2. They paste a link or text and pick a reading level and number of questions.
 3. AI writes their own questions for that reading.
 4. They answer; the same effort check gives pass or fail with nudges, up to 3 tries.
