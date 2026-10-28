@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { TIMED_OUT_STATE, type AnswerFormState } from "@/components/answer-form-state";
 import { requireSelfLearner } from "@/lib/account";
+import { guardAnswerCheck, withDeadline } from "@/lib/answer-check-guard";
 import { isQuestionWritingConfigured } from "@/lib/ai/client";
 import { soloSubmitMessage } from "@/lib/self-answers-core";
 import { submitSelfAnswers } from "@/lib/self-readings";
@@ -11,8 +12,6 @@ import { CHECK_FAILED_MESSAGE } from "@/lib/submit-answers-core";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
-
-const SUBMIT_FAILED_MESSAGE = "Something went wrong. Try again.";
 
 // Checks every answer at once (one effort check) and saves the try, with
 // all the student rules enforced in submitSelfAnswers (owner, these exact
@@ -24,25 +23,26 @@ export async function submitSelfAnswersAction(
   _prev: AnswerFormState,
   formData: FormData,
 ): Promise<AnswerFormState> {
-  try {
-    return await checkSelfAnswers(readingId, formData);
-  } catch (error) {
+  return guardAnswerCheck((preCheck) => checkSelfAnswers(readingId, formData, preCheck), {
     // requireSelfLearner's redirects are errors Next must handle.
-    unstable_rethrow(error);
-    // Name, code, and message only: an error's detail can echo an answer.
-    const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-    console.error("submitSelfAnswersAction: submit failed", { name, code, message, readingId });
-    return { message: SUBMIT_FAILED_MESSAGE };
-  }
+    rethrow: unstable_rethrow,
+    onError: (error) => {
+      // Name, code, and message only: an error's detail can echo an answer.
+      const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
+      console.error("submitSelfAnswersAction: submit failed", { name, code, message, readingId });
+    },
+  });
 }
 
-async function checkSelfAnswers(readingId: string, formData: FormData): Promise<AnswerFormState> {
-  const account = await requireSelfLearner();
+async function checkSelfAnswers(readingId: string, formData: FormData, preCheck: AbortSignal): Promise<AnswerFormState> {
+  // Its redirects (signed out, not a self-learner) come through the
+  // deadline as they are.
+  const account = await withDeadline(requireSelfLearner(), preCheck);
   // Without AI Gateway credentials every check would fail (given back,
   // but filling the outage window), so don't start one.
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
-  const result = await submitSelfAnswers(account.id, readingId, answerEntries(formData.entries()));
+  const result = await submitSelfAnswers(account.id, readingId, answerEntries(formData.entries()), { preCheck });
   const refresh = () => {
     revalidatePath(`/learn/r/${readingId}`);
     revalidatePath("/learn");

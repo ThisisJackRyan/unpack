@@ -334,6 +334,37 @@ async function checkModelFailureAndLimit() {
   const afterTimeout = await submit(slow, "fail", { delayMs: 20 });
   check(afterTimeout.status === "checked" && afterTimeout.tryNumber === 1, `after a timeout, the next submit uses try 1: ${afterTimeout.status}`);
 
+  // The request dying before the claim (the database down, or the
+  // lookups past the action's pre-check deadline): no effort_checks row,
+  // no try, and the next submit starts fresh.
+  const early = await newStudent();
+  const entries = answers(await openQuestionIds(execute, early, readingId));
+  const earlyCalls = modelCalls;
+  const down = await submitAnswers(early, readingId, entries, {
+    check: fakeChecker("pass"),
+    execute: async () => {
+      throw new Error("fake database down");
+    },
+  }).then(
+    () => "returned",
+    (e: Error) => e.message,
+  );
+  const late = await submitAnswers(early, readingId, entries, {
+    check: fakeChecker("pass"),
+    execute,
+    preCheck: AbortSignal.abort(),
+  }).then(
+    () => "returned",
+    (e: Error) => e.name,
+  );
+  c = await counts(early);
+  check(
+    down === "fake database down" && late === "DeadlineError" && c.checks === 0 && c.attempts === 0 && modelCalls === earlyCalls,
+    `before the claim: ${down}, ${late}, checks ${c.checks}, attempts ${c.attempts}, model calls ${modelCalls - earlyCalls}`,
+  );
+  const afterEarly = await submit(early, "fail", { delayMs: 5 });
+  check(afterEarly.status === "checked" && afterEarly.tryNumber === 1, `after a failure before the claim, try 1: ${afterEarly.status}`);
+
   const limited = await newStudent();
   for (let i = 0; i < EFFORT_CHECK_LIMIT; i++) await submit(limited, "error", { delayMs: 5 });
   const before = modelCalls;

@@ -90,6 +90,7 @@
 // Every database error propagates, so the caller fails closed.
 
 import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
+import { withDeadline } from "./deadline";
 import { EffortCheckError, effortErrorKind, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
 import type { GradeLevel } from "./grade-levels";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
@@ -198,6 +199,9 @@ export type SubmitDeps = {
   newId: () => string;
   // Logs safe fields only (never the text, answers, or names).
   onError?: (error: unknown) => void;
+  // Bounds the lookup before the claim (see answer-check-guard.ts): past
+  // it, a DeadlineError, and nothing was written.
+  preCheck?: AbortSignal;
 };
 
 // Only the questions checked on this try (not the locked ones).
@@ -245,7 +249,7 @@ export async function submitAnswersWith(
   deps: SubmitDeps,
 ): Promise<SubmitResult> {
   const { store } = deps;
-  const lookup = await store.loadContext(studentId, readingId);
+  const lookup = await withDeadline(store.loadContext(studentId, readingId), deps.preCheck);
   if (lookup.status !== "ok") return { status: "not_found" };
   const { context } = lookup;
   if (context.passed) return { status: "already_passed" };

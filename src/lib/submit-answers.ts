@@ -30,6 +30,8 @@ export type SubmitAnswersOptions = {
   // calls) and a throttled executor. The app passes nothing.
   check?: EffortChecker;
   execute?: StatementExecutor;
+  // The answer action's pre-check deadline (see answer-check-guard.ts).
+  preCheck?: AbortSignal;
 };
 
 export async function submitAnswers(
@@ -43,6 +45,7 @@ export async function submitAnswers(
     store: postgresAttemptStore(options.execute ?? neonExecutor),
     check: options.check ?? modelChecker,
     newId: randomUUID,
+    preCheck: options.preCheck,
     onError: (error) =>
       logModelError("submitAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
   });

@@ -4,6 +4,7 @@ import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
 import { checkEffort, EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
 import type { ModelReply } from "./ai/model";
 import { QuestionWriterError, type QuestionModel } from "./ai/questions";
+import { DeadlineError } from "./deadline";
 import type { Statement } from "./link-rate-limit";
 import {
   ALREADY_PASSED_MESSAGE,
@@ -498,6 +499,46 @@ describe("submitAnswersWith", () => {
   it("a plain failure is still check_failed, not timed_out", async () => {
     const { store } = fakeStore();
     assert.deepEqual(await submit(store, fakeChecker(() => new Error("fetch failed")).check), { status: "check_failed" });
+  });
+
+  it("a lookup that fails before the claim propagates, with no check claimed and no try saved", async () => {
+    const { store, attempts, checks } = fakeStore();
+    const down = new Error("fetch failed");
+    store.loadContext = async () => {
+      throw down;
+    };
+    const checker = fakeChecker();
+    await assert.rejects(submit(store, checker.check), (e: unknown) => e === down);
+    assert.equal(checks.length, 0, "no effort_checks row");
+    assert.equal(attempts.length, 0);
+    assert.equal(checker.calls(), 0);
+  });
+
+  it("a lookup that hangs past the pre-check deadline is a DeadlineError, with nothing written", async () => {
+    const { store, attempts, checks } = fakeStore();
+    store.loadContext = () => new Promise(() => {});
+    const checker = fakeChecker();
+    const preCheck = new AbortController();
+    const r = submitAnswersWith(STUDENT, READING, ANSWERS, { store, check: checker.check, newId, preCheck: preCheck.signal });
+    preCheck.abort();
+    await assert.rejects(r, DeadlineError);
+    assert.equal(checks.length, 0, "no effort_checks row");
+    assert.equal(attempts.length, 0);
+    assert.equal(checker.calls(), 0);
+  });
+
+  it("the pre-check deadline ends at the claim: a slow check after it still saves the try", async () => {
+    const { store, attempts } = fakeStore();
+    const preCheck = new AbortController();
+    const checker = fakeChecker();
+    const slow: EffortChecker = async (input, hooks) => {
+      // Past the pre-check deadline, mid check.
+      preCheck.abort();
+      return checker.check(input, hooks);
+    };
+    const r = await submitAnswersWith(STUDENT, READING, ANSWERS, { store, check: slow, newId, preCheck: preCheck.signal });
+    assert.equal(r.status === "checked" && r.tryNumber, 1);
+    assert.equal(attempts.length, 1);
   });
 
   it("a failure with no model reply is given back: never toward the limit, only the short window", async () => {

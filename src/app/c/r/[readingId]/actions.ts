@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
+import { guardAnswerCheck, withDeadline } from "@/lib/answer-check-guard";
 import { isQuestionWritingConfigured } from "@/lib/ai/client";
 import { sendChallenge, type ChallengeResult } from "@/lib/challenges";
 import { CHALLENGE_FAILED_MESSAGE, challengeMessage } from "@/lib/challenges-core";
@@ -12,8 +13,6 @@ import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
 import { TIMED_OUT_STATE, type AnswerFormState, type ChallengeFormState } from "./form-state";
-
-const SUBMIT_FAILED_MESSAGE = "Something went wrong. Try again.";
 
 // Name, code, and message only: a Postgres error's detail can echo the
 // row, including a student's answer or name.
@@ -33,31 +32,30 @@ function refresh(readingId: string) {
 // one check at a time, the check limit) are enforced server side in
 // submitAnswers; the form's own limits are only a convenience. Never
 // throws, except Next's redirect: any error (the session lookup, the
-// database, the model) is a message in the form, which keeps the answers.
+// database, the model) is a message in the form, which keeps the answers,
+// and the lookups before the claim have a short deadline (see
+// guardAnswerCheck). Fail closed: nothing is checked when the database
+// can't say it's OK.
 export async function submitAnswersAction(
   readingId: string,
   _prev: AnswerFormState,
   formData: FormData,
 ): Promise<AnswerFormState> {
-  try {
-    return await checkAnswers(readingId, formData);
-  } catch (error) {
+  return guardAnswerCheck((preCheck) => checkAnswers(readingId, formData, preCheck), {
     // redirect("/join") (no session) is an error Next must handle.
-    unstable_rethrow(error);
-    // Fail closed: nothing is checked when the database can't say it's OK.
-    logError("submitAnswersAction: submit failed", error, readingId);
-    return { message: SUBMIT_FAILED_MESSAGE };
-  }
+    rethrow: unstable_rethrow,
+    onError: (error) => logError("submitAnswersAction: submit failed", error, readingId),
+  });
 }
 
-async function checkAnswers(readingId: string, formData: FormData): Promise<AnswerFormState> {
-  const session = await getStudentSession();
+async function checkAnswers(readingId: string, formData: FormData, preCheck: AbortSignal): Promise<AnswerFormState> {
+  const session = await withDeadline(getStudentSession(), preCheck);
   if (!session) redirect("/join");
   // Without AI Gateway credentials every check would fail (given back,
   // but filling the outage window), so don't start one.
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
-  const result = await submitAnswers(session.student.id, readingId, answerEntries(formData.entries()));
+  const result = await submitAnswers(session.student.id, readingId, answerEntries(formData.entries()), { preCheck });
   switch (result.status) {
     case "checked":
       refresh(readingId);
