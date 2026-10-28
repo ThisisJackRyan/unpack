@@ -110,7 +110,7 @@ function errorFields(error: unknown): { name?: unknown; code?: unknown; status?:
 }
 
 // Clerk says the account doesn't exist (already deleted).
-function isNotFound(error: unknown): boolean {
+export function isNotFound(error: unknown): boolean {
   return errorFields(error).status === 404;
 }
 

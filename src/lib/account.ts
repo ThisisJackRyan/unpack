@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { db, schema } from "@/db";
 import type { Teacher } from "@/db/schema";
+import { clerkUserOrNull } from "./clerk-user";
 import { ACCOUNT_DELETED_PATH, createAccountStatements } from "./deleted-accounts";
 import { roleRedirect, setRoleOutcome, setRoleStatements, type AccountRole, type Area, type SetRoleOutcome } from "./account-role";
 import type { StatementExecutor } from "./link-rate-limit";
@@ -36,7 +37,8 @@ export const getOrCreateAccount = cache(async (): Promise<Account> => {
     .limit(1);
   if (existing) return existing;
 
-  const user = await currentUser();
+  // Gone in Clerk (a 404) is no user too: see clerk-user.ts.
+  const user = await clerkUserOrNull(() => currentUser());
   if (!user) {
     return redirectToSignIn();
   }
