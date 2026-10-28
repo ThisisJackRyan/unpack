@@ -125,8 +125,10 @@ const PART_PATTERNS = [
   /\b(sk|pk|rk)_(live|test)_[A-Za-z0-9]+/g,
   /\bwhsec_[A-Za-z0-9+/=]+/g,
   /\b(password|passwd|pwd|secret|token|api[_-]?key|apikey|authorization|cookie)\s*[=:]\s*[^\s,;&]+/gi,
-  // A Clerk id (user_2abc..., sess_..., org_...).
-  /\b(user|sess|org|client|sms|idn|inv)_(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{10,}\b/g,
+  // A Clerk id (user_2abc..., sess_..., org_...): 20 or more characters
+  // after the prefix, digits or not (a base62 id can have none), or a
+  // shorter one with a digit.
+  /\b(user|sess|org|client|sms|idn|inv)_([A-Za-z0-9]{20,}|(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{10,})\b/g,
   // A hash or token: a long run of letters and digits (a uuid's parts
   // are shorter), or a longer base64 run with mixed case and digits.
   /\b(?=[A-Za-z0-9_]*\d)(?=[A-Za-z0-9_]*[A-Za-z])[A-Za-z0-9_]{24,}\b/g,

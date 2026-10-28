@@ -28,6 +28,7 @@ import { safeErrorFields } from "./safe-error-fields";
 
 // Obviously fake values, never real people.
 const CLERK_ID = "user_2FAKECLERKID123";
+const LETTERS_CLERK_ID = "user_AbCdEfGhIjKlMnOpQrStUvWxYzA";
 const TOKEN = "FAKE-session-token-for-tests";
 const TOKEN_HASH = hashSessionToken(TOKEN);
 const DETAIL = "FAKE-DETAIL-MARKER";
@@ -232,6 +233,10 @@ describe("sanitizeLogArgs", () => {
       ["from fake.person@example.invalid today", `from ${REDACTED_PART} today`],
       ["ip 203.0.113.7 refused", `ip ${REDACTED_PART} refused`],
       [`clerk ${CLERK_ID} missing`, `clerk ${REDACTED_PART} missing`],
+      // A Clerk id with no digit at all.
+      [`lookup ${LETTERS_CLERK_ID}`, `lookup ${REDACTED_PART}`],
+      ["session sess_FakeSessionIdLettersOnly done", `session ${REDACTED_PART} done`],
+      [`Error: no user for ${LETTERS_CLERK_ID}`, `Error: no user for ${REDACTED_PART}`],
       [`hash ${TOKEN_HASH}`, `hash ${REDACTED_PART}`],
       ["auth Bearer abc.def.ghi", `auth ${REDACTED_PART}`],
       ["key sk_live_FAKE1234567890", `key ${REDACTED_PART}`],
