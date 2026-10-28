@@ -17,7 +17,10 @@
 //                answers: the driver posts to https://localhost/sql and the
 //                connection is refused, as in the reviewer's repro.
 // In each it opens /join, /c, and /c/r/<id> (generateMetadata) with a fake
-// student session cookie, then reads everything the server printed. It
+// student session cookie, and calls sendChallengeAction (a server action
+// whose session lookup is outside its try; its id is read from the build's
+// server-reference-manifest.json), then reads everything the server
+// printed. It
 // fails if the output holds "Failed query", "params:", "detail:", "hint:",
 // "where:", the cookie, its SHA-256 hash, a stub marker, or the fake Clerk
 // id; and also if the safe fields are missing (DrizzleQueryError and a
@@ -25,7 +28,7 @@
 // names are printed, never the values. The servers are always stopped.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -172,6 +175,16 @@ globalThis.fetch = async function (input, init) {
 
 // expect: what the logged cause chain shows when the mode worked (the
 // stub's SQLSTATE, or the refused connection).
+// The built id of a server action, from .next.
+function actionId(file: string, exportedName: string): string {
+  const manifest = JSON.parse(readFileSync(".next/server/server-reference-manifest.json", "utf8")) as {
+    node: Record<string, { filename?: string; exportedName?: string }>;
+  };
+  const found = Object.entries(manifest.node).find(([, entry]) => entry.filename === file && entry.exportedName === exportedName);
+  if (!found) throw new Error(`no server action ${exportedName} in ${file} in the build`);
+  return found[0];
+}
+
 type Mode = { name: string; env: Record<string, string>; expect: RegExp };
 
 async function checkMode(mode: Mode) {
@@ -201,6 +214,26 @@ async function checkMode(mode: Mode) {
       );
       if (digest) digests.push(digest);
     }
+    // The action as the browser's form would call it: React's encoded
+    // reply (readingId, the previous state, the FormData).
+    const body = new FormData();
+    body.append("0", JSON.stringify([readingId, {}, "$K1"]));
+    body.append("1_note", "a note");
+    const action = await fetch(`http://127.0.0.1:${port}/c/r/${readingId}`, {
+      method: "POST",
+      headers: {
+        "next-action": actionId("src/app/c/r/[readingId]/actions.ts", "sendChallengeAction"),
+        origin: `http://127.0.0.1:${port}`,
+        accept: "text/x-component",
+        cookie: `${STUDENT_SESSION_COOKIE}=${TOKEN}`,
+      },
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
+    const actionDigest = /"digest":"([A-Za-z0-9@_-]+)"/.exec(await action.text())?.[1];
+    check(action.status === 500 && !!actionDigest, `${mode.name}: sendChallengeAction failed with an uncaught server error`, String(action.status));
+    if (actionDigest) digests.push(actionDigest);
     // onRequestError and the stream's last writes.
     await sleep(1_500);
     const output = log.join("");
@@ -218,6 +251,7 @@ async function checkMode(mode: Mode) {
       `${digests.length} digest(s) in the pages`,
     );
     check(/routePath: '\/c\/r\/\[readingId\]'/.test(output), `${mode.name}: onRequestError logged the route pattern`);
+    check(/routeType: 'action'/.test(output), `${mode.name}: onRequestError logged the action's error`);
     if (failures > 0) {
       // The server's output with every forbidden value replaced by its name.
       let redacted = output;

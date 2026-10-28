@@ -177,6 +177,7 @@ function boundNames(pattern, derived, out) {
   return out;
 }
 
+/** @type {import("eslint").Rule.RuleModule} */
 const rule = {
   meta: {
     type: "problem",
