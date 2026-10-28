@@ -12,6 +12,7 @@ import {
 import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { MaxLengthNote } from "@/components/max-length-note";
+import { TrimmedNote } from "@/components/trimmed-note";
 import { withRejectionFallback } from "@/components/action-fallback";
 import { noReplyParts, readingFormFallback, readingsListHref } from "@/components/reading-form-fallback";
 import { field, optionCard, optionRadio, primaryButton, quietButton, secondaryButton, textLink } from "@/components/ui";
@@ -76,6 +77,10 @@ type Props = {
   initialValues?: ReadingFormValues;
   // Edit only: where the saved text came from.
   sourceHost?: string;
+  // Edit only: the saved text is a long article's first part
+  // (readings.body_trimmed). The note describes the saved text, so it
+  // stays while the teacher types; saving changed text clears the flag.
+  bodyTrimmed?: boolean;
 };
 
 function describedBy(...ids: (string | false | undefined)[]) {
@@ -90,6 +95,7 @@ export function ReadingForm({
   cancelHref,
   initialValues = EMPTY_READING_VALUES,
   sourceHost,
+  bodyTrimmed = false,
 }: Props) {
   // A request that fails outright (no answer, a 504, a lapsed session, a
   // deploy) is a message in this form with every value kept, never the
@@ -108,6 +114,7 @@ export function ReadingForm({
   const create = mode === "create" || solo;
   const titleOnly = mode === "title";
   const noReply = noReplyParts(errors.form, readingsListHref(mode, classId));
+  const trimmedNote = mode === "edit" && bodyTrimmed;
 
   // The panels switch with CSS alone; this mirrors the checked source radio
   // for the pending label and the length check.
@@ -287,6 +294,7 @@ export function ReadingForm({
             <label htmlFor="bodyText" className={label}>
               {create ? "Reading text" : "Text"}
             </label>
+            {trimmedNote && <TrimmedNote id="body-trimmed" />}
             <textarea
               ref={textareaRef}
               id="bodyText"
@@ -298,6 +306,7 @@ export function ReadingForm({
               }
               aria-invalid={bodyError ? true : undefined}
               aria-describedby={describedBy(
+                trimmedNote && "body-trimmed",
                 "body-hint",
                 "body-count",
                 bodyError && "body-error",

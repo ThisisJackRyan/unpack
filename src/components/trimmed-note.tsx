@@ -3,10 +3,12 @@ export const TRIMMED_NOTE_MESSAGE = "This article was long, so we kept the first
 // Above the text of a linked article that was cut to the length limit
 // (readings.body_trimmed). A heads-up, not an error: soft amber (never
 // red), one line, not dismissible. role="note", so a screen reader reads
-// it with the text instead of announcing it; the icon is decorative.
-export function TrimmedNote({ className = "" }: { className?: string }) {
+// it with the text instead of announcing it; the icon is decorative. The
+// id lets a text box point at it (aria-describedby).
+export function TrimmedNote({ id, className = "" }: { id?: string; className?: string }) {
   return (
     <p
+      id={id}
       role="note"
       className={`flex w-fit items-start gap-2 rounded-xl border border-warning-200 bg-warning-50 px-3 py-2 text-base font-medium text-warning-950 ${className}`}
     >

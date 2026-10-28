@@ -41,6 +41,7 @@ export default async function EditReadingPage({ params }: Props) {
           classGradeLabel={gradeLevelLabel(found.gradeLevel)}
           cancelHref={readingHref}
           sourceHost={sourceHost(reading.sourceUrl)}
+          bodyTrimmed={reading.bodyTrimmed}
           initialValues={{
             source: "text",
             url: "",
