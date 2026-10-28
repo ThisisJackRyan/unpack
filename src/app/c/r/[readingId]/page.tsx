@@ -5,7 +5,7 @@ import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { backLink, card } from "@/components/ui";
 import { questionCountLabel } from "@/lib/question-modes";
-import { answerStage, stageAnnouncement, type AnswerStage } from "@/lib/reading-progress";
+import { answerStage, stageAnnouncement, stageStatus, stageWaitsForTeacher, type AnswerStage } from "@/lib/reading-progress";
 import { loadReadingProgress } from "@/lib/reading-progress-db";
 import { getStudentSession, requireStudentSession } from "@/lib/student-auth";
 import type { StudentQuestion } from "@/lib/student-questions-core";
@@ -21,6 +21,7 @@ import { PassCelebration } from "@/components/celebration";
 import { ChallengeForm } from "./challenge-form";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
 import { MetaLine } from "@/components/meta-line";
+import { StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
 
 // A student's first open of a unique per student reading writes their set,
 // which QUESTION_WRITE_DEADLINE_MS (110s, in src/lib/ai/settings.ts) ends
@@ -89,6 +90,13 @@ export default async function StudentReadingPage({ params }: Props) {
 
         {view.kind === "questions" && stage && (
           <>
+            {/* The class home's badge, right after the last try or check:
+                the teacher is next, and the note box stays below. */}
+            {stageWaitsForTeacher(stage) && (
+              <div className="self-start">
+                <StudentReadingStatusBadge audience="student" status={stageStatus(stage)} />
+              </div>
+            )}
             <QuestionsStage readingId={reading.id} studentId={session.student.id} questions={view.questions} stage={stage} />
             {stage.kind !== "answer" && (
               <ClearAnswerDrafts

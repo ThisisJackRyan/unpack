@@ -138,6 +138,29 @@ export function answerStage(progress: ReadingProgress): AnswerStage {
   return { kind: "answer", tryNumber: attempts.length + 1, maxTries: limits.tries, previous: latest, extraTry };
 }
 
+// The class home status (studentReadingStatus) for a reading page stage,
+// so the page and the list agree. The page shows it as a badge only when
+// the next step is the teacher's (Waiting for your teacher): out of tries
+// or every check used, with the note box still there, and a sent note.
+export function stageStatus(stage: AnswerStage): StudentReadingStatus {
+  switch (stage.kind) {
+    case "answer":
+      return stage.previous || stage.extraTry ? "in_progress" : "not_started";
+    case "passed":
+      return "passed";
+    case "out_of_tries":
+    case "check_limit":
+      return "waiting";
+    case "challenged":
+      return stage.status === "open" ? "challenged" : "challenge_denied";
+  }
+}
+
+export function stageWaitsForTeacher(stage: AnswerStage): boolean {
+  const status = stageStatus(stage);
+  return status === "waiting" || status === "challenged";
+}
+
 // For the page's live region, so a screen reader hears what changed after
 // a check or a sent note. Empty before the first try.
 export function stageAnnouncement(stage: AnswerStage): string {
@@ -148,10 +171,10 @@ export function stageAnnouncement(stage: AnswerStage): string {
       return stage.status === "open" ? "Sent. Your teacher will take a look." : "Your teacher read your note.";
     case "out_of_tries":
       return stage.extraTry
-        ? "That was your extra try. You can send a note to your teacher."
-        : `That was try ${MAX_TRIES} of ${MAX_TRIES}. You can send a note to your teacher.`;
+        ? "That was your extra try. Waiting for your teacher. You can still send them a note."
+        : `That was try ${MAX_TRIES} of ${MAX_TRIES}. Waiting for your teacher. You can still send them a note.`;
     case "check_limit":
-      return "We couldn’t check your answers. You can send a note to your teacher.";
+      return "We couldn’t check your answers. Waiting for your teacher. You can still send them a note.";
     case "answer":
       if (stage.extraTry) return "Your teacher gave you one more try. You have 1 try left.";
       return stage.previous

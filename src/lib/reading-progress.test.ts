@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   answerStage,
@@ -10,6 +11,8 @@ import {
   readingListStatement,
   readingProgress,
   stageAnnouncement,
+  stageStatus,
+  stageWaitsForTeacher,
   STUDENT_READING_STATUS_LABELS,
   TEACHER_READING_STATUS_LABELS,
   studentReadingStatus,
@@ -245,11 +248,11 @@ describe("stageAnnouncement", () => {
     );
     assert.match(stageAnnouncement({ kind: "passed", attempt: pass(1), byTeacher: false }), /You passed/);
     assert.equal(stageAnnouncement({ kind: "passed", attempt: null, byTeacher: true }), "Your teacher accepted your answers.");
-    assert.match(stageAnnouncement({ kind: "out_of_tries", attempt: null, extraTry: false }), /try 3 of 3/);
+    assert.match(stageAnnouncement({ kind: "out_of_tries", attempt: null, extraTry: false }), /^That was try 3 of 3\. Waiting for your teacher\. You can still send them a note\.$/);
     assert.match(stageAnnouncement({ kind: "out_of_tries", attempt: null, extraTry: true }), /That was your extra try/);
     assert.equal(
       stageAnnouncement({ kind: "check_limit", attempt: null }),
-      "We couldn’t check your answers. You can send a note to your teacher.",
+      "We couldn’t check your answers. Waiting for your teacher. You can still send them a note.",
     );
     assert.match(stageAnnouncement({ kind: "challenged", status: "open", attempt: null }), /Your teacher will take a look/);
     assert.equal(stageAnnouncement({ kind: "challenged", status: "denied", attempt: null }), "Your teacher read your note.");
@@ -354,5 +357,77 @@ describe("readingListItems", () => {
     // The student's own tries limit, so a used one more try is Waiting.
     assert.match(s.text, /as tries_allowed/);
     assert.deepEqual(items[0], { id: "r1", title: "A", questionCount: 3, status: "not_started", passedAnswers: 0 });
+  });
+});
+
+// C1: right after the last try (or the last check), the reading page says
+// Waiting for your teacher, the same as the class home, and keeps the note.
+describe("stageStatus", () => {
+  const cases: Array<{ tries: number; checks: number; challenge: LatestChallenge | null; limits: Limits; passed: boolean }> = [];
+  for (const limits of [DEFAULT_LIMITS, granted, { tries: 1, checks: 2 }])
+    for (let tries = 0; tries <= limits.tries; tries++)
+      for (let checks = tries; checks <= limits.checks + 1; checks++)
+        for (const challenge of [null, open, denied, deniedExtra, approved])
+          for (const passed of [false, true]) cases.push({ tries, checks, challenge, limits, passed });
+
+  it("matches the class home status for every case", () => {
+    for (const c of cases) {
+      const attempts = Array.from({ length: c.tries }, (_, i) => (c.passed && i === c.tries - 1 ? pass(i + 1) : fail(i + 1)));
+      const passed = c.passed && c.tries > 0;
+      const stage = answerStage(progress({ ...c, attempts }));
+      assert.equal(stageStatus(stage), studentReadingStatus({ ...c, passed }), JSON.stringify(c));
+    }
+  });
+
+  it("is Waiting for your teacher right after try 3, with the note box (out of tries)", () => {
+    const stage = answerStage(progress({ attempts: [fail(1), fail(2), fail(3)], checks: 3 }));
+    assert.equal(stage.kind, "out_of_tries");
+    assert.equal(stageStatus(stage), "waiting");
+    assert.equal(STUDENT_READING_STATUS_LABELS[stageStatus(stage)], "Waiting for your teacher");
+    assert.equal(stageWaitsForTeacher(stage), true);
+  });
+
+  it("is the same at the check limit, with or without a saved try", () => {
+    for (const attempts of [[], [fail(1)], [fail(1), fail(2)]]) {
+      const stage = answerStage(progress({ attempts, checks: EFFORT_CHECK_LIMIT }));
+      assert.equal(stage.kind, "check_limit");
+      assert.equal(STUDENT_READING_STATUS_LABELS[stageStatus(stage)], "Waiting for your teacher");
+      assert.equal(stageWaitsForTeacher(stage), true);
+    }
+  });
+
+  it("is the same after a used one more try, and after a sent note", () => {
+    const four = [fail(1), fail(2), fail(3), fail(4)];
+    assert.equal(stageWaitsForTeacher(answerStage(progress({ attempts: four, challenge: deniedExtra, checks: 4, limits: granted }))), true);
+    assert.equal(stageWaitsForTeacher(answerStage(progress({ attempts: four, challenge: open, checks: 4, limits: granted }))), true);
+  });
+
+  it("is not waiting while answering, after a pass, or after a denial", () => {
+    assert.equal(stageWaitsForTeacher(answerStage(progress({}))), false);
+    assert.equal(stageWaitsForTeacher(answerStage(progress({ attempts: [fail(1), fail(2)], checks: 2 }))), false);
+    assert.equal(stageWaitsForTeacher(answerStage(progress({ attempts: [fail(1), pass(2)], checks: 2 }))), false);
+    assert.equal(stageWaitsForTeacher(answerStage(progress({ attempts: [fail(1), fail(2), fail(3)], challenge: denied, checks: 3 }))), false);
+    assert.equal(stageWaitsForTeacher(answerStage(progress({ attempts: [fail(1), fail(2), fail(3)], challenge: deniedExtra, checks: 3, limits: granted }))), false);
+  });
+
+  it("is announced as Waiting for your teacher, with the note still offered", () => {
+    for (const stage of [
+      { kind: "out_of_tries", attempt: null, extraTry: false },
+      { kind: "out_of_tries", attempt: null, extraTry: true },
+      { kind: "check_limit", attempt: null },
+    ] as const) {
+      assert.match(stageAnnouncement(stage), /Waiting for your teacher\. You can still send them a note\.$/);
+    }
+  });
+
+  it("the class reading page shows the badge, and keeps the note box in both stages", () => {
+    const page = readFileSync(new URL("../app/c/r/[readingId]/page.tsx", import.meta.url), "utf8");
+    assert.match(page, /\{stageWaitsForTeacher\(stage\) && \(\s*<div className="self-start">\s*<StudentReadingStatusBadge audience="student" status=\{stageStatus\(stage\)\} \/>/);
+    for (const kind of ["out_of_tries", "check_limit"]) {
+      const start = page.indexOf(`case "${kind}":`);
+      const end = page.indexOf("case ", start + 6);
+      assert.ok(start > 0 && end > start, kind);
+      assert.match(page.slice(start, end), /<ChallengeForm\b/, kind);
+    }
   });
 });
