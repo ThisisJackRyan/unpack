@@ -8,7 +8,7 @@ import { sendChallenge, type ChallengeResult } from "@/lib/challenges";
 import { CHALLENGE_FAILED_MESSAGE, challengeMessage } from "@/lib/challenges-core";
 import { getStudentSession } from "@/lib/student-auth";
 import { submitAnswers } from "@/lib/submit-answers";
-import { CHECK_FAILED_MESSAGE, submitMessage } from "@/lib/submit-answers-core";
+import { CHECK_FAILED_MESSAGE, refreshesPage, submitMessage } from "@/lib/submit-answers-core";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
@@ -56,9 +56,10 @@ async function checkAnswers(readingId: string, formData: FormData, preCheck: Abo
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
   const result = await submitAnswers(session.student.id, readingId, answerEntries(formData.entries()), { preCheck });
+  // A saved try, or the page may have moved on: show where things stand.
+  if (refreshesPage(result)) refresh(readingId);
   switch (result.status) {
     case "checked":
-      refresh(readingId);
       return {};
     case "invalid":
       return { errors: result.errors, message: ANSWERS_FIX_MESSAGE };
@@ -66,19 +67,12 @@ async function checkAnswers(readingId: string, formData: FormData, preCheck: Abo
     case "out_of_tries":
     case "too_many_checks":
     case "check_failed":
-      // The page may have moved on (another tab, or that was the last
-      // check): show where things stand. At the check limit that's the note
-      // to the teacher instead of the answer form; otherwise the form stays,
-      // with its answers and this message.
-      refresh(readingId);
+      // Re-rendered above. At the check limit that's the note to the
+      // teacher instead of the answer form; otherwise the form stays, with
+      // its answers and this message.
       return { message: submitMessage(result.status) };
     case "timed_out":
-      // Usually given back (the model never replied), so the page can't
-      // have moved on: no re-render at the end of an already slow request.
-      // But a reply, then a retry that ran out of time, counts toward the
-      // check limit and may have been the last check: then show where
-      // things stand (the note to the teacher).
-      if (result.counted) refresh(readingId);
+      // Re-rendered above only when it counted (see refreshesPage).
       return TIMED_OUT_STATE;
     case "paused":
       // An outage: a short break, with when checking frees up again.

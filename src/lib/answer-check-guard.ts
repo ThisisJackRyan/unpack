@@ -14,8 +14,9 @@ export const SUBMIT_FAILED_MESSAGE = "Something went wrong. Try again.";
 
 // The lookups before the claim (the session or sign-in, the reading, the
 // questions, the tries so far) normally take well under a second, a cold
-// database a few. Nothing is written before the claim, so giving up here
-// costs nothing: the student sees the timeout message and the next submit
+// database a few. Nothing that matters is written before the claim (a
+// self-learner's first visit may upsert their account row, which is
+// idempotent), so giving up here costs nothing: the student sees the timeout message and the next submit
 // starts fresh. The claim itself is not bounded (it writes the
 // effort_checks row: one that landed after we gave up would hold a check
 // until it goes stale), nor is the check (EFFORT_CHECK_DEADLINE_MS bounds

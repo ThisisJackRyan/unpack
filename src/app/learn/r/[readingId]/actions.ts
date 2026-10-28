@@ -8,7 +8,7 @@ import { guardAnswerCheck, withDeadline } from "@/lib/answer-check-guard";
 import { isQuestionWritingConfigured } from "@/lib/ai/client";
 import { soloSubmitMessage } from "@/lib/self-answers-core";
 import { submitSelfAnswers } from "@/lib/self-readings";
-import { CHECK_FAILED_MESSAGE } from "@/lib/submit-answers-core";
+import { CHECK_FAILED_MESSAGE, refreshesPage } from "@/lib/submit-answers-core";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
@@ -43,13 +43,13 @@ async function checkSelfAnswers(readingId: string, formData: FormData, preCheck:
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
   const result = await submitSelfAnswers(account.id, readingId, answerEntries(formData.entries()), { preCheck });
-  const refresh = () => {
+  // A saved try, or the page may have moved on: show where things stand.
+  if (refreshesPage(result)) {
     revalidatePath(`/learn/r/${readingId}`);
     revalidatePath("/learn");
-  };
+  }
   switch (result.status) {
     case "checked":
-      refresh();
       return {};
     case "invalid":
       return { errors: result.errors, message: ANSWERS_FIX_MESSAGE };
@@ -57,12 +57,9 @@ async function checkSelfAnswers(readingId: string, formData: FormData, preCheck:
     case "out_of_tries":
     case "too_many_checks":
     case "check_failed":
-      refresh();
       return { message: soloSubmitMessage(result.status) };
     case "timed_out":
-      // As on the student reading page: a re-render only when the check
-      // counted (it may have been the last one).
-      if (result.counted) refresh();
+      // Re-rendered above only when it counted (see refreshesPage).
       return TIMED_OUT_STATE;
     case "paused":
       // An outage: a short break, with when checking frees up again.

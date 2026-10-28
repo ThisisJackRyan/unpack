@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { EFFORT_CHECK_DEADLINE_MS } from "./ai/settings";
 import { checkEffort, EffortCheckError, type EffortCheckInput, type EffortVerdict } from "./ai/effort-check";
@@ -21,6 +22,7 @@ import {
   EFFORT_GIVEN_BACK_WINDOW_LIMIT,
   EFFORT_GIVEN_BACK_WINDOW_MINUTES,
   effortFailureCounts,
+  refreshesPage,
   OUT_OF_TRIES_MESSAGE,
   pausedUntilStatement,
   postgresAttemptStore,
@@ -695,6 +697,42 @@ describe("submitAnswersWith", () => {
     await assert.rejects(submit(broken, fakeChecker().check), /db down/);
     const brokenLoad: AttemptStore = { ...store, loadContext: async () => Promise.reject(new Error("db down")) };
     await assert.rejects(submit(brokenLoad, fakeChecker().check), /db down/);
+  });
+});
+
+describe("refreshesPage", () => {
+  it("re-renders after a saved try, a counted timeout, and whenever the page may have moved on", () => {
+    const yes: SubmitResult[] = [
+      { status: "checked", passed: false, tryNumber: 1, results: [] },
+      { status: "already_passed" },
+      { status: "out_of_tries" },
+      { status: "too_many_checks" },
+      { status: "check_failed" },
+      // A reply, then a retry that ran out of time: it counted, and may
+      // have been the last check (the page shows the note to the teacher).
+      { status: "timed_out", counted: true },
+    ];
+    for (const result of yes) assert.equal(refreshesPage(result), true, result.status);
+  });
+
+  it("skips the re-render when nothing changed", () => {
+    const no: SubmitResult[] = [
+      { status: "timed_out", counted: false },
+      { status: "invalid", errors: {} },
+      { status: "stale" },
+      { status: "not_found" },
+      { status: "busy" },
+      { status: "paused", retryAt: null },
+    ];
+    for (const result of no) assert.equal(refreshesPage(result), false, result.status);
+  });
+
+  it("is what both answer actions use to revalidate", () => {
+    for (const actions of ["src/app/c/r/[readingId]/actions.ts", "src/app/learn/r/[readingId]/actions.ts"]) {
+      const source = readFileSync(actions, "utf8");
+      assert.match(source, /if \(refreshesPage\(result\)\)/, actions);
+      assert.doesNotMatch(source, /result\.counted/, `${actions}: no second copy of the branch`);
+    }
   });
 });
 

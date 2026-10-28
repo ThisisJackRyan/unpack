@@ -224,6 +224,31 @@ export type SubmitResult =
   // toward the limit (step 5) and may have been the last one.
   | { status: "timed_out"; counted: boolean };
 
+// Whether the answer actions re-render the reading page (revalidatePath)
+// after this result. A saved try does. So do the results that say the page
+// may have moved on (another tab, or that was the last check): at the
+// check limit that's the note to the teacher instead of the answer form.
+// A timeout is usually given back (the model never replied), so the page
+// can't have moved on and an already slow request skips the re-render; but
+// a reply, then a retry that ran out of time, counts toward the limit and
+// may have been the last check. A directly called server action's
+// revalidatePath still reaches the page (see submitCheck in
+// src/components/answer-form-state.ts).
+export function refreshesPage(result: SubmitResult): boolean {
+  switch (result.status) {
+    case "checked":
+    case "already_passed":
+    case "out_of_tries":
+    case "too_many_checks":
+    case "check_failed":
+      return true;
+    case "timed_out":
+      return result.counted;
+    default:
+      return false;
+  }
+}
+
 // Whether a failed check counts toward EFFORT_CHECK_LIMIT (step 5 above):
 // only when the model replied at least once. Unusable output is only ever
 // thrown after a reply, so it counts even from a checker that doesn't
