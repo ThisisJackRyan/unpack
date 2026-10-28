@@ -19,6 +19,18 @@
 //     constraint needs) and a no-role row that becomes a self-learner
 //     right after the lookup: both rows, roles and age_confirmed_at are
 //     kept, nothing is listed, and no Clerk DELETE is sent for either.
+// (e) Environment mismatch: a wrong --expect-db, a wrong
+//     --expect-instance, a sk_live key against this test database, and a
+//     sk_test key whose instance says production are each refused before
+//     any Clerk user is listed or any row looked up; no DELETE, nothing
+//     changes.
+// (f) Zero match: aged Clerk ids, none with a teachers row (as when the
+//     database is the wrong one), aborts --apply with nothing changed.
+// (g) High share: 10 aged ids, 6 with no teachers row (over 50%), aborts
+//     --apply with nothing changed.
+// (h) Normal run: 10 aged ids, 5 with no row (exactly 50%), proceeds: a
+//     wrong --expect-count is refused first with nothing changed, then the
+//     count the dry run printed deletes the 5 and keeps the teachers.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-roleless-clerk-sweep
 //
@@ -32,7 +44,7 @@ import { hashClerkUserId } from "@/lib/deleted-accounts";
 import { neonExecutor } from "@/lib/neon-executor";
 import { prepareDbCheck } from "./lib/db-check";
 import type { FetchLike } from "./lib/pending-clerk-deletes";
-import { DEFAULT_LIMIT, DEFAULT_MIN_AGE_DAYS, runSweep, type Options, type SweepDeps } from "./lib/roleless-clerk-sweep";
+import { DEFAULT_LIMIT, DEFAULT_MIN_AGE_DAYS, describeDatabaseUrl, runSweep, type Options, type SweepDeps } from "./lib/roleless-clerk-sweep";
 import { sweepDbDeps } from "./lib/roleless-clerk-sweep-db";
 
 const { fetchEndpoint } = prepareDbCheck();
@@ -54,16 +66,24 @@ function id(label: string): string {
   return value;
 }
 
-// A fake Clerk listing the given users (id, created_at, last_sign_in_at
-// and last_active_at only; the last two null unless activeDays is given),
-// and recording each DELETE.
-function fakeClerk(users: { id: string; ageDays: number; activeDays?: number }[]) {
+const FAKE_INSTANCE = "ins_fakecheck";
+
+// A fake Clerk: GET /v1/instance answers FAKE_INSTANCE (development unless
+// `environmentType` says otherwise); GET /v1/users lists the given users
+// (id, created_at, last_sign_in_at and last_active_at only; the last two
+// null unless activeDays is given). Records each list and DELETE.
+function fakeClerk(users: { id: string; ageDays: number; activeDays?: number }[], environmentType = "development") {
   const deletes: string[] = [];
+  let lists = 0;
   const fetchFn: FetchLike = async (url, init) => {
+    if (url === "https://api.clerk.com/v1/instance") {
+      return { ok: true, status: 200, json: async () => ({ id: FAKE_INSTANCE, environment_type: environmentType }) };
+    }
     if (init.method === "DELETE") {
       deletes.push(decodeURIComponent(url.split("/").pop() ?? ""));
       return { ok: true, status: 200, json: async () => ({ deleted: true }) };
     }
+    lists++;
     const offset = Number(new URL(url).searchParams.get("offset"));
     const page =
       offset === 0
@@ -74,14 +94,26 @@ function fakeClerk(users: { id: string; ageDays: number; activeDays?: number }[]
         : [];
     return { ok: true, status: 200, json: async () => page };
   };
-  return { fetchFn, deletes };
+  return { fetchFn, deletes, lists: () => lists };
 }
+
+const DATABASE_URL = process.env.DATABASE_URL ?? "";
 
 function deps(fetchFn: FetchLike, lines: string[]): SweepDeps {
-  return { fetchFn, secretKey: "sk_test_fake", ...sweepDbDeps(), print: (line) => lines.push(line), now: NOW };
+  return { fetchFn, secretKey: "sk_test_fake", databaseUrl: DATABASE_URL, ...sweepDbDeps(), print: (line) => lines.push(line), now: NOW };
 }
 
-const DRY: Options = { apply: false, minAgeDays: DEFAULT_MIN_AGE_DAYS, limit: DEFAULT_LIMIT };
+// prepareDbCheck already refused anything but a readable local or test URL.
+const THIS_DB = describeDatabaseUrl(DATABASE_URL) ?? { host: "", name: "" };
+const DRY: Options = {
+  apply: false,
+  minAgeDays: DEFAULT_MIN_AGE_DAYS,
+  limit: DEFAULT_LIMIT,
+  expectDb: THIS_DB,
+  expectInstance: FAKE_INSTANCE,
+  expectCount: null,
+};
+const applyCount = (count: number): Options => ({ ...DRY, apply: true, expectCount: count });
 
 async function insertAccount(clerkUserId: string, role: "teacher" | "self_learner" | null): Promise<void> {
   await sql.query(
@@ -146,7 +178,7 @@ async function checkDryRunAndRace(): Promise<void> {
     await sql.query(`update teachers set role = 'teacher' where clerk_user_id = $1::text`, [noRole]);
     return found;
   };
-  const applied = await runSweep({ ...DRY, apply: true }, raceDeps);
+  const applied = await runSweep(applyCount(3), raceDeps);
   check(applied.skippedHasRole === 1 && applied.deleted === 2, `1 skipped, 2 deleted (got ${applied.skippedHasRole}, ${applied.deleted})`);
   check(apply.deletes.join(",") === [noRow, pending].join(","), "Clerk DELETE only for the no-row and pending ids");
   check((await roleOf(noRole)) === "teacher" && (await listState(noRole)) === "none", "the raced account keeps its row and role, nothing listed");
@@ -161,7 +193,7 @@ async function checkDeleteThenLateEvents(): Promise<void> {
   const noRole = id("late");
   await insertAccount(noRole, null);
   const clerk = fakeClerk([{ id: noRole, ageDays: 8 }]);
-  const result = await runSweep({ ...DRY, apply: true }, deps(clerk.fetchFn, []));
+  const result = await runSweep(applyCount(1), deps(clerk.fetchFn, []));
   check(result.deleted === 1 && clerk.deletes.join() === noRole, "deleted in Clerk");
   check((await roleOf(noRole)) === undefined && (await listState(noRole)) === "confirmed", "row gone, hash confirmed");
   const created = await handleClerkEvent(
@@ -195,12 +227,116 @@ async function checkSelfLearnerNeverSwept(): Promise<void> {
     await sql.query(`update teachers set role = 'self_learner', age_confirmed_at = now() where clerk_user_id = $1::text`, [becomes]);
     return found;
   };
-  const result = await runSweep({ ...DRY, apply: true }, raceDeps);
+  const result = await runSweep(applyCount(1), raceDeps);
   check(result.candidates === 1 && result.skippedHasRole === 1 && result.deleted === 0, `only the no-role row was a candidate, then skipped (got ${result.candidates}, ${result.skippedHasRole}, ${result.deleted})`);
   check(!clerk.deletes.includes(self) && !clerk.deletes.includes(becomes), "no Clerk DELETE for either self-learner");
   check((await roleOf(self)) === "self_learner" && (await ageConfirmed(self)), "the aged self-learner keeps its row, role and age_confirmed_at");
   check((await roleOf(becomes)) === "self_learner" && (await ageConfirmed(becomes)), "the raced self-learner keeps its row, role and age_confirmed_at");
   check((await listState(self)) === "none" && (await listState(becomes)) === "none", "neither self-learner is listed");
+}
+
+// The state the guards must leave alone: each id's role (undefined: no
+// row) and listed state.
+async function snapshot(ids: readonly string[]): Promise<string> {
+  const parts: string[] = [];
+  for (const clerkUserId of ids) parts.push(`${String(await roleOf(clerkUserId))}:${await listState(clerkUserId)}`);
+  return parts.join(",");
+}
+
+// Runs one sweep, counting the lookups it makes.
+async function runCounted(options: Options, sweepDeps: SweepDeps): Promise<{ result: Awaited<ReturnType<typeof runSweep>>; lookups: number }> {
+  let lookups = 0;
+  const lookup = sweepDeps.lookup;
+  sweepDeps.lookup = async (ids) => {
+    lookups++;
+    return lookup(ids);
+  };
+  return { result: await runSweep(options, sweepDeps), lookups };
+}
+
+async function checkEnvironmentMismatch(): Promise<void> {
+  console.log("\n(e) environment mismatch is refused before any listing or lookup");
+  const teacher = id("envteacher");
+  const noRole = id("envnorole");
+  const noRow = id("envnorow");
+  await insertAccount(teacher, "teacher");
+  await insertAccount(noRole, null);
+  const users = [
+    { id: teacher, ageDays: 30 },
+    { id: noRole, ageDays: 30 },
+    { id: noRow, ageDays: 30 },
+  ];
+  const before = await snapshot([teacher, noRole, noRow]);
+  const cases: { name: string; options: Options; secretKey?: string; environmentType?: string }[] = [
+    { name: "wrong --expect-db", options: { ...applyCount(2), expectDb: { host: THIS_DB.host, name: `${THIS_DB.name}_other` } } },
+    { name: "wrong --expect-instance", options: { ...applyCount(2), expectInstance: "ins_someotherinstance" } },
+    { name: "sk_live key with this test database", options: applyCount(2), secretKey: "sk_live_fake", environmentType: "production" },
+    { name: "sk_test key, Clerk says production", options: applyCount(2), environmentType: "production" },
+  ];
+  for (const c of cases) {
+    const clerk = fakeClerk(users, c.environmentType);
+    const lines: string[] = [];
+    const sweepDeps = { ...deps(clerk.fetchFn, lines), ...(c.secretKey ? { secretKey: c.secretKey } : {}) };
+    const { result, lookups } = await runCounted(c.options, sweepDeps);
+    check(
+      result.aborted === "environment" && clerk.lists() === 0 && lookups === 0 && clerk.deletes.length === 0,
+      `${c.name}: refused, no listing, no lookup, no DELETE (${lines.at(-1) ?? ""})`,
+    );
+    check(lines[1] === `Database: host ${THIS_DB.host}, database ${THIS_DB.name}.` && lines[0].startsWith(`Clerk: instance ${FAKE_INSTANCE} `), `${c.name}: printed the pair first`);
+  }
+  check((await snapshot([teacher, noRole, noRow])) === before, "database unchanged");
+}
+
+async function checkZeroMatch(): Promise<void> {
+  console.log("\n(f) zero match: aged ids, none with a teachers row");
+  const ids = [id("zero1"), id("zero2"), id("zero3")];
+  const clerk = fakeClerk(ids.map((clerkUserId) => ({ id: clerkUserId, ageDays: 30 })));
+  const lines: string[] = [];
+  const result = await runSweep(applyCount(3), deps(clerk.fetchFn, lines));
+  check(result.aborted === "shape" && result.candidates === 0, `aborted (${lines.at(-1) ?? ""})`);
+  check(clerk.deletes.length === 0, "no DELETE sent");
+  check((await snapshot(ids)) === ids.map(() => "undefined:none").join(","), "nothing listed, no row made");
+}
+
+async function checkHighShare(): Promise<void> {
+  console.log("\n(g) high share: 6 of 10 aged ids with no teachers row");
+  const withRow = [id("share_t1"), id("share_t2"), id("share_t3"), id("share_n1")];
+  const noRow = [1, 2, 3, 4, 5, 6].map((n) => id(`share_x${n}`));
+  for (const clerkUserId of withRow) await insertAccount(clerkUserId, clerkUserId.includes("share_n") ? null : "teacher");
+  const all = [...withRow, ...noRow];
+  const before = await snapshot(all);
+  const clerk = fakeClerk(all.map((clerkUserId) => ({ id: clerkUserId, ageDays: 30 })));
+  const lines: string[] = [];
+  const result = await runSweep(applyCount(7), deps(clerk.fetchFn, lines));
+  check(result.aborted === "shape", `aborted (${lines.at(-1) ?? ""})`);
+  check(clerk.deletes.length === 0, "no DELETE sent");
+  check((await snapshot(all)) === before, "database unchanged");
+}
+
+async function checkNormalRun(): Promise<void> {
+  console.log("\n(h) normal run: 5 of 10 aged ids with no teachers row");
+  const teachers = [1, 2, 3, 4, 5].map((n) => id(`normal_t${n}`));
+  const noRow = [1, 2, 3, 4, 5].map((n) => id(`normal_x${n}`));
+  for (const clerkUserId of teachers) await insertAccount(clerkUserId, "teacher");
+  const all = [...teachers, ...noRow];
+  const users = all.map((clerkUserId) => ({ id: clerkUserId, ageDays: 30 }));
+
+  const dryLines: string[] = [];
+  const dry = await runSweep(DRY, deps(fakeClerk(users).fetchFn, dryLines));
+  check(dry.aborted === null && dry.candidates === 5, `dry run proceeds with 5 candidates (got ${dry.candidates})`);
+  check((dryLines.at(-1) ?? "").trim().endsWith("--expect-count=5"), "dry run prints the --apply command with --expect-count=5");
+
+  const before = await snapshot(all);
+  const wrong = fakeClerk(users);
+  const refused = await runSweep(applyCount(4), deps(wrong.fetchFn, []));
+  check(refused.aborted === "count" && wrong.deletes.length === 0, "a wrong --expect-count is refused, no DELETE");
+  check((await snapshot(all)) === before, "database unchanged after the refused count");
+
+  const right = fakeClerk(users);
+  const applied = await runSweep(applyCount(5), deps(right.fetchFn, []));
+  check(applied.aborted === null && applied.deleted === 5 && right.deletes.join(",") === noRow.join(","), `the 5 no-row ids deleted (got ${applied.deleted})`);
+  check((await snapshot(teachers)) === teachers.map(() => "teacher:none").join(","), "teachers untouched");
+  check((await snapshot(noRow)) === noRow.map(() => "undefined:confirmed").join(","), "deleted hashes confirmed");
 }
 
 async function cleanup(): Promise<void> {
@@ -217,6 +353,10 @@ async function main(): Promise<void> {
     await checkDryRunAndRace();
     await checkDeleteThenLateEvents();
     await checkSelfLearnerNeverSwept();
+    await checkEnvironmentMismatch();
+    await checkZeroMatch();
+    await checkHighShare();
+    await checkNormalRun();
   } finally {
     await cleanup();
   }
