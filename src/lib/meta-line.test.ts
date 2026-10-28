@@ -87,4 +87,17 @@ describe("meta line", () => {
       assert.doesNotMatch(source, /sr-only">,\s*</, f);
     }
   });
+
+  // C4: the class progress page linked each student's name twice (a table
+  // for wide screens and cards for narrow ones, both in the page). One
+  // table now, so each row has one name link.
+  it("the class progress page has one name link per student row", () => {
+    const page = read("../app/teacher/classes/[id]/students/page.tsx");
+    assert.doesNotMatch(page, /ProgressCards|md:hidden|md:block/);
+    // One in the table's row header, one in the list shown before any
+    // reading is published (never both: the page picks one).
+    assert.equal(page.match(/<StudentLink\b/g)?.length, 2);
+    assert.match(page, /<th scope="row"[^>]*>\s*<StudentLink\b/);
+    assert.match(page, /: status\.readings\.length === 0 \? \([\s\S]*<StudentList\b[\s\S]*\) : \(\s*<ProgressTable\b[^/]*\/>\s*\)/);
+  });
 });

@@ -38,9 +38,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // Each student on each published reading: Not started, In progress,
 // Passed, Challenged, or Challenge denied, with tries used, or Needs a
 // reset (with "Let them try again") when a student used every try at
-// getting their own questions for a reading. A table on
-// wide screens (students down, readings across), one card per student on
-// narrow ones. Only the owning teacher gets here (loadClass 404s others).
+// getting their own questions for a reading. One table at every width
+// (students down, readings across), scrolling sideways on narrow screens
+// with the names kept in view, so each student's row has one name link.
+// Only the owning teacher gets here (loadClass 404s others).
 // Each student has a Delete (with a confirm dialog) that removes them and
 // all of their work; the delete checks ownership again in its own
 // statement. Each name links to that student's own page.
@@ -94,10 +95,7 @@ export default async function ClassProgressPage({ params }: Props) {
           <StudentList status={status} actions={actions} />
         </>
       ) : (
-        <>
-          <ProgressTable status={status} actions={actions} />
-          <ProgressCards status={status} actions={actions} />
-        </>
+        <ProgressTable status={status} actions={actions} />
       )}
     </div>
   );
@@ -167,7 +165,7 @@ function StudentList({ status, actions }: { status: ClassStatus; actions: Action
 
 function ProgressTable({ status, actions }: { status: ClassStatus; actions: Actions }) {
   return (
-    <div className={`${card} hidden overflow-x-auto md:block`}>
+    <div className={`${card} overflow-x-auto`}>
       <table className="w-full border-collapse text-left">
         <caption className="sr-only">Each student’s status on each reading, with tries used</caption>
         <thead>
@@ -205,30 +203,5 @@ function ProgressTable({ status, actions }: { status: ClassStatus; actions: Acti
         </tbody>
       </table>
     </div>
-  );
-}
-
-function ProgressCards({ status, actions }: { status: ClassStatus; actions: Actions }) {
-  return (
-    <ul className="flex flex-col gap-3 md:hidden">
-      {status.students.map((s) => (
-        <li key={s.id} className={`${card} flex flex-col gap-3 px-5 py-4`}>
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="text-lg font-semibold text-ink-950">
-              <StudentLink classId={actions.classId} student={s} className="" />
-            </h2>
-            <DeleteStudentButton action={actions.onDelete} studentId={s.id} name={s.name} />
-          </div>
-          <ul className="flex flex-col divide-y divide-ink-100">
-            {status.readings.map((r) => (
-              <li key={r.id} className="flex items-start justify-between gap-4 py-2.5">
-                <span className="min-w-0 text-base break-words text-ink-800">{r.title}</span>
-                <Cell cell={cellOf(status, s.id, r.id)} target={{ student: s, reading: r, actions }} />
-              </li>
-            ))}
-          </ul>
-        </li>
-      ))}
-    </ul>
   );
 }
