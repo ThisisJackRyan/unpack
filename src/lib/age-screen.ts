@@ -22,7 +22,9 @@
 // - Under 13: the action sets AGE_GATE_COOKIE (value "under", no date or
 //   age in it) for AGE_GATE_MAX_AGE_SECONDS, and while it is there the
 //   screen isn't asked again on this device (/welcome and /settings
-//   alike): the actions refuse self-learner before reading any answer.
+//   alike): the actions refuse self-learner before reading any answer,
+//   and an account with no role can't choose teacher either. On /welcome
+//   the answer also deletes the account (under-13-account.ts).
 
 export const MIN_AGE = 13;
 
