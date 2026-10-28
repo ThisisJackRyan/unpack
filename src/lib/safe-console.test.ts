@@ -230,7 +230,7 @@ describe("sanitizeLogArgs", () => {
       new DbReadTimeoutError(1000),
       new JoinCodeExhaustedError(),
       new ClerkUserNoEmailError(),
-      ...(["invalid_url", "blocked", "timeout", "too_large", "not_html", "http_error", "extract_failed", "too_long"] as const).map(
+      ...(["invalid_url", "blocked", "timeout", "too_large", "not_html", "http_error", "extract_failed"] as const).map(
         (kind) => new FetchArticleError(kind),
       ),
     ];
