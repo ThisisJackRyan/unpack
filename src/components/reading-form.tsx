@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useRef, useState, type FormEvent } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { useActionState, useMemo, useRef, useState, type FormEvent } from "react";
 import { GRADE_LEVELS, gradeLevelLabel } from "@/lib/grade-levels";
 import {
   QUESTION_MODES,
@@ -11,7 +12,9 @@ import {
 import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { MaxLengthNote } from "@/components/max-length-note";
-import { field, optionCard, optionRadio, primaryButton, quietButton, secondaryButton } from "@/components/ui";
+import { withRejectionFallback } from "@/components/action-fallback";
+import { noReplyParts, readingFormFallback, readingsListHref } from "@/components/reading-form-fallback";
+import { field, optionCard, optionRadio, primaryButton, quietButton, secondaryButton, textLink } from "@/components/ui";
 import {
   BODY_TEXT_MAX_LENGTH,
   BODY_TEXT_MIN_LENGTH,
@@ -66,6 +69,9 @@ type Props = {
   mode: "create" | "edit" | "title" | "solo";
   // The class grade, for the "Class grade" option (not in solo mode).
   classGradeLabel?: string;
+  // The class (create mode), so a create with no reply can link to its
+  // readings.
+  classId?: string;
   cancelHref: string;
   initialValues?: ReadingFormValues;
   // Edit only: where the saved text came from.
@@ -80,11 +86,20 @@ export function ReadingForm({
   action,
   mode,
   classGradeLabel,
+  classId,
   cancelHref,
   initialValues = EMPTY_READING_VALUES,
   sourceHost,
 }: Props) {
-  const [state, formAction, pending] = useActionState(action, {
+  // A request that fails outright (no answer, a 504, a lapsed session, a
+  // deploy) is a message in this form with every value kept, never the
+  // page's error boundary (see reading-form-fallback.ts, which also says
+  // why there is no client time limit here).
+  const guarded = useMemo(
+    () => withRejectionFallback(action, (kind, formData) => readingFormFallback(mode, kind, formData), unstable_rethrow),
+    [action, mode],
+  );
+  const [state, formAction, pending] = useActionState(guarded, {
     values: initialValues,
   });
   const values = state.values ?? initialValues;
@@ -92,6 +107,7 @@ export function ReadingForm({
   const solo = mode === "solo";
   const create = mode === "create" || solo;
   const titleOnly = mode === "title";
+  const noReply = noReplyParts(errors.form, readingsListHref(mode, classId));
 
   // The panels switch with CSS alone; this mirrors the checked source radio
   // for the pending label and the length check.
@@ -414,8 +430,18 @@ export function ReadingForm({
         </div>
       )}
 
-      <ErrorMessage>
-        {errors.form}
+      <ErrorMessage alert>
+        {noReply ? (
+          <>
+            {noReply.before}
+            <Link href={noReply.href} className={textLink}>
+              {noReply.linkText}
+            </Link>
+            {noReply.after}
+          </>
+        ) : (
+          errors.form
+        )}
       </ErrorMessage>
 
       <div className="flex flex-col-reverse gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:items-center sm:justify-end">

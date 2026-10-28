@@ -30,6 +30,19 @@
 //     a crafted commit straight at the statements can't replace q1; a
 //     given-back check in between keeps the lock and the try; the reading
 //     passes on try 2 with q1 as it was; 2 counted checks, 3 model calls.
+// (g) Failed creates use nothing (the /learn/new error page bug): through
+//     createSelfReadingWith inside guardCreate, as the action runs it, with
+//     the real allowance read, link fetch record and create transaction: a
+//     create whose account lookup throws or passes the pre-write deadline,
+//     or whose allowance read passes it, leaves no row, the allowance
+//     unchanged and no link_fetch_attempts row, and returns every value; a
+//     create transaction that fails after its insert (1/0 as its last
+//     statement) rolls the insert back: no row, the allowance unchanged; a
+//     link create whose transaction fails keeps its one link fetch record
+//     (it limits fetches, not readings) and uses no slot; then a create
+//     works and takes exactly one slot. A teacher create (the real insert)
+//     whose teacher lookup or class check fails, or whose insert fails,
+//     writes no reading.
 // (f) Delete: user.deleted through handleClerkEvent leaves zero rows of
 //     the account in every self-learner table (counted per table) and the
 //     other account's rows intact; a repeat is already_gone.
@@ -72,6 +85,14 @@ import {
   submitSelfAnswers,
 } from "@/lib/self-readings";
 import { createAccountStatements, hashClerkUserId } from "@/lib/deleted-accounts";
+import { guardCreate, readingSaveFailedState } from "@/lib/create-guard";
+import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
+import { insertReading } from "@/lib/readings";
+import { createOutcome, createSelfReadingStatements } from "@/lib/self-allowance";
+import { createSelfReadingWith, type SelfCreateDeps } from "@/lib/self-reading-create";
+import { createTeacherReadingWith, type TeacherCreateDeps } from "@/lib/teacher-reading-create";
+import { readingFormValues, type ReadingFormInput } from "@/lib/validate-reading";
 import { prepareDbCheck } from "./lib/db-check";
 
 const { fetchEndpoint } = prepareDbCheck();
@@ -92,7 +113,7 @@ const SUBMITS = intFlag("submits", 10);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
-const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_c", "test_self_d", "test_self_teacher", "test_self_gone", "test_self_kept"];
+const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_c", "test_self_d", "test_self_teacher", "test_self_gone", "test_self_kept", "test_self_create"];
 const FREE = allowanceFor("free");
 
 const sql = getSql();
@@ -666,6 +687,129 @@ async function checkRoleAndOwnerAtWrite() {
   check(own === "claimed" && foreignCommit === null && after.n === 0, `a commit under another account's id saves nothing (${own}, ${foreignCommit}, ${after.n})`);
 }
 
+// AbortSignal.timeout's timer doesn't keep Node's event loop alive.
+async function keepingAlive<T>(work: () => Promise<T>): Promise<T> {
+  const keepAlive = setInterval(() => {}, 1_000);
+  try {
+    return await work();
+  } finally {
+    clearInterval(keepAlive);
+  }
+}
+
+const never = <T>() => new Promise<T>(() => {});
+const rethrowNext = (error: unknown) => {
+  const digest = (error as { digest?: unknown } | null)?.digest;
+  if (typeof digest === "string" && digest.startsWith("NEXT_")) throw error;
+};
+
+async function checkFailedCreates() {
+  console.log("\n== (g) FAILED CREATES USE NOTHING ==");
+  const eId = await newAccount("test_self_create", "self_learner");
+  const text: ReadingFormInput = { source: "text", url: "", title: "Failed create", bodyText: BODY, gradeLevel: "6", questionCount: "4", questionMode: null };
+  const link: ReadingFormInput = { ...text, source: "link", url: "https://example.invalid/story", bodyText: "" };
+  // The real reads and writes; the fetch is a fake (no network).
+  const real = (): SelfCreateDeps => ({
+    requireAccount: async () => ({ id: eId }),
+    getAllowance: (id) => getAllowance(id),
+    recordLinkFetch: (id) => recordLinkFetchAttempt(id),
+    linkLimitedMessage: async () => "limited",
+    fetchArticle: async (url) => ({ title: "From the page", text: BODY, url }),
+    createSelfReading: (id, draft) => createSelfReading(id, draft),
+    log: () => {},
+  });
+  const run = (input: ReadingFormInput, deps: SelfCreateDeps) =>
+    keepingAlive(() =>
+      guardCreate((preWrite) => createSelfReadingWith(input, preWrite, deps), () => ({ state: readingSaveFailedState(readingFormValues(input)) }), {
+        rethrow: rethrowNext,
+        onError: () => {},
+        deadlineMs: 300,
+      }),
+    );
+  const state = async () => {
+    const row = await one<{ readings: number; fetches: number }>(sql`
+      select (select count(*)::int from self_readings where account_id = ${eId}) as readings,
+        (select count(*)::int from link_fetch_attempts where teacher_id = ${eId}) as fetches`);
+    return { ...row, remaining: (await getAllowance(eId)).remaining };
+  };
+  const start = await state();
+  check(start.readings === 0 && start.fetches === 0 && start.remaining === FREE.readings, `a fresh account: ${JSON.stringify(start)}`);
+
+  const failures: { name: string; deps: (d: SelfCreateDeps) => SelfCreateDeps }[] = [
+    { name: "the account lookup throws", deps: (d) => ({ ...d, requireAccount: async () => Promise.reject(new Error("fetch failed")) }) },
+    { name: "the account lookup passes the deadline", deps: (d) => ({ ...d, requireAccount: never }) },
+    { name: "the allowance read passes the deadline", deps: (d) => ({ ...d, getAllowance: never }) },
+  ];
+  for (const { name, deps } of failures) {
+    for (const input of [text, link]) {
+      const result = await run(input, deps(real()));
+      const kept = "state" in result && result.state.errors?.form === SAVE_READING_FAILED_MESSAGE && result.state.values?.bodyText === input.bodyText && result.state.values?.url === input.url;
+      check(kept && JSON.stringify(await state()) === JSON.stringify(start), `${name} (${input.source}): the form keeps everything; no row, no slot, no fetch record`);
+    }
+  }
+
+  // The create transaction fails after its insert ran: Postgres rolls the
+  // whole batch back.
+  const failingTransaction = (d: SelfCreateDeps): SelfCreateDeps => ({
+    ...d,
+    createSelfReading: async (id, draft) =>
+      createOutcome(await neonExecutor([...createSelfReadingStatements(id, draft, FREE), { text: "select 1/0", params: [] }]), FREE),
+  });
+  const failedText = await run(text, failingTransaction(real()));
+  check(
+    "state" in failedText && failedText.state.errors?.form === SAVE_READING_FAILED_MESSAGE && failedText.state.values?.bodyText === BODY,
+    "a failed create transaction: the form keeps everything",
+  );
+  check(JSON.stringify(await state()) === JSON.stringify(start), `...no row, the allowance unchanged (${JSON.stringify(await state())})`);
+  const failedLink = await run(link, failingTransaction(real()));
+  const afterLink = await state();
+  check(
+    "state" in failedLink && afterLink.readings === 0 && afterLink.remaining === FREE.readings && afterLink.fetches === 1,
+    `a link whose transaction fails: its fetch is counted (limits fetches), no slot used (${JSON.stringify(afterLink)})`,
+  );
+
+  const created = await run(text, real());
+  const after = await state();
+  check("redirect" in created && created.redirect.path.startsWith("/learn/r/") && created.redirect.type === "replace", "then a create works");
+  check(after.readings === 1 && after.remaining === FREE.readings - 1 && after.fetches === 1, `...taking exactly one slot (${JSON.stringify(after)})`);
+
+  // A teacher's create, with the real insert.
+  const { id: classId } = await one<{ id: string }>(sql`select id from classes where teacher_id = ${teacherId} limit 1`);
+  const classReadings = async () => (await one<{ n: number }>(sql`select count(*)::int as n from readings where class_id = ${classId}`)).n;
+  const before = await classReadings();
+  const teacherInput: ReadingFormInput = { ...text, gradeLevel: "", questionMode: "per_student" };
+  const teacherDeps = (over: Partial<TeacherCreateDeps>): TeacherCreateDeps => ({
+    requireTeacher: async () => ({ id: teacherId }),
+    ownsClass: async () => true,
+    recordLinkFetch: async () => true,
+    linkLimitedMessage: async () => "limited",
+    fetchArticle: async (url) => ({ title: "Page", text: BODY, url }),
+    insertReading: (c, t, draft) => insertReading(c, t, draft),
+    log: () => {},
+    ...over,
+  });
+  const teacherFailures: { name: string; over: Partial<TeacherCreateDeps> }[] = [
+    { name: "the teacher lookup throws", over: { requireTeacher: async () => Promise.reject(new Error("fetch failed")) } },
+    { name: "the teacher lookup passes the deadline", over: { requireTeacher: never } },
+    { name: "the class check passes the deadline", over: { ownsClass: never } },
+    // An insert Postgres refuses (a value its enum cast rejects).
+    { name: "the insert fails", over: { insertReading: (c, t, draft) => insertReading(c, t, { ...draft, questionMode: "not_a_mode" as never }) } },
+  ];
+  for (const { name, over } of teacherFailures) {
+    const result = await keepingAlive(() =>
+      guardCreate(
+        (preWrite) => createTeacherReadingWith(classId, teacherInput, preWrite, teacherDeps(over)),
+        () => ({ state: readingSaveFailedState(readingFormValues(teacherInput)) }),
+        { rethrow: rethrowNext, onError: () => {}, deadlineMs: 300 },
+      ),
+    );
+    check(
+      "state" in result && result.state.errors?.form === SAVE_READING_FAILED_MESSAGE && result.state.values?.bodyText === BODY && (await classReadings()) === before,
+      `teacher create, ${name}: the form keeps everything, no reading written`,
+    );
+  }
+}
+
 async function fullSelfLearner(prefix: string): Promise<string> {
   const id = await newAccount(prefix, "self_learner");
   const readingId = await rawReading(id, `${prefix} reading`);
@@ -740,6 +884,7 @@ async function main(): Promise<void> {
     await checkLockedAnswers();
     await checkGivenBackChecks();
     await checkRoleAndOwnerAtWrite();
+    await checkFailedCreates();
     await checkDelete();
   } finally {
     await cleanup();

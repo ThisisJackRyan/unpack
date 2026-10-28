@@ -6,8 +6,8 @@ import type { AnswerFormState } from "@/components/answer-form-state";
 import { guardAnswerCheck, PRE_CHECK_DEADLINE_MS, withDeadline } from "@/lib/answer-check-guard";
 import { qaRoutesEnabled } from "@/lib/qa-routes";
 import { safeErrorFields } from "@/lib/safe-error-fields";
-import { ANSWER_FIELD_PREFIX } from "@/lib/validate-answers";
-import { saveQaTry } from "./tries";
+import { ANSWER_FIELD_PREFIX, ANSWERS_STALE_MESSAGE } from "@/lib/validate-answers";
+import { qaLastTry, saveQaTry } from "./tries";
 
 // The posted answers by question id.
 function answerTexts(formData: FormData): Record<string, string> {
@@ -23,6 +23,10 @@ export type QaActionOptions = {
   redirect: boolean;
   // Save a try (the page moves to the next one), as a saved check does.
   advance: boolean;
+  // With advance: once this run has a saved try, refuse the next submit
+  // as the reading pages refuse one a saved try overtook (the server's
+  // "stale", ANSWERS_STALE_MESSAGE), saving nothing.
+  stale: boolean;
   // The ?run= id: which saved tries, and the server log marker.
   run: string;
   // Bound the wait as a lookup before the claim, with this deadline in
@@ -47,6 +51,9 @@ export async function qaAnswerAction(
   const bounded = options.precheckMs !== null;
   return guardAnswerCheck(
     async (preCheck) => {
+      // Refused before any wait, as the reading pages refuse it at the
+      // claim, before the check.
+      if (options.stale && qaLastTry(options.run)) return { message: ANSWERS_STALE_MESSAGE };
       const wait = new Promise((resolve) => setTimeout(resolve, ms));
       await (bounded ? withDeadline(wait, preCheck) : wait);
       if (options.redirect) redirect("/qa/answer-timeout/landed");

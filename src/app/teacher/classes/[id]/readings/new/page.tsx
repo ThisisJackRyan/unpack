@@ -12,6 +12,14 @@ export const metadata: Metadata = {
   title: "Add a reading",
 };
 
+// The create action runs in this page's function: its lookups give up at
+// PRE_WRITE_DEADLINE_MS (10s), a link fetch at FETCH_DEADLINE_MS (8s), then
+// one insert and the redirect. 60 leaves room for those, and ends a hung
+// request (a 504 the form shows as no reply, with everything kept) a lot
+// sooner than the platform's default. src/lib/function-budget.test.ts adds
+// it up.
+export const maxDuration = 60;
+
 export default async function NewReadingPage({ params }: Props) {
   const { id } = await params;
   const found = await loadClass(id);
@@ -31,6 +39,7 @@ export default async function NewReadingPage({ params }: Props) {
           mode="create"
           action={createReading.bind(null, found.id)}
           classGradeLabel={gradeLevelLabel(found.gradeLevel)}
+          classId={found.id}
           cancelHref={classHref}
         />
       </div>

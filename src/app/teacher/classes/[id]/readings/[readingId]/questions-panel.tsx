@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import {
   useActionState,
   useEffect,
@@ -11,6 +12,8 @@ import {
   type ReactNode,
 } from "react";
 import { questionRole, type QuestionRole } from "@/lib/ai/prompts";
+import { withRejectionFallback } from "@/components/action-fallback";
+import { questionPanelFallback } from "./question-state";
 import { questionCountLabel } from "@/lib/question-modes";
 import { LAST_QUESTION_MESSAGE } from "@/lib/shared-questions";
 import { ErrorMessage } from "@/components/error-message";
@@ -68,9 +71,13 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
   // a save, the list after a delete).
   const focusAfter = useRef<string | null>(null);
 
+  // A request that fails outright (no answer, a 504, a lapsed session, a
+  // deploy) is an error on the panel or its card, never the page's error
+  // boundary (see questionPanelFallback).
+  const guarded = withRejectionFallback(action, questionPanelFallback, unstable_rethrow);
   const [state, dispatch, pending] = useActionState(
     async (prev: QuestionActionState, formData: FormData) => {
-      const next = await action(prev, formData);
+      const next = await guarded(prev, formData);
       if (next.ok && next.intent === "update") {
         setEditingId(null);
         focusAfter.current = `edit-${next.questionId}`;

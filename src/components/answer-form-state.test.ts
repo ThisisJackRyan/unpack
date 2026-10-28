@@ -3,13 +3,20 @@ import { readFileSync } from "node:fs";
 import { describe, it, type TestContext } from "node:test";
 import { EFFORT_CHECK_DEADLINE_MS } from "@/lib/ai/settings";
 import { PRE_CHECK_DEADLINE_MS } from "@/lib/answer-check-guard";
-import { CHECK_TIMED_OUT_MESSAGE } from "@/lib/validate-answers";
+import { soloSubmitMessage } from "@/lib/self-answers-core";
+import { submitMessage } from "@/lib/submit-answers-core";
+import { ANSWERS_STALE_MESSAGE, CHECK_TIMED_OUT_MESSAGE } from "@/lib/validate-answers";
 import {
   APP_UPDATED_MESSAGE,
   APP_UPDATED_STATE,
   CHECK_NO_REPLY_MESSAGE,
   CLIENT_CHECK_TIMEOUT_MS,
+  initialAnswerView,
   isAppUpdatedError,
+  landedResult,
+  newTryView,
+  startedCheck,
+  typedAnswer,
   isNextRedirect,
   NO_REPLY_STATE,
   submitCheck,
@@ -373,5 +380,107 @@ describe("valuesForNewTry", () => {
 
   it("fills a question the boxes don't have from the new try", () => {
     assert.deepEqual(valuesForNewTry(checked, { q1: "mine" }, true), { q1: "mine", q2: "it ran away" });
+  });
+});
+
+describe("the answer form's view", () => {
+  const sent = { q1: "to see the snow", q2: "it ran away" };
+  const edit = "to see the snow, and to play in it";
+  // The server's answer to a submit that a saved try overtook: the posted
+  // answers no longer match the open questions ("stale").
+  const staleRefusal: AnswerFormState = { message: submitMessage("stale") };
+
+  it("the server reports an overtaken submit as stale, with the approved out-of-date message, on both pages", () => {
+    assert.equal(submitMessage("stale"), ANSWERS_STALE_MESSAGE);
+    assert.equal(soloSubmitMessage("stale"), ANSWERS_STALE_MESSAGE);
+    assert.equal(ANSWERS_STALE_MESSAGE, "This page is out of date. Reload it and try again.");
+  });
+
+  // Give up, edit, resubmit; then the first check lands (a new try) and
+  // the second is refused as out of date, in either order.
+  function giveUpEditResubmit() {
+    let view = initialAnswerView(1, { q1: "", q2: "" });
+    view = typedAnswer(view, "q1", sent.q1);
+    view = typedAnswer(view, "q2", sent.q2);
+    view = startedCheck(view); // submit 1
+    view = landedResult(view, NO_REPLY_STATE); // the form gives up
+    assert.equal(view.result.message, CHECK_NO_REPLY_MESSAGE);
+    view = typedAnswer(view, "q1", edit); // the student edits
+    view = startedCheck(view); // submit 2, while check 1 still runs
+    assert.deepEqual(view.result, {});
+    assert.equal(view.edited, true, "a submit doesn't reset the edited flag");
+    return view;
+  }
+  const edited = { q1: edit, q2: sent.q2 };
+
+  it("the new try first, then the refusal: the edit is kept, then the out-of-date message shows over it", () => {
+    // Check 1 lands: the page re-renders with try 2 (its answers are what
+    // submit 1 sent).
+    const { view, carried } = newTryView(giveUpEditResubmit(), 2, sent);
+    assert.equal(view.tryNumber, 2);
+    assert.deepEqual(view.values, edited);
+    assert.deepEqual(carried, edited, "saved as the new try's drafts");
+    const refused = landedResult(view, staleRefusal);
+    assert.equal(refused.result.message, ANSWERS_STALE_MESSAGE);
+    assert.deepEqual(refused.values, edited, "the edit is still in the box");
+  });
+
+  it("the refusal first, then the new try (what Chrome does): the message stays and the edit is kept", () => {
+    // Check 2's refusal is plain state; check 1's re-render is a router
+    // transition React holds until check 2 settled.
+    const refused = landedResult(giveUpEditResubmit(), staleRefusal);
+    assert.equal(refused.result.message, ANSWERS_STALE_MESSAGE);
+    assert.equal(refused.edited, true, "a refusal didn't check the boxes");
+    const { view, carried } = newTryView(refused, 2, sent);
+    assert.equal(view.tryNumber, 2);
+    assert.deepEqual(view.values, edited, "the edit is still in the box");
+    assert.deepEqual(carried, edited);
+    assert.equal(view.result.message, ANSWERS_STALE_MESSAGE, "the server's message stays");
+  });
+
+  it("a give-up with no edit: the late check's new try clears the no-reply message", () => {
+    let view = initialAnswerView(1, sent);
+    view = landedResult(startedCheck(view), NO_REPLY_STATE);
+    const next = newTryView(view, 2, sent).view;
+    assert.deepEqual(next.values, sent);
+    assert.deepEqual(next.result, {}, "the old try's no-reply message is gone");
+    const updated = newTryView(landedResult(startedCheck(initialAnswerView(1, sent)), APP_UPDATED_STATE), 2, sent).view;
+    assert.deepEqual(updated.result, {});
+  });
+
+  it("the old way (edited reset on submit) lost the edit: the regression this guards", () => {
+    // Resetting at submit, as the form used to:
+    const view = { ...giveUpEditResubmit(), edited: false };
+    assert.deepEqual(newTryView(view, 2, sent).view.values, sent);
+  });
+
+  it("a normal check: the saved check resets the flag, and the new try starts from its (cleaned) answers", () => {
+    let view = initialAnswerView(1, { q1: "", q2: "" });
+    view = typedAnswer(view, "q1", "a ");
+    view = typedAnswer(view, "q2", "b");
+    view = startedCheck(view);
+    // Its result lands, then the re-render (as Chrome orders them).
+    const landed = landedResult(view, {});
+    assert.equal(landed.edited, false);
+    const resultFirst = newTryView(landed, 2, { q1: "a", q2: "b" });
+    assert.deepEqual(resultFirst.view.values, { q1: "a", q2: "b" });
+    assert.equal(resultFirst.carried, null);
+    // The other way round keeps what was sent, which is what was checked.
+    const renderFirst = newTryView(view, 2, { q1: "a", q2: "b" });
+    assert.deepEqual(landedResult(renderFirst.view, {}).values, { q1: "a ", q2: "b" });
+  });
+
+  it("only a saved check counts as checking the boxes", () => {
+    for (const result of [NO_REPLY_STATE, APP_UPDATED_STATE, TIMED_OUT_STATE, staleRefusal, { errors: { q1: "Write an answer here first." } }, { limit: "Checking is paused." }]) {
+      assert.equal(landedResult(typedAnswer(initialAnswerView(1, sent), "q1", edit), result).edited, true, JSON.stringify(result));
+    }
+    assert.equal(landedResult(typedAnswer(initialAnswerView(1, sent), "q1", edit), {}).edited, false);
+  });
+
+  it("a message that lands without a new try stays; a new check clears it", () => {
+    let view = landedResult(startedCheck(initialAnswerView(1, sent)), TIMED_OUT_STATE);
+    assert.equal(view.result.message, CHECK_TIMED_OUT_MESSAGE);
+    view = startedCheck(view);
+    assert.deepEqual(view.result, {});
   });
 });

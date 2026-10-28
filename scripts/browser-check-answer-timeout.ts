@@ -36,166 +36,38 @@
 //             request), the form still gives up at its 2s limit, the
 //             student edits, and when the late result lands with the next
 //             try, the edit stays.
+//   stale     a 6s check that saves a try, the form waiting 4s: the
+//             student edits after the give-up and checks again before the
+//             first check lands. The first lands as try 2, and the second
+//             is refused as out of date (as the reading pages refuse a
+//             submit a saved try overtook): try 2 shows with the edit
+//             still in the box, the refusal's message
+//             (ANSWERS_STALE_MESSAGE) shows, and the button works again.
 //   precheck  a wait bounded as a lookup before the claim (1s), through
 //             the reading pages' guardAnswerCheck: the server's timeout
 //             message, well before the client limit.
 //   gate      without UNPACK_QA_ROUTES the route is a 404.
 // Prints PASS/FAIL lines and exits non-zero on any failure. Chrome and the
 // servers are always stopped.
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { CHECK_NO_REPLY_MESSAGE } from "@/components/answer-form-state";
-import { CHECK_TIMED_OUT_MESSAGE } from "@/lib/validate-answers";
+import { ANSWERS_STALE_MESSAGE, CHECK_TIMED_OUT_MESSAGE } from "@/lib/validate-answers";
+import {
+  buildUnlessSkipped,
+  check,
+  CHROME,
+  evaluate,
+  freePort,
+  launchChrome,
+  runChecks,
+  sleep,
+  startServer,
+  waitFor,
+  type Cdp,
+} from "./lib/browser-check";
 
-const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const SLOW_MS = 10_000;
 const LIMIT_MS = 2_000;
-
-// Dummy values, as in the CI build. The Clerk key is Clerk's documented
-// example (example.clerk.accounts.dev), not a real instance.
-const DUMMY_ENV = {
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk",
-  CLERK_SECRET_KEY: "sk_test_dummy",
-  NEXT_PUBLIC_CLERK_SIGN_IN_URL: "/sign-in",
-  NEXT_PUBLIC_CLERK_SIGN_UP_URL: "/sign-up",
-  DATABASE_URL: "postgresql://user:password@localhost:5432/unpack",
-  AI_GATEWAY_API_KEY: "dummy",
-  NEXT_TELEMETRY_DISABLED: "1",
-};
-
-let failures = 0;
-function check(ok: boolean, label: string, detail = "") {
-  if (!ok) failures += 1;
-  console.log(`${ok ? "PASS" : "FAIL"} ${label}${detail ? ` (${detail})` : ""}`);
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-const children: ChildProcess[] = [];
-function start(command: string, args: string[], env: Record<string, string>, log: string[]): ChildProcess {
-  const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
-  const keep = (chunk: Buffer) => {
-    log.push(chunk.toString());
-    if (log.length > 2000) log.shift();
-  };
-  child.stdout?.on("data", keep);
-  child.stderr?.on("data", keep);
-  children.push(child);
-  return child;
-}
-
-function stopAll() {
-  for (const child of children) {
-    if (child.exitCode !== null || child.pid === undefined) continue;
-    try {
-      // The whole group: pnpm and next start, or Chrome and its helpers.
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      child.kill("SIGKILL");
-    }
-  }
-}
-
-function run(command: string, args: string[], env: Record<string, string>): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: "inherit" });
-    child.on("exit", (code) => resolve(code ?? 1));
-  });
-}
-
-async function waitFor<T>(label: string, timeoutMs: number, probe: () => Promise<T | undefined | false>): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const value = await probe();
-      if (value) return value;
-    } catch {
-      // Not up yet.
-    }
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
-    await sleep(100);
-  }
-}
-
-async function startServer(port: number, qa: boolean, log: string[]) {
-  start("pnpm", ["exec", "next", "start", "-p", String(port)], {
-    ...DUMMY_ENV,
-    ...(qa ? { UNPACK_QA_ROUTES: "1" } : {}),
-  }, log);
-  await waitFor(`next start on ${port}`, 60_000, async () => (await fetch(`http://127.0.0.1:${port}/`)).status > 0);
-}
-
-// A minimal CDP client for one page target.
-type Cdp = {
-  send: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  // One handler per event method (the last one set wins); null removes it.
-  on: (method: string, handler: ((params: Record<string, unknown>) => void) | null) => void;
-  close: () => void;
-};
-
-function connect(url: string): Promise<Cdp> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
-    let nextId = 0;
-    const waiting = new Map<number, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }>();
-    const handlers = new Map<string, (params: Record<string, unknown>) => void>();
-    ws.addEventListener("message", (event) => {
-      const msg = JSON.parse(String(event.data)) as {
-        id?: number;
-        method?: string;
-        params?: Record<string, unknown>;
-        result?: Record<string, unknown>;
-        error?: { message: string };
-      };
-      if (msg.id === undefined) {
-        if (msg.method) handlers.get(msg.method)?.(msg.params ?? {});
-        return;
-      }
-      const w = waiting.get(msg.id);
-      if (!w) return;
-      waiting.delete(msg.id);
-      if (msg.error) w.reject(new Error(msg.error.message));
-      else w.resolve(msg.result ?? {});
-    });
-    ws.addEventListener("error", () => reject(new Error(`CDP connection to ${url} failed`)));
-    ws.addEventListener("open", () =>
-      resolve({
-        send: (method, params = {}) =>
-          new Promise((res, rej) => {
-            nextId += 1;
-            waiting.set(nextId, { resolve: res, reject: rej });
-            ws.send(JSON.stringify({ id: nextId, method, params }));
-          }),
-        on: (method, handler) => {
-          if (handler) handlers.set(method, handler);
-          else handlers.delete(method);
-        },
-        close: () => ws.close(),
-      }),
-    );
-  });
-}
-
-async function evaluate<T>(cdp: Cdp, expression: string): Promise<T> {
-  const out = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (out.exceptionDetails) throw new Error(`page error: ${JSON.stringify(out.exceptionDetails)}`);
-  return (out.result as { value: T }).value;
-}
 
 // What the checks read off the page.
 type Snapshot = {
@@ -451,6 +323,50 @@ async function latencyCase(cdp: Cdp, base: string, as: Variant) {
   }
 }
 
+// The PR 20 follow-up's rare loss: give up, edit, check again while the
+// first check is still running; the first lands (a new try), then the
+// second is refused as out of date. Next sends one server action at a
+// time, so the second request goes out once the first has answered, and
+// React applies the refusal before the router's re-render with the new
+// try (see landedResult in answer-form-state.ts).
+async function staleCase(cdp: Cdp, base: string, as: Variant) {
+  const label = `${as} stale`;
+  const slow = 6_000;
+  const limit = 4_000;
+  console.log(`-- ${label}: the first check takes ${slow}ms and saves a try, the form waits ${limit}ms; edit and check again; the second is refused as out of date`);
+  const run = runId(as, "stale");
+  await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=${slow}&limit=${limit}&advance=1&stale=1&run=${run}`);
+  const t0 = await fillAndSubmit(cdp);
+  const gaveUp = await waitFor("the no-reply message", slow, async () => {
+    const s = await snapshot(cdp);
+    return s.message === CHECK_NO_REPLY_MESSAGE && !s.disabled ? s : undefined;
+  }).catch(() => undefined);
+  check(!!gaveUp, `${label}: the form gave up`, `${Date.now() - t0}ms`);
+  if (!gaveUp) return;
+  await evaluate(cdp, `(() => { const t = document.querySelectorAll("form textarea")[0]; t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
+  await cdp.send("Input.insertText", { text: EDIT });
+  const edited = [ANSWERS[0] + EDIT, ANSWERS[1]];
+  check(JSON.stringify((await snapshot(cdp)).answers) === JSON.stringify(edited), `${label}: the edit is in the box`);
+  await evaluate(cdp, `document.querySelector('form button[type="submit"]').click()`);
+  const resubmitted = await waitFor("the second check's pending button", 1_000, async () => {
+    const s = await snapshot(cdp);
+    return s.disabled ? s : undefined;
+  }).catch(() => undefined);
+  check(!!resubmitted && Date.now() - t0 < slow, `${label}: the second check is running before the first lands`, `${Date.now() - t0}ms`);
+
+  await waitFor("try 2 and the second check's answer", slow + limit, async () => {
+    const s = await snapshot(cdp);
+    return s.tryLabel === "Try 2 of 3" && !s.disabled ? s : undefined;
+  }).catch(() => undefined);
+  // Anything that would still replace the message or the boxes has landed.
+  await sleep(500);
+  const last = await snapshot(cdp);
+  check(last.tryLabel === "Try 2 of 3", `${label}: the first check landed as try 2`, last.tryLabel);
+  check(last.message === ANSWERS_STALE_MESSAGE, `${label}: the second check's out-of-date refusal shows`, last.message);
+  check(JSON.stringify(last.answers) === JSON.stringify(edited), `${label}: the edit is still in the box`, JSON.stringify(last.answers));
+  check(!last.disabled && last.button === "Check my answers", `${label}: the button works again`, last.button);
+}
+
 // A wait bounded as a lookup before the claim, through guardAnswerCheck:
 // the server's own timeout message, long before the client's limit.
 async function precheckCase(cdp: Cdp, base: string, as: Variant) {
@@ -469,11 +385,7 @@ async function precheckCase(cdp: Cdp, base: string, as: Variant) {
 
 async function main() {
   if (!existsSync(CHROME)) throw new Error(`no Chrome at ${CHROME} (set CHROME_PATH)`);
-  if (!process.argv.includes("--no-build")) {
-    console.log("-- next build");
-    const code = await run("pnpm", ["exec", "next", "build"], DUMMY_ENV);
-    if (code !== 0) throw new Error(`next build exited ${code}`);
-  }
+  await buildUnlessSkipped();
 
   const port = await freePort();
   await startServer(port, true, serverLog);
@@ -481,35 +393,15 @@ async function main() {
   const qaStatus = (await fetch(`${base}/qa/answer-timeout`)).status;
   if (qaStatus !== 200) throw new Error(`/qa/answer-timeout answered ${qaStatus}:\n${serverLog.join("").slice(-2000)}`);
 
-  const profile = mkdtempSync(join(tmpdir(), "unpack-chrome-"));
+  const { cdp, removeProfile } = await launchChrome();
   try {
-    start(CHROME, [
-      "--headless=new",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-gpu",
-      "--no-sandbox",
-      "about:blank",
-    ], {}, []);
-    const devtools = await waitFor("Chrome's DevTools port", 30_000, async () => {
-      const lines = readFileSync(join(profile, "DevToolsActivePort"), "utf8").trim().split("\n");
-      return lines.length >= 2 ? Number(lines[0]) : undefined;
-    });
-    const targets = (await (await fetch(`http://127.0.0.1:${devtools}/json/list`)).json()) as { type: string; webSocketDebuggerUrl: string }[];
-    const page = targets.find((t) => t.type === "page");
-    if (!page) throw new Error("no page target in Chrome");
-    const cdp = await connect(page.webSocketDebuggerUrl);
-    await cdp.send("Page.enable");
-    await cdp.send("Runtime.enable");
-
     for (const as of ["class", "self"] as const) {
       await slowCase(cdp, base, as);
       await fastCase(cdp, base, as);
       await redirectCase(cdp, base, as);
       await networkCase(cdp, base, as);
       await latencyCase(cdp, base, as);
+      await staleCase(cdp, base, as);
       await precheckCase(cdp, base, as);
     }
     cdp.close();
@@ -522,18 +414,8 @@ async function main() {
       check(status === 404, `gate: ${path} is a 404 without the env var`, String(status));
     }
   } finally {
-    stopAll();
-    rmSync(profile, { recursive: true, force: true });
+    removeProfile();
   }
 }
 
-main()
-  .catch((error: unknown) => {
-    failures += 1;
-    console.log(`FAIL ${error instanceof Error ? error.message : String(error)}`);
-  })
-  .finally(() => {
-    stopAll();
-    console.log(failures === 0 ? "All browser checks passed." : `${failures} browser check(s) failed.`);
-    process.exit(failures === 0 ? 0 : 1);
-  });
+runChecks(main);

@@ -26,6 +26,7 @@
     "ops:list-pending-clerk-deletes": "node --import ./scripts/ts-paths.mjs scripts/list-pending-clerk-deletes.ts",
     "ops:sweep-roleless-clerk-users": "node --import ./scripts/ts-paths.mjs scripts/sweep-roleless-clerk-users.ts",
     "browser:check-answer-timeout": "node --import ./scripts/ts-paths.mjs scripts/browser-check-answer-timeout.ts",
+    "browser:check-create-guard": "node --import ./scripts/ts-paths.mjs scripts/browser-check-create-guard.ts",
     "check:uncaught-error-logs": "node --import ./scripts/ts-paths.mjs scripts/check-uncaught-error-logs.ts"
   },
   "dependencies": {

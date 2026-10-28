@@ -28,3 +28,10 @@ export type ReadingFormState = {
   // At the link limit: an amber note with the retry time.
   limit?: string;
 };
+
+// The new reading forms' message for a create that got no answer (the
+// connection dropped, a 504, a sign-in that lapsed): the reading may or may
+// not have been saved. The form makes "Check your readings" a link to the
+// readings list (see noReplyParts in reading-form-fallback.ts).
+export const CREATE_NO_REPLY_MESSAGE =
+  "We couldn’t hear back. Your reading may have saved anyway. What you typed is still here. Check your readings before you try again.";

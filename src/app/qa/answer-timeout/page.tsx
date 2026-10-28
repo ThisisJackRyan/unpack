@@ -14,7 +14,8 @@ import { qaLastTry } from "./tries";
 // as /learn/r/[readingId] does (src/components/reading-answer-form.tsx).
 // ?sleep=<ms> is how long the action takes, ?limit=<ms> how long the form
 // waits, ?redirect=1 makes the action redirect, ?advance=1 makes it save a
-// try (the page moves to the next one), ?precheck=<ms> bounds the wait as
+// try (the page moves to the next one), ?stale=1 refuses a submit once the
+// run has a saved try (as out of date), ?precheck=<ms> bounds the wait as
 // a lookup before the claim, and ?run=<id> keeps one case's tries apart.
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "QA answer timeout", robots: { index: false, follow: false } };
@@ -53,6 +54,7 @@ export default async function QaAnswerTimeoutPage({
     sleepMs: msParam(params.sleep, 200),
     redirect: param(params.redirect) === "1",
     advance: param(params.advance) === "1",
+    stale: param(params.stale) === "1",
     run,
     precheckMs: params.precheck === undefined ? null : msParam(params.precheck, 0),
   });

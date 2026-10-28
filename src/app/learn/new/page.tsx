@@ -13,6 +13,14 @@ export const metadata: Metadata = {
   title: "New reading",
 };
 
+// The create action runs in this page's function: its lookups give up at
+// PRE_WRITE_DEADLINE_MS (10s), a link fetch at FETCH_DEADLINE_MS (8s), then
+// one insert and the redirect. 60 leaves room for those, and ends a hung
+// request (a 504 the form shows as no reply, with everything kept) a lot
+// sooner than the platform's default. src/lib/function-budget.test.ts adds
+// it up.
+export const maxDuration = 60;
+
 export default async function NewSelfReadingPage() {
   const account = await requireSelfLearner();
   const state = await getAllowance(account.id);

@@ -22,6 +22,7 @@
 // Callers add their own ids (classId, readingId: app uuids).
 
 import { DrizzleQueryError } from "drizzle-orm";
+import { DbReadTimeoutError } from "../db/read-timeout";
 import { ClerkUserNoEmailError } from "./clerk-user-errors";
 import { DeadlineError } from "./deadline";
 import { FetchArticleError } from "./fetch-errors";
@@ -40,7 +41,13 @@ export const MAX_CAUSES = 4;
 // Messages built only from fixed text and enums. QuestionWriterError and
 // EffortCheckError are left out: their reason can quote a schema problem
 // in the model's output.
-const MESSAGE_ALLOWED = [DeadlineError, JoinCodeExhaustedError, FetchArticleError, ClerkUserNoEmailError];
+const MESSAGE_ALLOWED = [
+  DeadlineError,
+  DbReadTimeoutError,
+  JoinCodeExhaustedError,
+  FetchArticleError,
+  ClerkUserNoEmailError,
+];
 
 const NAME_PATTERN = /^[A-Za-z_$][\w$.]{0,79}$/;
 const CODE_PATTERN = /^[A-Z0-9_]{1,40}$/;
@@ -51,6 +58,8 @@ const TIMEOUT_NAMES = new Set([
   "ResponseAborted",
   "GatewayTimeoutError",
   "DeadlineError",
+  // A database read past DB_READ_TIMEOUT_MS (src/db/read-timeout.ts).
+  "DbReadTimeoutError",
 ]);
 
 const TIMEOUT_CODES = new Set<string | number>([

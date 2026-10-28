@@ -7,7 +7,8 @@
 //
 //   DATABASE_URL=... CLERK_SECRET_KEY=... pnpm ops:sweep-roleless-clerk-users \
 //     --expect-db=<host>/<dbname> --expect-instance=<ins_id>
-//   (then the --apply command the dry run prints, with --expect-count=N)
+//   (then the --apply command the dry run prints, with --expect-count=N
+//   and --expect-ids=<digest>)
 //
 // Guards, each refusing before anything changes:
 // - Environment, before any Clerk user is listed or any row looked up:
@@ -23,6 +24,10 @@
 //   have none (the wrong database for this instance looks like that).
 // - Count, with --apply: --expect-count=N is required and must equal the
 //   candidates this run found.
+// - Ids, with --apply: --expect-ids=<digest> is required and must equal
+//   the id digest of the candidates this run found (the same digest the
+//   dry run prints). A mismatch prints only the two digests and exits 1;
+//   a missing one is refused with the usage (exit 2).
 //
 // Dry run by default: pages through every Clerk user (Backend API, GET
 // /v1/users; only id, created_at, last_sign_in_at and last_active_at are
@@ -52,6 +57,7 @@
 // driver at a local Neon proxy (as in the db checks).
 
 import { neonConfig } from "@neondatabase/serverless";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { ClerkListError } from "./lib/pending-clerk-deletes";
 import { parseOptions, runSweep, USAGE } from "./lib/roleless-clerk-sweep";
 import { sweepDbDeps } from "./lib/roleless-clerk-sweep-db";
@@ -91,12 +97,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  // Name and code only (a driver message can name the database user or
-  // host); our own Clerk errors carry just an HTTP status.
+  // Safe fields only (safe-error-fields.ts: a driver message can name the
+  // database user or host); our own Clerk errors carry just an HTTP status.
   if (error instanceof ClerkListError) console.error("sweep-roleless-clerk-users failed:", error.message);
-  else {
-    const { name, code } = error as { name?: unknown; code?: unknown };
-    console.error("sweep-roleless-clerk-users failed:", name, code);
-  }
+  else console.error("sweep-roleless-clerk-users failed:", safeErrorFields(error));
   process.exit(1);
 });

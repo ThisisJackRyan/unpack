@@ -1,37 +1,25 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { getClassForTeacher } from "@/lib/classes";
+import { guardCreate, readingSaveFailedState } from "@/lib/create-guard";
 import { fetchArticle } from "@/lib/fetch-article";
 import { linkFetchRetryAt, recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
 import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
-import { resolveReadingSource, SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
 import {
   getReadingForTeacher,
   insertReading,
   saveReadingEdit,
-  type ReadingDraft,
 } from "@/lib/readings";
 import { safeErrorFields, type SafeErrorFields } from "@/lib/safe-error-fields";
 import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
-import { validateReadingForm } from "@/lib/validate-reading";
+import { createTeacherReadingWith } from "@/lib/teacher-reading-create";
+import { readingFormInput, readingFormValues, validateReadingForm } from "@/lib/validate-reading";
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { GENERATE_FLAG } from "./[readingId]/question-state";
-
-function readForm(formData: FormData, source: unknown) {
-  return validateReadingForm({
-    source,
-    url: formData.get("url"),
-    title: formData.get("title"),
-    bodyText: formData.get("bodyText"),
-    gradeLevel: formData.get("gradeLevel"),
-    questionCount: formData.get("questionCount"),
-    questionMode: formData.get("questionMode"),
-  });
-}
 
 // Safe fields only (safe-error-fields.ts): a query error's message can
 // echo the row, including the reading text.
@@ -39,61 +27,43 @@ function logDbError(where: string, fields: SafeErrorFields) {
   console.error(where, fields);
 }
 
+// Adds a draft reading to the class (see createTeacherReadingWith for the
+// steps). Never throws, except Next's redirects: every other failure, a
+// lookup past PRE_WRITE_DEADLINE_MS included, is
+// SAVE_READING_FAILED_MESSAGE in the form, with everything typed still
+// there (see create-guard.ts).
 export async function createReading(
   classId: string,
   _prev: ReadingFormState,
   formData: FormData,
 ): Promise<ReadingFormState> {
-  const result = readForm(formData, formData.get("source"));
-  if (!result.ok) {
-    return { errors: result.errors, values: result.values };
-  }
-  const { data, values } = result;
-
-  // Check ownership before fetching anything.
-  const teacher = await getOrCreateTeacher();
-  if (!(await getClassForTeacher(classId, teacher.id))) {
-    return { errors: { form: "We couldn’t find this class." }, values };
-  }
-
-  const resolved = await resolveReadingSource(data, {
-    recordLinkFetch: () => recordLinkFetchAttempt(teacher.id),
-    limitedMessage: async () =>
-      withRetryAt(LINK_FETCH_LIMITED_MESSAGE, await linkFetchRetryAt(teacher.id), await requestRetryClock()),
-    fetchArticle: (url) => fetchArticle(url),
-    log: (message, fields) => console.error(`createReading: ${message}`, fields),
-  });
-  if (!resolved.ok) {
-    return { errors: resolved.errors, values, suggestText: resolved.suggestText, limit: resolved.limit };
-  }
-  const draft: ReadingDraft = {
-    ...resolved.source,
-    gradeLevel: data.gradeLevel,
-    questionCount: data.questionCount,
-    questionMode: data.questionMode,
-  };
-
-  // redirect() throws, so it stays outside this try.
-  let readingId: string;
-  try {
-    const created = await insertReading(classId, teacher.id, draft);
-    if (!created) {
-      return { errors: { form: "We couldn’t find this class." }, values };
-    }
-    readingId = created.id;
-  } catch (error) {
-    logDbError("createReading: insertReading failed", safeErrorFields(error));
-    return {
-      errors: { form: SAVE_READING_FAILED_MESSAGE },
-      values,
-    };
-  }
+  const input = readingFormInput(formData);
+  const result = await guardCreate(
+    (preWrite) =>
+      createTeacherReadingWith(classId, input, preWrite, {
+        requireTeacher: getOrCreateTeacher,
+        ownsClass: async (id, teacherId) => !!(await getClassForTeacher(id, teacherId)),
+        recordLinkFetch: (teacherId) => recordLinkFetchAttempt(teacherId),
+        linkLimitedMessage: async (teacherId) =>
+          withRetryAt(LINK_FETCH_LIMITED_MESSAGE, await linkFetchRetryAt(teacherId), await requestRetryClock()),
+        fetchArticle: (url) => fetchArticle(url),
+        insertReading: (id, teacherId, draft) => insertReading(id, teacherId, draft),
+        log: (message, fields) => console.error(`createReading: ${message}`, fields),
+      }),
+    () => ({ state: readingSaveFailedState(readingFormValues(input)) }),
+    {
+      // getOrCreateTeacher's redirects are errors Next must handle.
+      rethrow: unstable_rethrow,
+      onError: (error) => console.error("createReading: create failed", safeErrorFields(error)),
+    },
+  );
+  if ("state" in result) return result.state;
 
   // "Create & generate": the reading page starts writing the shared set
   // with the same action as its Generate button (same checks and limits).
   // A per-student reading has no set to write, so it just saves.
-  const generate = formData.get("then") === "generate" && draft.questionMode === "shared";
-  redirect(`/teacher/classes/${classId}/readings/${readingId}${generate ? `?${GENERATE_FLAG}=1` : ""}`);
+  const generate = formData.get("then") === "generate" && result.draft.questionMode === "shared";
+  redirect(`/teacher/classes/${classId}/readings/${result.readingId}${generate ? `?${GENERATE_FLAG}=1` : ""}`);
 }
 
 export async function updateReading(

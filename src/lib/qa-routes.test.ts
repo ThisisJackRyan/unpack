@@ -7,6 +7,9 @@ const QA_FILES = [
   "src/app/qa/answer-timeout/page.tsx",
   "src/app/qa/answer-timeout/landed/page.tsx",
   "src/app/qa/answer-timeout/actions.ts",
+  "src/app/qa/create-guard/page.tsx",
+  "src/app/qa/create-guard/landed/page.tsx",
+  "src/app/qa/create-guard/actions.ts",
 ];
 
 // The body of the file's exported page or action: after the first brace
@@ -35,7 +38,7 @@ describe("QA routes", () => {
   });
 
   it("only /qa and below are QA paths (the proxy skips Clerk for them only with the env var)", () => {
-    for (const path of ["/qa", "/qa/answer-timeout", "/qa/answer-timeout/landed"]) assert.equal(isQaPath(path), true, path);
+    for (const path of ["/qa", "/qa/answer-timeout", "/qa/answer-timeout/landed", "/qa/create-guard", "/qa/create-guard/landed"]) assert.equal(isQaPath(path), true, path);
     for (const path of ["/", "/qa-x", "/quiz", "/c/qa/x", "/learn/qa", "/welcome"]) assert.equal(isQaPath(path), false, path);
     assert.match(readFileSync("src/proxy.ts", "utf8"), /if \(qaRoutesEnabled\(\) && isQaPath\(req\.nextUrl\.pathname\)\) return NextResponse\.next\(\);/);
   });
@@ -50,6 +53,15 @@ describe("QA routes", () => {
     }
     const qa = readFileSync("src/app/qa/answer-timeout/page.tsx", "utf8");
     assert.match(qa, /\? SelfAnswerForm : ClassAnswerForm/);
+  });
+
+  it("the QA create page renders the real reading form in solo mode, through the real guard", () => {
+    const page = readFileSync("src/app/qa/create-guard/page.tsx", "utf8");
+    assert.match(page, /<ReadingForm\s+mode="solo"/);
+    assert.match(page, /import \{ ReadingForm \} from "@\/components\/reading-form";/);
+    const action = readFileSync("src/app/qa/create-guard/actions.ts", "utf8");
+    assert.match(action, /guardCreate\(/);
+    assert.match(action, /createSelfReadingWith\(/);
   });
 
   it("only the QA page passes a client timeout to the answer form", () => {

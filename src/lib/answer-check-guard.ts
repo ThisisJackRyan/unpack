@@ -6,6 +6,7 @@
 // with fakes.
 
 import { TIMED_OUT_STATE, type AnswerFormState } from "@/components/answer-form-state";
+import { isDbReadTimeout } from "@/db/read-timeout";
 import { DeadlineError } from "./deadline";
 
 export { DeadlineError, withDeadline } from "./deadline";
@@ -33,9 +34,11 @@ export type GuardOptions = {
 };
 
 // Runs the check with a pre-check signal (pass it to withDeadline for each
-// lookup before the claim). A lookup past the deadline is the timeout
-// message; any other error is "Something went wrong", with the form and
-// its answers still there.
+// lookup before the claim). A lookup past the deadline, or a database read
+// past DB_READ_TIMEOUT_MS (src/db/read-timeout.ts: only reads are bounded,
+// and every write after the claim is unbounded, so a try is never saved
+// behind it), is the timeout message; any other error is "Something went
+// wrong", with the form and its answers still there.
 export async function guardAnswerCheck(
   run: (preCheck: AbortSignal) => Promise<AnswerFormState>,
   { rethrow, onError, deadlineMs = PRE_CHECK_DEADLINE_MS }: GuardOptions,
@@ -45,6 +48,6 @@ export async function guardAnswerCheck(
   } catch (error) {
     rethrow(error);
     onError(error);
-    return error instanceof DeadlineError ? TIMED_OUT_STATE : { message: SUBMIT_FAILED_MESSAGE };
+    return error instanceof DeadlineError || isDbReadTimeout(error) ? TIMED_OUT_STATE : { message: SUBMIT_FAILED_MESSAGE };
   }
 }
