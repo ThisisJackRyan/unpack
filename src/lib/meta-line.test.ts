@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { metaParts, metaSpokenText } from "./meta-line";
+import { metaParts, metaSpokenText, studentOnReading } from "./meta-line";
+
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 describe("meta line", () => {
   it("keeps only present parts, so a missing one leaves no separator or comma", () => {
@@ -9,15 +11,44 @@ describe("meta line", () => {
       "3 questions",
       "From example.com",
     ]);
-    assert.equal(metaSpokenText(["3 questions", null]), "3 questions");
-    assert.equal(metaSpokenText([null, "3 questions"]), "3 questions");
+    assert.equal(metaSpokenText(["3 questions", null]), "3 questions.");
+    assert.equal(metaSpokenText([null, "3 questions"]), "3 questions.");
     assert.equal(metaSpokenText([]), "");
   });
 
-  it("gives screen readers one clean comma-separated sentence, with no dot separators", () => {
-    const spoken = metaSpokenText(["Grade 5", "3 questions", "From example.com"]);
-    assert.equal(spoken, "Grade 5, 3 questions, From example.com");
-    assert.doesNotMatch(spoken, /·|, ,|^,|,\s*$/);
+  // C4: short sentences, not a comma list ("3 questions, Same for
+  // everyone" read as one run-on phrase).
+  it("gives screen readers short sentences, with no dot separators or commas between parts", () => {
+    assert.equal(metaSpokenText(["3 questions", "Same for everyone"]), "3 questions. Same for everyone.");
+    assert.equal(metaSpokenText(["Grade 5", "3 questions", "From example.com"]), "Grade 5. 3 questions. From example.com.");
+    assert.equal(metaSpokenText(["3 questions", "Written for Grade 5"]), "3 questions. Written for Grade 5.");
+    assert.equal(metaSpokenText(["Oct 27", "Grade 5", "2 of 3 done"]), "Oct 27. Grade 5. 2 of 3 done.");
+    for (const spoken of [metaSpokenText(["A", "B", "C"]), metaSpokenText(["3 questions", "Same for everyone"])]) {
+      assert.doesNotMatch(spoken, /·|,|\.\.|^\.|\s\./);
+    }
+  });
+
+  it("doesn't double the end mark", () => {
+    assert.equal(metaSpokenText(["Done!", "Why?", "Ok."]), "Done! Why? Ok.");
+  });
+
+  it("speaks a student and a reading as one phrase", () => {
+    assert.equal(studentOnReading("Qapr Sx", "QA PR16 Oct 27"), "Qapr Sx on QA PR16 Oct 27");
+    assert.equal(studentOnReading(" Maya Ro ", " Foxes "), "Maya Ro on Foxes");
+  });
+
+  it("MetaLine speaks `spoken` when given, and the queue headings use it", () => {
+    const component = read("../components/meta-line.tsx");
+    assert.match(component, /<span className="sr-only">\{spoken \?\? metaSpokenText\(present\)\}<\/span>/);
+    const queue = read("../app/teacher/classes/[id]/challenges/queue.tsx");
+    const headings = queue.match(/<MetaLine as="span" parts=\{\[item\.studentName, item\.readingTitle\]\} spoken=\{studentOnReading\(item\.studentName, item\.readingTitle\)\} \/>/g);
+    assert.equal(headings?.length, 2);
+  });
+
+  it("Let them try again names the student and reading as a phrase, not a comma list", () => {
+    const reset = read("../app/teacher/classes/[id]/students/reset-tries.tsx");
+    assert.match(reset, /<span className="sr-only">\s*\{" "\}\s*for \{name\} on \{readingTitle\}\s*<\/span>/);
+    assert.doesNotMatch(reset, /\(\{name\}, \{readingTitle\}\)/);
   });
 
   // The reading meta lines (student reader, self-learner reader, teacher

@@ -16,6 +16,7 @@ import {
 } from "@/lib/challenge-queue-core";
 import { ErrorMessage } from "@/components/error-message";
 import { MetaLine } from "@/components/meta-line";
+import { studentOnReading } from "@/lib/meta-line";
 import type { DecideState } from "./state";
 
 type Action = (state: DecideState, formData: FormData) => Promise<DecideState>;
@@ -75,7 +76,7 @@ function NoNoteRow({ classId, item }: { classId: string; item: NoNoteItem }) {
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <h2 id={headingId} className="min-w-0 text-xl font-semibold break-words text-ink-950">
-            <MetaLine as="span" parts={[item.studentName, item.readingTitle]} />
+            <MetaLine as="span" parts={[item.studentName, item.readingTitle]} spoken={studentOnReading(item.studentName, item.readingTitle)} />
           </h2>
           <span className={`${pill} bg-warning-50 text-warning-900 text-base`}>
             <span aria-hidden="true" className="h-2 w-2 rounded-full bg-warning-500" /> {NO_NOTE_LABEL}
@@ -124,7 +125,7 @@ function ChallengeCard({
     <li aria-labelledby={headingId} className="flex flex-col gap-5 rounded-3xl border border-ink-200 bg-white p-5 sm:p-6">
       <div className="flex flex-col gap-2">
         <h2 id={headingId} className="text-xl font-semibold break-words text-ink-950">
-          <MetaLine as="span" parts={[item.studentName, item.readingTitle]} />
+          <MetaLine as="span" parts={[item.studentName, item.readingTitle]} spoken={studentOnReading(item.studentName, item.readingTitle)} />
         </h2>
         <p className="flex flex-wrap items-center gap-2 text-base text-ink-700">
           <span className={`${pill} bg-ink-100 text-ink-700 text-base tabular-nums`}>
