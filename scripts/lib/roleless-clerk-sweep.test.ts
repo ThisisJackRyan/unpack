@@ -222,6 +222,14 @@ describe("pickCandidates", () => {
     );
   });
 
+  it("an aged self-learner is never a candidate, like a teacher", () => {
+    const old = NOW.getTime() - 400 * DAY;
+    const aged = [{ id: "user_self", createdAt: old, lastSeenAt: old }];
+    assert.deepEqual(pickCandidates(aged, [{ clerk_user_id: "user_self", role: "self_learner" }], []), []);
+    // Even with its hash listed as pending.
+    assert.deepEqual(pickCandidates(aged, [{ clerk_user_id: "user_self", role: "self_learner" }], [{ clerk_user_hash: hashClerkUserId("user_self"), confirmed: false }]), []);
+  });
+
   it("the lookup reads ids and roles by id, and listed rows by hash", () => {
     const [teachers, deleted] = sweepLookupStatements(["user_a", "user_b"]);
     assert.match(teachers.text, /select clerk_user_id, role from teachers where clerk_user_id = any\(\$1::text\[\]\)/);
@@ -346,6 +354,33 @@ describe("runSweep", () => {
     assert.equal(db.roles.user_a, "teacher");
     assert.deepEqual(result, { checked: 2, candidates: 2, deleted: 1, skippedHasRole: 1, stoppedStatus: null });
     assert.ok(lines.includes(`  skipped user_a  (${hashClerkUserId("user_a").slice(0, 12)}): has a role now, nothing changed`));
+  });
+
+  it("apply never deletes an aged self-learner, locally or in Clerk", async () => {
+    const clerk = fakeClerk([clerkUser("user_self", 400), clerkUser("user_none", 30)]);
+    const db = fakeDb({ user_self: "self_learner" });
+    const lines: string[] = [];
+    const result = await runSweep(APPLY, deps(clerk, db, lines));
+    assert.deepEqual(clerk.deletes(), ["user_none"]);
+    assert.deepEqual(db.deletedLocal, ["user_none"]);
+    assert.equal(db.roles.user_self, "self_learner");
+    assert.equal(lines.some((l) => l.includes("user_self")), false);
+    assert.deepEqual(result, { checked: 2, candidates: 1, deleted: 1, skippedHasRole: 0, stoppedStatus: null });
+  });
+
+  it("the re-check skips an account that became a self-learner after the lookup", async () => {
+    const clerk = fakeClerk([clerkUser("user_a", 10)]);
+    const db = fakeDb({ user_a: null });
+    const lookup = db.deps.lookup;
+    db.deps.lookup = async (ids) => {
+      const found = await lookup(ids);
+      db.roles.user_a = "self_learner";
+      return found;
+    };
+    const result = await runSweep(APPLY, deps(clerk, db, []));
+    assert.deepEqual(clerk.deletes(), []);
+    assert.equal(db.roles.user_a, "self_learner");
+    assert.deepEqual(result, { checked: 1, candidates: 1, deleted: 0, skippedHasRole: 1, stoppedStatus: null });
   });
 
   it("stops on the first Clerk error, printing only the status", async () => {

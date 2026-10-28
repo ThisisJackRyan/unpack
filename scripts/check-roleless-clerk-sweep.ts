@@ -15,6 +15,10 @@
 // (c) Apply: a row with no role is deleted, its hash confirmed; then a
 //     late user.created is refused (deleted_account) and the webhook's
 //     user.deleted is already_gone.
+// (d) Apply on an aged self-learner (age_confirmed_at set, as the check
+//     constraint needs) and a no-role row that becomes a self-learner
+//     right after the lookup: both rows, roles and age_confirmed_at are
+//     kept, nothing is listed, and no Clerk DELETE is sent for either.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-roleless-clerk-sweep
 //
@@ -148,7 +152,7 @@ async function checkDryRunAndRace(): Promise<void> {
   check((await roleOf(noRole)) === "teacher" && (await listState(noRole)) === "none", "the raced account keeps its row and role, nothing listed");
   check((await listState(noRow)) === "confirmed" && (await listState(pending)) === "confirmed", "deleted hashes confirmed");
   check((await roleOf(teacher)) === "teacher" && (await roleOf(self)) === "self_learner", "role holders untouched");
-  check((await listState(young)) === "none" && (await listState(teacher)) === "none", "young id and role holders not listed");
+  check((await listState(young)) === "none" && (await listState(teacher)) === "none" && (await listState(self)) === "none", "young id and role holders not listed");
   check((await roleOf(back)) === null && (await listState(back)) === "none", "the recently active no-role row is kept, nothing listed");
 }
 
@@ -169,6 +173,36 @@ async function checkDeleteThenLateEvents(): Promise<void> {
   check(deleted === "already_gone", `user.deleted is already_gone (${deleted})`);
 }
 
+async function ageConfirmed(clerkUserId: string): Promise<boolean> {
+  const rows = await sql.query(`select age_confirmed_at is not null as confirmed from teachers where clerk_user_id = $1::text`, [clerkUserId]);
+  return rows[0]?.confirmed === true;
+}
+
+async function checkSelfLearnerNeverSwept(): Promise<void> {
+  console.log("\n(d) apply on an aged self-learner, and a no-role row that becomes one after the lookup");
+  const self = id("oldself");
+  const becomes = id("becomes");
+  await insertAccount(self, "self_learner");
+  await insertAccount(becomes, null);
+  const clerk = fakeClerk([
+    { id: self, ageDays: 400 },
+    { id: becomes, ageDays: 20 },
+  ]);
+  const raceDeps = deps(clerk.fetchFn, []);
+  const lookup = raceDeps.lookup;
+  raceDeps.lookup = async (ids) => {
+    const found = await lookup(ids);
+    await sql.query(`update teachers set role = 'self_learner', age_confirmed_at = now() where clerk_user_id = $1::text`, [becomes]);
+    return found;
+  };
+  const result = await runSweep({ ...DRY, apply: true }, raceDeps);
+  check(result.candidates === 1 && result.skippedHasRole === 1 && result.deleted === 0, `only the no-role row was a candidate, then skipped (got ${result.candidates}, ${result.skippedHasRole}, ${result.deleted})`);
+  check(!clerk.deletes.includes(self) && !clerk.deletes.includes(becomes), "no Clerk DELETE for either self-learner");
+  check((await roleOf(self)) === "self_learner" && (await ageConfirmed(self)), "the aged self-learner keeps its row, role and age_confirmed_at");
+  check((await roleOf(becomes)) === "self_learner" && (await ageConfirmed(becomes)), "the raced self-learner keeps its row, role and age_confirmed_at");
+  check((await listState(self)) === "none" && (await listState(becomes)) === "none", "neither self-learner is listed");
+}
+
 async function cleanup(): Promise<void> {
   const ids = [...used];
   const rows = await sql.query(`delete from teachers where clerk_user_id = any($1::text[]) returning id`, [ids]);
@@ -182,6 +216,7 @@ async function main(): Promise<void> {
   try {
     await checkDryRunAndRace();
     await checkDeleteThenLateEvents();
+    await checkSelfLearnerNeverSwept();
   } finally {
     await cleanup();
   }
