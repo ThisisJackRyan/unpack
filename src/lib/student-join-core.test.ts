@@ -45,7 +45,7 @@ describe("isNameTakenConflict", () => {
   });
 
   it("has the agreed message", () => {
-    assert.equal(NAME_TAKEN_MESSAGE, "Someone already has that name. If it’s you, open unpack on the device you joined with, or add another letter.");
+    assert.equal(NAME_TAKEN_MESSAGE, "Someone already has that name. If it’s you, open unpack on the device you joined with. If not, add a letter to your first name.");
   });
 });
 
