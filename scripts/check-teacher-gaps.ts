@@ -44,7 +44,18 @@
 //   deleted (0 rows in every table) and its hash listed once; the later
 //   webhook user.deleted for the same id is already_gone and lists
 //   nothing new; a first visit can't bring it back; and the two deletes
-//   run at the same moment on a fresh role-less id leave no row, one hash.
+//   run at the same moment on a fresh role-less id leave no row, one hash
+//   (confirmed).
+// - Pending Clerk deletes (deleteUnder13Account with a fake Clerk that
+//   fails; the real local delete and confirm): both deleteUser tries
+//   failing leave the hash pending; the ops listing returns exactly this
+//   run's pending hashes (and matchPendingClerkIds exactly their ids); a
+//   pending row backdated past 30 days survives the prune and a first
+//   visit is still refused; a failed sign-in retry keeps it pending; a
+//   retry that succeeds, and one that gets a 404, confirm theirs; the
+//   webhook user.deleted confirms the first (keeping deleted_at), a later
+//   pending write doesn't un-confirm it, the prune keeps it until its
+//   confirmation is past 30 days, then removes it.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-teacher-gaps [flags]
 //
@@ -69,8 +80,21 @@ import { capView } from "@/lib/reading-cap";
 import { deleteReading, getClassCapBadges, getReadingCap, listReadings, raiseReadingCap } from "@/lib/readings";
 import { getOrCreateStudentQuestions, postgresStudentQuestionStore } from "@/lib/student-questions";
 import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "@/lib/student-questions-core";
-import { createAccountStatements, hashClerkUserId } from "@/lib/deleted-accounts";
-import { deleteRolelessAccountStatements, rolelessDeleteOutcome } from "@/lib/under-13-account";
+import {
+  confirmClerkDeletedStatement,
+  createAccountStatements,
+  hashClerkUserId,
+  pendingClerkDeletesStatement,
+  pruneDeletedStatement,
+} from "@/lib/deleted-accounts";
+import {
+  deleteRolelessAccountStatements,
+  deleteUnder13Account,
+  retryClerkDelete,
+  rolelessDeleteOutcome,
+  type Under13DeleteDeps,
+} from "@/lib/under-13-account";
+import { matchPendingClerkIds } from "./lib/pending-clerk-deletes";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
 const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
@@ -739,6 +763,120 @@ async function checkUnder13Delete() {
     racedRows.n === 0 && (await listedCount(racedId)) === 1 && raced.filter((r) => r === "deleted").length === 1,
     `the local delete and the webhook at the same moment: no row, one hash (${raced.join(", ")})`,
   );
+  check((await listState(racedId)) === "confirmed", "...confirmed, whichever ran first (the webhook's write never loses to a pending one)");
+}
+
+// ---------------------------------------------------------------------------
+// Pending Clerk deletes (deleted_clerk_users.clerk_deleted_at, PR 16 review G2)
+
+async function listState(clerkUserId: string): Promise<"missing" | "pending" | "confirmed"> {
+  const rows = await sql`select clerk_deleted_at from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(clerkUserId)}`;
+  if (rows.length === 0) return "missing";
+  return rows[0].clerk_deleted_at === null ? "pending" : "confirmed";
+}
+
+function clerkFailure(status: number): Error {
+  return Object.assign(new Error(`Clerk ${status}`), { name: "ClerkAPIResponseError", status });
+}
+
+// The real local delete and confirm (as under-13-server.ts), a fake Clerk.
+function under13Deps(deleteClerkUser: Under13DeleteDeps["deleteClerkUser"]): Under13DeleteDeps {
+  return {
+    deleteLocal: async (id) => rolelessDeleteOutcome(await neonExecutor(deleteRolelessAccountStatements(id))),
+    deleteClerkUser,
+    confirmClerkDeleted: async (id) => {
+      await neonExecutor([confirmClerkDeletedStatement(id)]);
+    },
+    log: () => {},
+  };
+}
+
+const clerkDown = async (): Promise<never> => {
+  throw clerkFailure(503);
+};
+
+async function prune(): Promise<void> {
+  await neonExecutor([pruneDeletedStatement()]);
+}
+
+// This run's hashes among the ops listing's rows.
+async function pendingOfRun(ids: string[]): Promise<string[]> {
+  const run = new Map(ids.map((id) => [hashClerkUserId(id), id]));
+  const [rows = []] = await neonExecutor([pendingClerkDeletesStatement()]);
+  return rows
+    .map((r) => run.get(String(r.clerk_user_hash)))
+    .filter((id): id is string => id !== undefined)
+    .sort();
+}
+
+async function checkPendingClerkDeletes() {
+  console.log("\n== PENDING CLERK DELETES (under-13 delete whose Clerk call failed) ==");
+  const pendId = `test_gaps_u13pend_${RUN_ID}`;
+  const retryId = `test_gaps_u13retry_${RUN_ID}`;
+  const goneId = `test_gaps_u13r404_${RUN_ID}`;
+  const runIds = [pendId, retryId, goneId, `test_gaps_u13_${RUN_ID}`, `test_gaps_u13race_${RUN_ID}`, `test_gaps_u13role_${RUN_ID}`];
+
+  for (const id of [pendId, retryId, goneId]) {
+    await sql`insert into teachers (clerk_user_id, email) values (${id}, ${`${id}@example.invalid`})`;
+    let clerkCalls = 0;
+    const result = await deleteUnder13Account(
+      id,
+      under13Deps(async () => {
+        clerkCalls++;
+        return clerkDown();
+      }),
+    );
+    const rows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${id}`);
+    check(
+      result === "deleted" && clerkCalls === 2 && rows.n === 0 && (await listState(id)) === "pending",
+      `Clerk failing both tries: row gone, hash listed pending (${result}, ${clerkCalls} Clerk calls, ${rows.n} rows, ${await listState(id)})`,
+    );
+  }
+
+  const listed = await pendingOfRun(runIds);
+  const expected = [pendId, retryId, goneId].sort();
+  check(JSON.stringify(listed) === JSON.stringify(expected), `the ops listing returns exactly the pending hashes (${listed.length} of this run)`);
+  const [opsRows = []] = await neonExecutor([pendingClerkDeletesStatement()]);
+  const matched = matchPendingClerkIds(runIds, new Set(opsRows.map((r) => String(r.clerk_user_hash)))).sort();
+  check(JSON.stringify(matched) === JSON.stringify(expected), "...and matching Clerk ids against it finds exactly their ids");
+
+  await sql`update deleted_clerk_users set deleted_at = now() - interval '40 days' where clerk_user_hash = ${hashClerkUserId(pendId)}`;
+  await prune();
+  check((await listState(pendId)) === "pending", "a pending row 40 days old survives the prune");
+  const [, firstVisit = []] = await neonExecutor(createAccountStatements(pendId, "Child", `${pendId}@example.invalid`));
+  check(firstVisit.length === 0, `...and a first visit is still refused (${firstVisit.length} rows)`);
+
+  await retryClerkDelete(pendId, under13Deps(clerkDown));
+  check((await listState(pendId)) === "pending", "a sign-in retry that fails again keeps it pending");
+  await retryClerkDelete(retryId, under13Deps(async () => undefined));
+  check((await listState(retryId)) === "confirmed", "a sign-in retry that succeeds confirms it");
+  await retryClerkDelete(
+    goneId,
+    under13Deps(async () => {
+      throw clerkFailure(404);
+    }),
+  );
+  check((await listState(goneId)) === "confirmed", "a sign-in retry that gets a 404 confirms it");
+  const stillPending = await pendingOfRun(runIds);
+  check(JSON.stringify(stillPending) === JSON.stringify([pendId]), `the ops listing now has only the failed one (${stillPending.length})`);
+
+  const webhook = await handleClerkEvent({ type: "user.deleted", data: { id: pendId, deleted: true } }, neonExecutor);
+  const after = await one<{ age: number }>(
+    sql`select extract(day from now() - deleted_at)::int as age from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(pendId)}`,
+  );
+  check(
+    webhook === "already_gone" && (await listState(pendId)) === "confirmed" && after.age >= 39,
+    `the webhook's user.deleted confirms it and keeps deleted_at (${webhook}, ${after.age} days)`,
+  );
+  await neonExecutor(deleteRolelessAccountStatements(pendId));
+  check((await listState(pendId)) === "confirmed", "a later pending write never un-confirms it");
+  await prune();
+  check((await listState(pendId)) === "confirmed", "the prune keeps it: retention counts from the confirmation, just now");
+  await sql`update deleted_clerk_users set clerk_deleted_at = now() - interval '31 days' where clerk_user_hash = ${hashClerkUserId(pendId)}`;
+  await prune();
+  check((await listState(pendId)) === "missing", "confirmed 31 days ago: the prune removes it");
+  check((await listState(retryId)) === "confirmed", "...and keeps a row confirmed just now");
+  check((await pendingOfRun(runIds)).length === 0, "the ops listing has none of this run left");
 }
 
 // ---------------------------------------------------------------------------
@@ -757,6 +895,9 @@ async function cleanup(): Promise<void> {
     "test_gaps_u13",
     "test_gaps_u13role",
     "test_gaps_u13race",
+    "test_gaps_u13pend",
+    "test_gaps_u13retry",
+    "test_gaps_u13r404",
   ];
   for (const prefix of prefixes) {
     const results = await neonExecutor(deleteTeacherStatements(`${prefix}_${RUN_ID}`));
@@ -781,6 +922,7 @@ async function main(): Promise<void> {
     await checkCap();
     await checkTeacherDelete();
     await checkUnder13Delete();
+    await checkPendingClerkDeletes();
   } finally {
     await cleanup();
   }
