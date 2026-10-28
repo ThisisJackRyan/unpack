@@ -6,9 +6,12 @@
 // a claim and a commit under one advisory lock, nothing after a pass.
 // Differences, all in the statements below:
 // - Scoped to the owner: every statement checks self_readings.account_id,
-//   so another account's reading is not_found.
+//   so another account's reading is not_found. The claim and the commit
+//   also check, in the statement, that the account is a self-learner now.
 // - No challenges, no one more try: the limits are always MAX_TRIES and
 //   EFFORT_CHECK_LIMIT.
+// Passed answers are locked the same way (see submit-answers-core.ts):
+// lockedStatement and carryLockedStatement over the self_* tables.
 // - The reading's status is settled in the same transaction as the commit
 //   (or the release of a failed check): passed on a passing try, moved_on
 //   once every try (or every check) is used without a pass. The page then
@@ -20,13 +23,22 @@ import type { QuestionModel } from "./ai/questions";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import type { AnswerStage, AttemptView, ReadingProgress } from "./reading-progress";
 import { answerStage, readingProgress } from "./reading-progress";
+import { countedCheckSql } from "./reading-limits";
 import {
   ALREADY_PASSED_MESSAGE,
   CHECK_BUSY_MESSAGE,
   CHECK_FAILED_MESSAGE,
+  CHECKS_PAUSED_MESSAGE,
   claimOutcome,
+  carryLockedStatement,
   committedTry,
   EFFORT_CLAIM_STALE_SECONDS,
+  EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+  EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+  lockedStatement,
+  pausedUntilStatement,
+  SELF_ANSWER_TABLES,
+  retryAtFromRows,
   OUT_OF_TRIES_MESSAGE,
   submitLookup,
   type AttemptStore,
@@ -40,7 +52,7 @@ import { ANSWERS_STALE_MESSAGE, EFFORT_CHECK_LIMIT, MAX_TRIES } from "./validate
 // The model checker: the solo effort prompt (the reader chose the reading;
 // no teacher or students). getModel runs per check.
 export function selfEffortChecker(getModel: () => QuestionModel): EffortChecker {
-  return (input) => checkEffort(getModel(), input, { audience: "solo" });
+  return (input, hooks) => checkEffort(getModel(), input, { audience: "solo", onModelResponse: hooks?.onModelResponse });
 }
 
 // Advisory lock namespace for a self-learner's reading (join-rate-limit.ts
@@ -56,12 +68,27 @@ export function selfEffortLockStatement(readingId: string): Statement {
 }
 
 // $1 account, $2 reading throughout.
-const OWNED = `exists (select 1 from self_readings where id = $2::uuid and account_id = $1::uuid)`;
+// The reading is this account's, and the account is a self-learner right
+// now. Checked inside the claim and the commit themselves (as the create
+// does), so a role switch or another account's id between the page load
+// and the write can't save anything.
+const OWNED = `exists (
+  select 1 from self_readings r join teachers t on t.id = r.account_id
+  where r.id = $2::uuid and r.account_id = $1::uuid and t.role = 'self_learner'
+)`;
 const NOT_PASSED = `not exists (
   select 1 from self_attempts where reading_id = $2::uuid and account_id = $1::uuid and result = 'pass'
 )`;
 const TRIES = `(select count(*) from self_attempts where reading_id = $2::uuid and account_id = $1::uuid)`;
-const CHECKS = `(select count(*) from self_effort_checks where reading_id = $2::uuid and account_id = $1::uuid)`;
+const CHECKS = `(select count(*) from self_effort_checks where reading_id = $2::uuid and account_id = $1::uuid and ${countedCheckSql()})`;
+
+// The given-back checks in the outage window ($n: its minutes), as in
+// submit-answers-core.ts.
+function givenBackRecent(n: number): string {
+  return `(select count(*) from self_effort_checks
+  where reading_id = $2::uuid and account_id = $1::uuid and outcome = 'given_back'
+    and created_at > now() - make_interval(mins => $${n}::int))`;
+}
 
 // An unfinished check younger than the stale timeout, given as $n.
 function liveCheck(n: number): string {
@@ -87,36 +114,57 @@ export function selfSubmitContextStatements(accountId: string, readingId: string
 from self_attempts where reading_id = $2::uuid and account_id = $1::uuid`,
       params: [accountId, readingId, MAX_TRIES],
     },
+    lockedStatement(accountId, readingId, SELF_ANSWER_TABLES),
   ];
 }
 
 // The claim (same three steps and result shape as claimStatements in
 // submit-answers-core.ts, so claimOutcome reads it).
-export function selfClaimCheckStatements(accountId: string, readingId: string, claimId: string): Statement[] {
+export function selfClaimCheckStatements(
+  accountId: string,
+  readingId: string,
+  claimId: string,
+  expectedTries: number,
+): Statement[] {
   return [
     selfEffortLockStatement(readingId),
     {
-      // $3 claim id, $4 stale seconds, $5 tries, $6 checks.
+      // $3 claim id, $4 stale seconds, $5 tries, $6 checks, $7 window
+      // minutes, $8 window limit, $9 the tries the answers were validated
+      // against.
       text: `insert into self_effort_checks (id, account_id, reading_id)
 select $3::uuid, $1::uuid, $2::uuid
 where ${OWNED}
 and ${NOT_PASSED}
 and ${TRIES} < $5::int
+and ${TRIES} = $9::int
 and not ${liveCheck(4)}
 and ${CHECKS} < $6::int
+and ${givenBackRecent(7)} < $8::int
 returning id`,
-      params: [accountId, readingId, claimId, EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES, EFFORT_CHECK_LIMIT],
+      params: [
+        accountId,
+        readingId,
+        claimId,
+        EFFORT_CLAIM_STALE_SECONDS,
+        MAX_TRIES,
+        EFFORT_CHECK_LIMIT,
+        EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+        EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+        expectedTries,
+      ],
     },
     {
-      // $3 stale seconds, $4 tries, $5 checks.
+      // $3 stale seconds, $4 tries, $5 checks, $6 window minutes.
       text: `select ${OWNED} as eligible,
   not ${NOT_PASSED} as passed,
   ${TRIES}::int as tries,
   ${liveCheck(3)} as live,
   ${CHECKS}::int as checks,
   $4::int as tries_allowed,
-  $5::int as checks_allowed`,
-      params: [accountId, readingId, EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES, EFFORT_CHECK_LIMIT],
+  $5::int as checks_allowed,
+  ${givenBackRecent(6)}::int as given_back_recent`,
+      params: [accountId, readingId, EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES, EFFORT_CHECK_LIMIT, EFFORT_GIVEN_BACK_WINDOW_MINUTES],
     },
   ];
 }
@@ -142,13 +190,21 @@ returning status`,
   };
 }
 
-export function selfReleaseCheckStatements(accountId: string, readingId: string, claimId: string): Statement[] {
+// Given back ($4) when the model never replied, else an error (see
+// releaseStatement in submit-answers-core.ts).
+export function selfReleaseCheckStatements(
+  accountId: string,
+  readingId: string,
+  claimId: string,
+  givenBack = false,
+): Statement[] {
   return [
     selfEffortLockStatement(readingId),
     {
-      text: `update self_effort_checks set finished_at = now(), outcome = 'error'
+      text: `update self_effort_checks set finished_at = now(),
+  outcome = case when $4::boolean then 'given_back' else 'error' end
 where id = $3::uuid and account_id = $1::uuid and reading_id = $2::uuid and finished_at is null`,
-      params: [accountId, readingId, claimId],
+      params: [accountId, readingId, claimId, givenBack],
     },
     settleStatusStatement(accountId, readingId),
   ];
@@ -156,7 +212,8 @@ where id = $3::uuid and account_id = $1::uuid and reading_id = $2::uuid and fini
 
 // The commit (same shape as commitStatements in submit-answers-core.ts, so
 // committedTry reads it): finish the live claim and insert the attempt in
-// one statement, then the answers (only for this reading's questions),
+// one statement, then the locked answers carried over, then the new
+// answers (only for this reading's questions, never over a locked one),
 // then settle the status. No challenge to close.
 export function selfCommitStatements(input: SaveInput): Statement[] {
   const { studentId: accountId, readingId } = input;
@@ -169,6 +226,7 @@ export function selfCommitStatements(input: SaveInput): Statement[] {
   update self_effort_checks set finished_at = now(), outcome = $5::text
   where id = $3::uuid and account_id = $1::uuid and reading_id = $2::uuid
     and finished_at is null and created_at > now() - make_interval(secs => $6::int)
+    and ${OWNED}
     and ${TRIES} < $7::int
     and ${NOT_PASSED}
   returning id
@@ -179,6 +237,7 @@ from claim
 returning try_number`,
       params: [accountId, readingId, input.claimId, input.attemptId, result, EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES],
     },
+    carryLockedStatement(accountId, readingId, input.attemptId, SELF_ANSWER_TABLES),
     {
       // $3 attempt id, $4 to $7 the answers' question ids, texts, passes,
       // and nudges.
@@ -187,6 +246,7 @@ select $3::uuid, a.question_id, a.text, a.pass, nullif(a.nudge, '')
 from unnest($4::uuid[], $5::text[], $6::boolean[], $7::text[]) as a(question_id, text, pass, nudge)
 join self_questions q on q.id = a.question_id and q.reading_id = $2::uuid
 where exists (select 1 from self_attempts where id = $3::uuid and account_id = $1::uuid)
+on conflict (attempt_id, question_id) do nothing
 returning id`,
       params: [
         accountId,
@@ -208,11 +268,14 @@ export function postgresSelfAttemptStore(execute: StatementExecutor): AttemptSto
     async loadContext(accountId, readingId) {
       return submitLookup(await execute(selfSubmitContextStatements(accountId, readingId)));
     },
-    async claim(accountId, readingId, claimId) {
-      return claimOutcome(await execute(selfClaimCheckStatements(accountId, readingId, claimId)));
+    async claim(accountId, readingId, claimId, expectedTries) {
+      return claimOutcome(await execute(selfClaimCheckStatements(accountId, readingId, claimId, expectedTries)), expectedTries);
     },
-    async release(accountId, readingId, claimId) {
-      await execute(selfReleaseCheckStatements(accountId, readingId, claimId));
+    async release(accountId, readingId, claimId, givenBack) {
+      await execute(selfReleaseCheckStatements(accountId, readingId, claimId, givenBack));
+    },
+    async pausedUntil(accountId, readingId) {
+      return retryAtFromRows(await execute([pausedUntilStatement(accountId, readingId, "self_effort_checks", "account_id")]));
     },
     async commit(input) {
       return committedTry(await execute(selfCommitStatements(input)));
@@ -247,7 +310,7 @@ order by a.try_number`,
       params: [MAX_TRIES, EFFORT_CHECK_LIMIT],
     },
     {
-      text: `select count(*)::int as checks from self_effort_checks where account_id = $1::uuid and reading_id = $2::uuid`,
+      text: `select count(*)::int as checks from self_effort_checks where account_id = $1::uuid and reading_id = $2::uuid and ${countedCheckSql()}`,
       params: [accountId, readingId],
     },
   ];
@@ -313,6 +376,8 @@ export function soloSubmitMessage(status: Exclude<SubmitResult["status"], "check
       return SOLO_CHECKS_USED_MESSAGE;
     case "check_failed":
       return CHECK_FAILED_MESSAGE;
+    case "paused":
+      return CHECKS_PAUSED_MESSAGE;
     case "stale":
     case "not_found":
       return ANSWERS_STALE_MESSAGE;

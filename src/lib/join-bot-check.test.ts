@@ -233,7 +233,7 @@ describe("verifyJoinBotCheck", () => {
     assert.ok(!JSON.stringify(args).includes(site));
   });
 
-  it("production, no keys: the student is told joining is turned off", async () => {
+  it("production, no keys: the student is told joining isn’t working right now", async () => {
     const result = await verifyJoinBotCheck({ token: "tok" }, { env: PROD, logError: () => {} });
     assert.ok(!result.ok);
     assert.equal(botCheckMessage(result.reason), JOIN_DISABLED_MESSAGE);

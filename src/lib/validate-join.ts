@@ -22,10 +22,11 @@ export const CLASS_NOT_FOUND_MESSAGE =
 export const JOIN_FAILED_MESSAGE = "We couldn’t join you to the class. Please try again.";
 
 // A join blocked by server setup (the Turnstile keys, or
-// JOIN_IP_HASH_SECRET in production, missing or unusable). Trying again
-// won't help, so it says so instead of the generic message; the server
+// JOIN_IP_HASH_SECRET in production, missing or unusable). Its own
+// message instead of the generic one: nothing the student typed is wrong,
+// so it asks them to come back later rather than retry now; the server
 // logs which variable (see logJoinBlockedConfig).
-export const JOIN_DISABLED_MESSAGE = "Joining is turned off right now. Ask your teacher.";
+export const JOIN_DISABLED_MESSAGE = "Joining isn’t working right now. Please try again in a little while.";
 
 // The stable first argument of that server log, to search the runtime
 // logs for.

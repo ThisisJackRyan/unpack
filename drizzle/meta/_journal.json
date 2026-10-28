@@ -64,6 +64,13 @@
       "when": 1793114381554,
       "tag": "0008_self_learner",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793125218729,
+      "tag": "0009_hardening",
+      "breakpoints": true
     }
   ]
 }

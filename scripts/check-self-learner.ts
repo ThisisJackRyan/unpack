@@ -13,11 +13,23 @@
 //     them; a second self-learner can't either. All not_found or empty,
 //     with nothing written.
 // (c) Allowance: --creates concurrent creates leave exactly 5 in the window.
+// (c3) Refused opens keep the slot (PR 16 review A1): an account at its
+//     question limit (QUESTION_GENERATION_LIMIT generations in the
+//     window) creates and opens readings over and over; every open is
+//     rate_limited with no model call and keeps its slot, so the account
+//     stops at the allowance (no 6th reading) instead of cycling slots.
+//     After the wait, a kept reading gets its questions on the slot it
+//     held, with no second slot.
 // (d) The window rolls: backdated to 7 days minus a minute it still
 //     blocks; with the oldest just past 7 days, exactly one more fits.
 // (e) Solo flow: 3 failed tries, then moved on (a 4th is out_of_tries),
 //     with zero challenge rows anywhere for it; a passing answer marks
 //     another reading passed; --submits parallel submits save one try.
+// (e3) Passed answers are locked: q1 passes on try 1; try 2 sends only q2
+//     and q3; a crafted form with q1 is "stale" (no claim, no model call);
+//     a crafted commit straight at the statements can't replace q1; a
+//     given-back check in between keeps the lock and the try; the reading
+//     passes on try 2 with q1 as it was; 2 counted checks, 3 model calls.
 // (f) Delete: user.deleted through handleClerkEvent leaves zero rows of
 //     the account in every self-learner table (counted per table) and the
 //     other account's rows intact; a repeat is already_gone.
@@ -28,19 +40,28 @@
 //   --creates=20   concurrent creates for (c) (default 20)
 //   --submits=10   parallel submits for (e) (default 10)
 //
-// Same host guard and NEON_FETCH_ENDPOINT handling as check-class-limit.ts;
-// set CHECK_CLASS_LIMIT_HOST to opt in for one Neon dev branch. Writes
+// Same database guard, connection cap, and NEON_FETCH_ENDPOINT handling as
+// every check (scripts/lib/db-check.ts). Writes
 // accounts named test_self_*_<run> and deletes them (and everything under
 // them) at the end through the webhook's delete. Never run against
 // production.
-import { neonConfig } from "@neondatabase/serverless";
+import { randomUUID } from "node:crypto";
 import { getSql } from "@/db";
 import { setRoleOutcome, setRoleStatements, type AccountRole, type SetRoleOutcome } from "@/lib/account-role";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
+import { QuestionWriterError } from "@/lib/ai/questions";
 import { deletedAccountRows, deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import { neonExecutor } from "@/lib/neon-executor";
-import { soloStage } from "@/lib/self-answers-core";
+import { selfClaimCheckStatements, selfCommitStatements, soloStage } from "@/lib/self-answers-core";
+import {
+  claimOutcome,
+  committedTry,
+  EFFORT_CHECK_LIMIT,
+  EFFORT_GIVEN_BACK_WINDOW_LIMIT,
+  EFFORT_GIVEN_BACK_WINDOW_MINUTES,
+} from "@/lib/submit-answers-core";
 import { allowanceFor } from "@/lib/self-allowance";
+import { QUESTION_GENERATION_LIMIT } from "@/lib/question-rate-limit";
 import {
   createSelfReading,
   getAllowance,
@@ -50,39 +71,10 @@ import {
   loadSelfProgress,
   submitSelfAnswers,
 } from "@/lib/self-readings";
+import { createAccountStatements, hashClerkUserId } from "@/lib/deleted-accounts";
+import { prepareDbCheck } from "./lib/db-check";
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is not set. Refusing to run.");
-  process.exit(2);
-}
-const LOCAL_DB_HOSTS = ["localhost", "127.0.0.1", "::1", "db.localtest.me"];
-let dbHost: string;
-try {
-  dbHost = new URL(process.env.DATABASE_URL).hostname.replace(/^\[|\]$/g, "");
-} catch {
-  console.error("DATABASE_URL is not a valid URL. Refusing to run.");
-  process.exit(2);
-}
-if (!LOCAL_DB_HOSTS.includes(dbHost) && process.env.CHECK_CLASS_LIMIT_HOST !== dbHost) {
-  console.error(
-    `Refusing to run against database host "${dbHost}". This script writes ` +
-      `and deletes rows, so it only runs against ${LOCAL_DB_HOSTS.join(", ")} ` +
-      `by default. To use a Neon dev branch, set CHECK_CLASS_LIMIT_HOST=${dbHost}. ` +
-      "Never use production.",
-  );
-  process.exit(2);
-}
-if (process.env.ALLOW_DB_WRITES !== "1") {
-  console.error("This script writes and deletes rows. Set ALLOW_DB_WRITES=1 to run it.");
-  process.exit(2);
-}
-// Belt and braces: the mock model is always injected, but make sure no
-// code path could reach the model with real credentials.
-for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
-const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
-if (fetchEndpoint) {
-  neonConfig.fetchEndpoint = () => fetchEndpoint;
-}
+const { fetchEndpoint } = prepareDbCheck();
 
 function intFlag(name: string, fallback: number): number {
   const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -100,7 +92,7 @@ const SUBMITS = intFlag("submits", 10);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
-const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_teacher", "test_self_gone", "test_self_kept"];
+const PREFIXES = ["test_self_new", "test_self_a", "test_self_b", "test_self_c", "test_self_d", "test_self_teacher", "test_self_gone", "test_self_kept"];
 const FREE = allowanceFor("free");
 
 const sql = getSql();
@@ -324,9 +316,134 @@ async function checkAllowance() {
   check(inWindow.n === FREE.readings, `...leaving ${inWindow.n} in the window`);
 }
 
+// A reading whose questions never get written gives its weekly slot back;
+// its Try again takes one back only while one is free, and creates racing
+// Try agains never pass the allowance.
+async function checkFailedGenerations() {
+  console.log("\n== (c2) FAILED GENERATIONS DON'T USE A SLOT ==");
+  const cId = await newAccount("test_self_c", "self_learner");
+  const draft = (i: number) => ({ title: `Slot ${i}`, bodyText: BODY, sourceUrl: null, gradeLevel: "5" as const, questionCount: 3 });
+  const failing = async (): Promise<string[]> => {
+    throw new QuestionWriterError("failed", "a fake outage");
+  };
+  const failed: string[] = [];
+  for (let i = 0; i < FREE.readings; i++) {
+    const created = await createSelfReading(cId, draft(i));
+    if (created.status !== "created") break;
+    const opened = await getOrCreateSelfQuestions(cId, created.id, { write: failing });
+    if (opened.status === "error") failed.push(created.id);
+  }
+  const afterFail = await getAllowance(cId);
+  check(
+    failed.length === FREE.readings && afterFail.remaining === FREE.readings,
+    `${failed.length} readings whose questions failed leave all ${afterFail.remaining} of ${FREE.readings} slots free`,
+  );
+  const held: string[] = [];
+  const more = await Promise.all(Array.from({ length: FREE.readings + 3 }, (_, i) => createSelfReading(cId, draft(10 + i))));
+  for (const o of more) if (o.status === "created") held.push(o.id);
+  check(held.length === FREE.readings, `then ${FREE.readings + 3} creates at once make exactly ${FREE.readings} (${held.length})`);
+  for (const id of held) await readyQuestions(cId, id);
+  const full = await getAllowance(cId);
+  check(full.remaining === 0, `readings with questions hold their slots (${full.remaining} left)`);
+
+  let writes = 0;
+  const counting = async (): Promise<string[]> => {
+    writes++;
+    return PROMPTS;
+  };
+  const retry = await getOrCreateSelfQuestions(cId, failed[0], { write: counting });
+  check(
+    retry.status === "limit_reached" && writes === 0 && retry.state.nextFreeAt !== null,
+    `a Try again on a released reading with no free slot: ${retry.status}, ${writes} model calls`,
+  );
+
+  // Free exactly one slot (the oldest held reading leaves the window), then
+  // race 3 Try agains on released readings against 3 creates.
+  await sql`update self_readings set created_at = now() - interval '8 days' where id = ${held[0]}`;
+  const raced = await Promise.all([
+    ...failed.slice(0, 3).map((id) => getOrCreateSelfQuestions(cId, id, { write: counting })),
+    ...[1, 2, 3].map((i) => createSelfReading(cId, draft(100 + i))),
+  ]);
+  const won = raced.filter((r) => r.status === "ready" || r.status === "created").length;
+  const nowHeld = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings
+    where account_id = ${cId} and slot_released_at is null and created_at > now() - interval '7 days'`);
+  check(
+    won === 1 && nowHeld.n === FREE.readings,
+    `one free slot, 3 Try agains and 3 creates at once: exactly ${won} got it, ${nowHeld.n} slots held (${raced.map((r) => r.status).join(", ")})`,
+  );
+  const withQuestions = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings r
+    where r.account_id = ${cId} and r.slot_released_at is not null
+      and exists (select 1 from self_questions q where q.reading_id = r.id)`);
+  check(withQuestions.n === 0, `no reading with questions is ever marked released (${withQuestions.n})`);
+}
+
+// PR 16 review A1: an open refused by the question limit used to give the
+// slot back, so an account at the limit could create, open and repeat
+// past the allowance. Now a refused open keeps the slot.
+async function checkRateLimitedKeepsSlot() {
+  console.log("\n== (c3) RATE-LIMITED OPENS KEEP THEIR SLOT ==");
+  const dId = await newAccount("test_self_d", "self_learner");
+  const draft = (i: number) => ({ title: `Loop ${i}`, bodyText: BODY, sourceUrl: null, gradeLevel: "5" as const, questionCount: 3 });
+  // At the question limit: the limiter's own rows, inside its window.
+  await sql`
+    insert into question_generation_attempts (teacher_id)
+    select ${dId}::uuid from generate_series(1, ${QUESTION_GENERATION_LIMIT}::int)`;
+  let writes = 0;
+  const counting = async (): Promise<string[]> => {
+    writes++;
+    return PROMPTS;
+  };
+  const created: string[] = [];
+  const opens: string[] = [];
+  const creates: string[] = [];
+  for (let i = 0; i < FREE.readings + 3; i++) {
+    const made = await createSelfReading(dId, draft(i));
+    creates.push(made.status);
+    if (made.status !== "created") continue;
+    created.push(made.id);
+    opens.push((await getOrCreateSelfQuestions(dId, made.id, { write: counting })).status);
+  }
+  const released = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings where account_id = ${dId} and slot_released_at is not null`);
+  check(
+    opens.length === FREE.readings && opens.every((s) => s === "rate_limited") && writes === 0,
+    `${opens.length} opens at the question limit: all rate_limited, ${writes} model calls (${opens.join(", ")})`,
+  );
+  check(released.n === 0, `...and every one kept its slot (${released.n} released)`);
+  check(
+    created.length === FREE.readings && creates.slice(FREE.readings).every((s) => s === "limit_reached"),
+    `create, open, repeat ${FREE.readings + 3} times stops at ${created.length} readings (${creates.join(", ")})`,
+  );
+  const rows = await one<{ n: number }>(sql`select count(*)::int as n from self_readings where account_id = ${dId}`);
+  const state = await getAllowance(dId);
+  check(rows.n === FREE.readings && state.remaining === 0, `${rows.n} rows, ${state.remaining} slots left: the allowance wasn't regained`);
+
+  // The wait passes: a kept reading gets its questions on its own slot.
+  await sql`delete from question_generation_attempts where teacher_id = ${dId}`;
+  const later = await getOrCreateSelfQuestions(dId, created[0], { write: counting });
+  const held = await one<{ n: number }>(sql`
+    select count(*)::int as n from self_readings
+    where account_id = ${dId} and slot_released_at is null and created_at > now() - interval '7 days'`);
+  check(
+    later.status === "ready" && writes === 1 && held.n === FREE.readings,
+    `after the wait, Try again: ${later.status}, ${writes} model call, ${held.n} slots held (no second slot)`,
+  );
+}
+
 async function checkSoloFlow() {
   console.log("\n== (e) SOLO FLOW ==");
-  const challengesBefore = await one<{ n: number }>(sql`select count(*)::int as n from challenges`);
+  // Scoped to this run's accounts: the test database is shared, so another
+  // run's challenges must not make this flaky.
+  const runChallenges = () =>
+    one<{ n: number }>(sql`
+      select count(*)::int as n from challenges ch
+      join students s on s.id = ch.student_id
+      join classes c on c.id = s.class_id
+      join teachers t on t.id = c.teacher_id
+      where t.clerk_user_id like ${`%\_${RUN_ID}`}`);
+  const challengesBefore = await runChallenges();
   const failing = await rawReading(bId, "Three tries");
   const questions = await readyQuestions(bId, failing);
   for (let i = 1; i <= 3; i++) {
@@ -341,9 +458,9 @@ async function checkSoloFlow() {
   check(stage.kind === "moved_on" && stage.attempt?.tryNumber === 3, `the page shows the last try's nudges: ${stage.kind}`);
   const fourth = await submitSelfAnswers(bId, failing, answersFor(questions), { check: checker(true) });
   check(fourth.status === "out_of_tries", `a 4th try is refused: ${fourth.status}`);
-  const challengesAfter = await one<{ n: number }>(sql`select count(*)::int as n from challenges`);
+  const challengesAfter = await runChallenges();
   const own = await one<{ n: number }>(sql`select count(*)::int as n from challenges where reading_id = ${failing}`);
-  check(challengesAfter.n === challengesBefore.n && own.n === 0, `zero challenge rows for it, none anywhere new (${challengesBefore.n} -> ${challengesAfter.n})`);
+  check(challengesAfter.n === challengesBefore.n && own.n === 0, `zero challenge rows for it, none new for this run's accounts (${challengesBefore.n} -> ${challengesAfter.n})`);
 
   const passing = await rawReading(bId, "Pass it");
   const passQuestions = await readyQuestions(bId, passing);
@@ -361,6 +478,192 @@ async function checkSoloFlow() {
     history[0]?.result === "passed" && history[1]?.result === "moved_on",
     `history lists them newest first with results: ${history.map((h) => h.result).join(", ")}`,
   );
+  check(
+    history[0]?.doneLabel === "" && history[1]?.doneLabel === "",
+    `passed and moved-on rows have no done hint (${JSON.stringify(history.slice(0, 2).map((h) => h.doneLabel))})`,
+  );
+
+  // In progress: "X of Y done" counts the passed answers on the latest try.
+  const halfway = await rawReading(bId, "Half way");
+  const halfQuestions = await readyQuestions(bId, halfway);
+  const fresh = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
+  check(fresh?.doneLabel === "0 of 3 done", `before any try: ${fresh?.doneLabel}`);
+  const mixed = async (input: EffortCheckInput): Promise<EffortVerdict[]> =>
+    input.items.map((i, n) => ({ questionId: i.questionId, pass: n < 2, nudge: n < 2 ? "" : "Name one detail from the text." }));
+  const firstTry = await submitSelfAnswers(bId, halfway, answersFor(halfQuestions), { check: mixed });
+  check(firstTry.status === "checked" && !firstTry.passed, `mixed try 1 saved, not passed: ${firstTry.status}`);
+  const afterOne = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
+  check(afterOne?.result === "in_progress" && afterOne.doneLabel === "2 of 3 done", `after 2 of 3 passed: ${afterOne?.doneLabel}`);
+  // Try 2 sends only the open question, and it fails: the passed ones stay
+  // done (locked), so the count never goes down.
+  const secondTry = await submitSelfAnswers(bId, halfway, answersFor(halfQuestions).slice(2), { check: checker(false) });
+  check(secondTry.status === "checked" && !secondTry.passed, `try 2 fails the open answer: ${secondTry.status}`);
+  const afterTwo = (await listSelfHistory(bId, "UTC")).find((h) => h.id === halfway);
+  check(afterTwo?.doneLabel === "2 of 3 done", `passed answers stay done after a failing try: ${afterTwo?.doneLabel}`);
+}
+
+async function selfAnswerRows(readingId: string, tryNumber: number) {
+  return (await sql`
+    select an.question_id, an.text, an.ai_pass, an.ai_feedback
+    from self_answers an join self_attempts a on a.id = an.attempt_id
+    join self_questions q on q.id = an.question_id
+    where a.reading_id = ${readingId} and a.try_number = ${tryNumber}
+    order by q.position`) as { question_id: string; text: string; ai_pass: boolean; ai_feedback: string | null }[];
+}
+
+async function checkLockedAnswers() {
+  console.log("\n== (e3) PASSED ANSWERS ARE LOCKED ==");
+  const readingId = await rawReading(bId, "Locked answers");
+  const questions = await readyQuestions(bId, readingId);
+  const ids = questions.map((q) => q.id);
+  let calls = 0;
+  let seen: string[] = [];
+  // Passes only the first question (`first`, q1 by default), or everything.
+  const counting = (passAll: boolean, outage = false, first = ids[0]) => async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+    calls++;
+    seen = input.items.map((i) => i.questionId);
+    if (outage) throw new Error("fake model outage");
+    return input.items.map((i) => {
+      const pass = passAll || i.questionId === first;
+      return { questionId: i.questionId, pass, nudge: pass ? "" : "Name one detail from the text." };
+    });
+  };
+  const all = answersFor(questions);
+  const first = await submitSelfAnswers(bId, readingId, all, { check: counting(false) });
+  check(first.status === "checked" && !first.passed && seen.length === 3, `try 1 checks all 3, q1 passes: ${first.status}`);
+  const row = (await listSelfHistory(bId, "UTC")).find((h) => h.id === readingId);
+  check(row?.doneLabel === "1 of 3 done", `history after try 1: ${row?.doneLabel}`);
+
+  const crafted = await submitSelfAnswers(bId, readingId, all.map((a) => ({ ...a, value: "Changed!" })), { check: counting(true) });
+  check(crafted.status === "stale" && calls === 1, `crafted form with q1: ${crafted.status}, no model call (${calls} calls)`);
+
+  const outage = await submitSelfAnswers(bId, readingId, all.slice(1), { check: counting(true, true) });
+  const tries = await one<{ n: number }>(sql`select count(*)::int as n from self_attempts where reading_id = ${readingId}`);
+  check(outage.status === "check_failed" && tries.n === 1 && seen.join(",") === ids.slice(1).join(","), `outage on try 2 (checked q2, q3 only): ${outage.status}, ${tries.n} try saved`);
+
+  const second = await submitSelfAnswers(bId, readingId, all.slice(1), { check: counting(true) });
+  check(
+    second.status === "checked" && second.passed && second.tryNumber === 2 && seen.join(",") === ids.slice(1).join(","),
+    `try 2 checks only q2 and q3 and passes: ${second.status}, ${seen.length} checked`,
+  );
+  const rows = await selfAnswerRows(readingId, 2);
+  check(
+    rows.length === 3 && rows[0].question_id === ids[0] && rows[0].text === all[0].value && rows[0].ai_pass && rows[0].ai_feedback === null,
+    `try 2 holds all 3 answers, q1 as it was: ${rows.map((r) => (r.ai_pass ? "pass" : "fail")).join(",")}`,
+  );
+  const counted = await one<{ counted: number; given_back: number; status: string }>(sql`
+    select count(*) filter (where outcome is distinct from 'given_back')::int as counted,
+      count(*) filter (where outcome = 'given_back')::int as given_back,
+      (select status::text from self_readings where id = ${readingId}) as status
+    from self_effort_checks where reading_id = ${readingId}`);
+  check(
+    counted.counted === 2 && counted.given_back === 1 && calls === 3 && counted.status === "passed",
+    `counting: ${counted.counted} counted (want 2), ${counted.given_back} given back (want 1), ${calls} model calls (want 3), status ${counted.status}`,
+  );
+
+  // A crafted commit straight at the statements with a failing, changed q1.
+  const direct = await rawReading(bId, "Locked, crafted commit");
+  const directQuestions = await readyQuestions(bId, direct);
+  await submitSelfAnswers(bId, direct, answersFor(directQuestions), { check: counting(false, false, directQuestions[0].id) });
+  const claimId = randomUUID();
+  const claimed = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, direct, claimId, 1)), 1);
+  const saved = committedTry(
+    await neonExecutor(
+      selfCommitStatements({
+        studentId: bId,
+        readingId: direct,
+        claimId,
+        attemptId: randomUUID(),
+        passed: false,
+        verdicts: directQuestions.map((q) => ({ questionId: q.id, text: "Overwritten", pass: false, nudge: "No." })),
+      }),
+    ),
+  );
+  const kept = await selfAnswerRows(direct, 2);
+  check(
+    claimed === "claimed" && saved === 2 && kept[0]?.text === answersFor(directQuestions)[0].value && kept[0]?.ai_pass && kept[1]?.text === "Overwritten",
+    `crafted commit: ${claimed}, try ${saved}, q1 ${kept[0]?.ai_pass ? "still passed" : "CHANGED"}, text ${kept[0]?.text === "Overwritten" ? "CHANGED" : "kept"}`,
+  );
+  const older = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, direct, randomUUID(), 1)), 1);
+  check(older === "stale", `a claim for an older try count: ${older}`);
+}
+
+// A check with no model reply (an outage, not set up, out of credits) is
+// given back: never toward the self-learner's check cap, and it never
+// moves the reading on.
+async function checkGivenBackChecks() {
+  console.log("\n== (e3) GIVEN-BACK CHECKS ==");
+  const readingId = await rawReading(bId, "Outage");
+  const questions = await readyQuestions(bId, readingId);
+  const outage = async (): Promise<EffortVerdict[]> => {
+    throw new Error("fake model outage");
+  };
+  const statuses: string[] = [];
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < EFFORT_GIVEN_BACK_WINDOW_LIMIT; i++) {
+      statuses.push((await submitSelfAnswers(bId, readingId, answersFor(questions), { check: outage })).status);
+    }
+    const paused = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: checker(true) });
+    statuses.push(paused.status);
+    await sql`update self_effort_checks set created_at = created_at - make_interval(mins => ${EFFORT_GIVEN_BACK_WINDOW_MINUTES + 1})
+      where reading_id = ${readingId}`;
+  }
+  const rows = await one<{ n: number; counted: number; status: string }>(sql`
+    select count(*)::int as n, count(*) filter (where e.outcome is distinct from 'given_back')::int as counted, r.status
+    from self_readings r left join self_effort_checks e on e.reading_id = r.id
+    where r.id = ${readingId} group by r.status`);
+  check(
+    rows.n === 3 * EFFORT_GIVEN_BACK_WINDOW_LIMIT && rows.counted === 0 && rows.status === "in_progress",
+    `${rows.n} given-back checks (cap ${EFFORT_CHECK_LIMIT}): ${rows.counted} counted, reading ${rows.status}; each window ended paused (${statuses.filter((x) => x === "paused").length}x)`,
+  );
+  const pass = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: checker(true) });
+  check(pass.status === "checked" && pass.passed && pass.tryNumber === 1, `then a real check is try 1 and passes: ${pass.status}`);
+}
+
+// A role switch or another account's id between the read and the write:
+// the claim and the commit re-check both in the statement, so nothing is
+// saved.
+async function checkRoleAndOwnerAtWrite() {
+  console.log("\n== (e2) ROLE AND OWNER AT WRITE TIME ==");
+  const readingId = await rawReading(bId, "Switch mid-check");
+  const questions = await readyQuestions(bId, readingId);
+  // The account switches to teacher while the check runs.
+  const switching = async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+    await sql`update teachers set role = 'teacher' where id = ${bId}`;
+    return checker(true)(input);
+  };
+  const mid = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: switching });
+  const saved = await one<{ n: number }>(sql`select count(*)::int as n from self_attempts where reading_id = ${readingId}`);
+  check(mid.status === "check_failed" && saved.n === 0, `a switch to teacher mid-check saves no try (${mid.status}, ${saved.n} saved)`);
+  const asTeacher = await submitSelfAnswers(bId, readingId, answersFor(questions), { check: checker(true) });
+  const claims = await one<{ n: number }>(
+    sql`select count(*)::int as n from self_effort_checks where reading_id = ${readingId} and finished_at is null and created_at > now() - interval '1 minute'`,
+  );
+  check(asTeacher.status === "not_found", `as a teacher the claim itself refuses: ${asTeacher.status} (${claims.n} live claim left from the switch)`);
+  await sql`update teachers set role = 'self_learner' where id = ${bId}`;
+
+  // A's id against B's reading, straight at the statements: no claim, and
+  // a commit with B's live claim id but A's account saves nothing.
+  const claimId = randomUUID();
+  const foreignClaim = claimOutcome(await neonExecutor(selfClaimCheckStatements(aId, readingId, claimId, 0)));
+  check(foreignClaim === "not_found", `another account's claim on the reading: ${foreignClaim}`);
+  await sql`update self_effort_checks set finished_at = now(), outcome = 'error' where reading_id = ${readingId} and finished_at is null`;
+  const ownClaim = randomUUID();
+  const own = claimOutcome(await neonExecutor(selfClaimCheckStatements(bId, readingId, ownClaim, 0)));
+  const foreignCommit = committedTry(
+    await neonExecutor(
+      selfCommitStatements({
+        studentId: aId,
+        readingId,
+        claimId: ownClaim,
+        attemptId: randomUUID(),
+        passed: true,
+        verdicts: questions.map((q) => ({ questionId: q.id, text: "x", pass: true, nudge: "" })),
+      }),
+    ),
+  );
+  const after = await one<{ n: number }>(sql`select count(*)::int as n from self_attempts where reading_id = ${readingId}`);
+  check(own === "claimed" && foreignCommit === null && after.n === 0, `a commit under another account's id saves nothing (${own}, ${foreignCommit}, ${after.n})`);
 }
 
 async function fullSelfLearner(prefix: string): Promise<string> {
@@ -396,6 +699,19 @@ async function checkDelete() {
   check(logs.n === 0, `the account row and its logs are gone too (${logs.n})`);
   const again = await handleClerkEvent({ type: "user.deleted", data: { id: clerkId("test_self_gone"), deleted: true } }, neonExecutor);
   check(again === "already_gone", `a repeat delete succeeds quietly: ${again}`);
+  const late = await handleClerkEvent(
+    {
+      type: "user.created",
+      data: { id: clerkId("test_self_gone"), first_name: "Late", email_addresses: [{ id: "idn_1", email_address: "late@example.invalid" }] },
+    },
+    neonExecutor,
+  );
+  const [, visit = []] = await neonExecutor(createAccountStatements(clerkId("test_self_gone"), "Late", "late@example.invalid"));
+  const back = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${clerkId("test_self_gone")}`);
+  check(
+    late === "deleted_account" && visit.length === 0 && back.n === 0,
+    `a deleted self-learner stays deleted: late user.created ${late}, first visit ${visit.length} rows, ${back.n} rows back`,
+  );
 }
 
 // Through the webhook's delete (classes, then self-learner readings, then
@@ -405,6 +721,9 @@ async function cleanup(): Promise<void> {
   for (const prefix of PREFIXES) {
     deleted += deletedAccountRows(await neonExecutor(deleteTeacherStatements(clerkId(prefix))));
   }
+  // The delete lists each test id; take them off again.
+  const hashes = PREFIXES.map((p) => hashClerkUserId(clerkId(p)));
+  await sql`delete from deleted_clerk_users where clerk_user_hash = any(${hashes})`;
   console.log(`\ncleanup: deleted ${deleted} test accounts (and everything under them)`);
 }
 
@@ -415,7 +734,12 @@ async function main(): Promise<void> {
     await checkRole();
     await checkIsolation();
     await checkAllowance();
+    await checkFailedGenerations();
+    await checkRateLimitedKeepsSlot();
     await checkSoloFlow();
+    await checkLockedAnswers();
+    await checkGivenBackChecks();
+    await checkRoleAndOwnerAtWrite();
     await checkDelete();
   } finally {
     await cleanup();

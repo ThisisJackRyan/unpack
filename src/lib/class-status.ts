@@ -5,7 +5,7 @@
 // statement is scoped to the class AND its owning teacher.
 
 import type { Statement } from "./link-rate-limit";
-import { checksAllowedSql, latestChallengeSql, limitsFromRow, triesAllowedSql } from "./reading-limits";
+import { checksAllowedSql, countedCheckSql, latestChallengeSql, limitsFromRow, triesAllowedSql } from "./reading-limits";
 import { latestChallenge, studentReadingStatus, type StudentReadingStatus } from "./reading-progress";
 import { STUDENT_GENERATION_CALL_LIMIT } from "./student-questions-core";
 
@@ -67,7 +67,7 @@ order by lower(s.first_name), lower(s.last_initials), s.created_at, s.id`,
     select 1 from attempts a where a.student_id = s.id and a.reading_id = r.id and a.result = 'pass'
   ) as passed,
   (select count(*)::int from attempts a where a.student_id = s.id and a.reading_id = r.id) as tries,
-  (select count(*)::int from effort_checks e where e.student_id = s.id and e.reading_id = r.id) as checks,
+  (select count(*)::int from effort_checks e where e.student_id = s.id and e.reading_id = r.id and ${countedCheckSql("e")}) as checks,
   lc.status as challenge, lc.extra_try,
   ${triesAllowedSql("s.id", "r.id")} as tries_allowed,
   ${checksAllowedSql("s.id", "r.id")} as checks_allowed,
@@ -140,6 +140,7 @@ export function statusCounts(status: ClassStatus, readingId: string): Record<Stu
   const counts: Record<StudentReadingStatus, number> = {
     not_started: 0,
     in_progress: 0,
+    waiting: 0,
     passed: 0,
     challenged: 0,
     challenge_denied: 0,
@@ -148,4 +149,15 @@ export function statusCounts(status: ClassStatus, readingId: string): Record<Stu
     counts[(status.cells[cellKey(s.id, readingId)] ?? NOT_STARTED_CELL).status]++;
   }
   return counts;
+}
+
+// "0 of 2 students passed", under each reading's title on the class
+// progress table. Counts the Passed status from studentReadingStatus, the
+// same rule as the student's own Passed badge and result.
+export function passedSummary(status: ClassStatus, readingId: string): string {
+  return passedSummaryLabel(statusCounts(status, readingId).passed, status.students.length);
+}
+
+export function passedSummaryLabel(passed: number, students: number): string {
+  return `${passed} of ${students} ${students === 1 ? "student" : "students"} passed`;
 }

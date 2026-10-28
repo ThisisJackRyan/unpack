@@ -8,6 +8,8 @@ import { CHALLENGE_FAILED_MESSAGE, challengeMessage } from "@/lib/challenges-cor
 import { getStudentSession } from "@/lib/student-auth";
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
 import { CHECK_FAILED_MESSAGE, submitMessage } from "@/lib/submit-answers-core";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
 import type { AnswerFormState, ChallengeFormState } from "./form-state";
 
@@ -37,8 +39,8 @@ export async function submitAnswersAction(
 ): Promise<AnswerFormState> {
   const session = await getStudentSession();
   if (!session) redirect("/join");
-  // Without AI Gateway credentials every check would fail and still count
-  // toward the limit, so don't start one.
+  // Without AI Gateway credentials every check would fail (given back,
+  // but filling the outage window), so don't start one.
   if (!isQuestionWritingConfigured()) return { message: CHECK_FAILED_MESSAGE };
 
   let result: SubmitResult;
@@ -66,6 +68,9 @@ export async function submitAnswersAction(
       // with its answers and this message.
       refresh(readingId);
       return { message: submitMessage(result.status) };
+    case "paused":
+      // An outage: a short break, with when checking frees up again.
+      return { limit: withRetryAt(submitMessage(result.status), result.retryAt, await requestRetryClock()) };
     default:
       return { message: submitMessage(result.status) };
   }

@@ -12,6 +12,7 @@ import {
   PENDING_MAX_REFRESHES,
   perStudentView,
   QUESTIONS_ERROR_MESSAGE,
+  QUESTIONS_UNAVAILABLE_MESSAGE,
   readingParagraphs,
   sharedView,
   sourceHost,
@@ -29,15 +30,27 @@ describe("perStudentView", () => {
       [{ status: "pending", retryAfterMs: 2000 }, { kind: "pending", retryAfterMs: 2000 }],
       [{ status: "limit_reached" }, { kind: "limit_reached", message: STUDENT_SETS_LIMITED_MESSAGE }],
       [{ status: "calls_used_up" }, { kind: "calls_used_up", message: STUDENT_GENERATION_USED_UP_MESSAGE }],
-      [{ status: "throttled" }, { kind: "throttled", message: STUDENT_GENERATION_THROTTLED_MESSAGE }],
+      [{ status: "throttled", retryAt: null }, { kind: "throttled", message: `${STUDENT_GENERATION_THROTTLED_MESSAGE} Try again in a few minutes.` }],
       [
-        { status: "error", kind: "not_configured", message: "Question writing isn’t set up yet." },
+        { status: "error", kind: "not_configured", message: "teacher text" },
+        { kind: "unavailable", message: QUESTIONS_UNAVAILABLE_MESSAGE },
+      ],
+      [
+        { status: "error", kind: "failed", message: "teacher text" },
         { kind: "error", message: QUESTIONS_ERROR_MESSAGE },
       ],
       [{ status: "not_found" }, { kind: "not_found" }],
       [{ status: "not_allowed" }, { kind: "not_found" }],
     ];
     for (const [result, view] of cases) assert.deepEqual(perStudentView(result), view, result.status);
+  });
+
+  it("tells when the Try again throttle frees up, in the reader's zone", () => {
+    const clock = { now: new Date("2026-10-27T14:30:00Z"), timeZone: "UTC", utcLabel: true };
+    assert.deepEqual(perStudentView({ status: "throttled", retryAt: new Date("2026-10-27T14:40:00Z") }, clock), {
+      kind: "throttled",
+      message: "We tried a few times to get your questions ready, so let’s take a short break. You can try again at 2:40 PM UTC.",
+    });
   });
 
   it("out of tries: points the student to the teacher, who can reset it", () => {

@@ -72,7 +72,9 @@ describe("the reading's cap", () => {
     assert.deepEqual(capView({ used: 135, limit: 150, raised: false }), { kind: "near", used: 135, limit: 150, raiseTo: 300 });
     assert.deepEqual(capView({ used: 150, limit: 150, raised: false }), { kind: "full", used: 150, limit: 150, raiseTo: 300 });
     assert.deepEqual(capView({ used: 150, limit: 300, raised: true }), { kind: "raised", used: 150, limit: 300 });
-    assert.deepEqual(capView({ used: 299, limit: 300, raised: true }), { kind: "raised", used: 299, limit: 300 });
+    assert.deepEqual(capView({ used: 284, limit: 300, raised: true }), { kind: "raised", used: 284, limit: 300 });
+    assert.deepEqual(capView({ used: 285, limit: 300, raised: true }), { kind: "raised_near", used: 285, limit: 300 });
+    assert.deepEqual(capView({ used: 299, limit: 300, raised: true }), { kind: "raised_near", used: 299, limit: 300 });
     assert.deepEqual(capView({ used: 300, limit: 300, raised: true }), { kind: "raised_full", used: 300, limit: 300 });
   });
 
@@ -81,6 +83,7 @@ describe("the reading's cap", () => {
     assert.equal(capHeadline({ kind: "near", used: 140, limit: 150, raiseTo: 300 }), "This reading is almost full (140 of 150 students)");
     assert.equal(capHeadline({ kind: "raised", used: 151, limit: 300 }), "Limit raised to 300 students");
     assert.equal(capHeadline({ kind: "raised_full", used: 300, limit: 300 }), "This reading is full (300 students)");
+    assert.equal(capHeadline({ kind: "raised_near", used: 290, limit: 300 }), "This reading is almost full (290 of 300 students)");
     assert.equal(capRaisedMessage(300), "Limit raised to 300 students.");
     assert.equal(capAlreadyRaisedMessage(300), "The limit was already raised to 300 students.");
   });
@@ -98,6 +101,10 @@ describe("the reading's cap", () => {
     assert.equal(
       capDetail({ kind: "raised", used: 151, limit: 300 }),
       "151 of 300 students have their own questions. The limit can only be raised once.",
+    );
+    assert.equal(
+      capDetail({ kind: "raised_near", used: 290, limit: 300 }),
+      `Once 300 students have their own questions, new students who open it see ${asked} The limit was raised once already, so it can’t go higher.`,
     );
     assert.equal(
       capDetail({ kind: "raised_full", used: 300, limit: 300 }),

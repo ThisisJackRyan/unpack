@@ -13,6 +13,7 @@
 // server-only runner is student-join.ts.
 
 import type { Statement, StatementExecutor } from "./link-rate-limit";
+import { dateFromRow } from "./local-time";
 
 // Per IP: schools put a whole building behind one NAT address, so this has
 // to let a full class (or two) join at once, with retries for typos and
@@ -27,7 +28,19 @@ export const JOIN_WINDOW_MINUTES = 10;
 // most 2, so this keeps up with any load while keeping each prune small.
 export const JOIN_PRUNE_BATCH = 200;
 
-export const JOIN_LIMITED_MESSAGE = "Too many tries. Wait a few minutes and try again.";
+// Shown to the student as an amber note, then when the next join frees up
+// (joinRetryStatement and retryAtSentence). Which one depends on the key
+// at its limit: this network (the per-IP limit) or the class code.
+export const JOIN_LIMITED_MESSAGE =
+  "Lots of people have tried to join from here in the last few minutes, so joining is paused for a bit.";
+export const JOIN_CODE_LIMITED_MESSAGE =
+  "This class code has had lots of tries in the last few minutes, so it’s paused for a bit.";
+
+export type JoinLimitedBy = "ip" | "code";
+
+export function joinLimitedMessage(by: JoinLimitedBy): string {
+  return by === "code" ? JOIN_CODE_LIMITED_MESSAGE : JOIN_LIMITED_MESSAGE;
+}
 
 export type JoinLimitKeys = { ipHash: string; codeHash: string };
 
@@ -94,6 +107,39 @@ where id in (
       params: [JOIN_WINDOW_MINUTES, JOIN_PRUNE_BATCH],
     },
   ];
+}
+
+// After a refusal: which key is at its limit (the code first: that's the
+// one the student can do something about, by checking the code), and when
+// the next join frees up for every key at its limit: the latest of their
+// oldest counted attempts plus the window. A refused attempt records
+// nothing, so a key at its limit has exactly its limit in the window and
+// the oldest leaving frees one. Not under the locks: a hint, not a rule.
+export function joinRetryStatement(keys: JoinLimitKeys): Statement {
+  return {
+    text: `with k as (
+  select key_kind, count(*) as n, min(created_at) as oldest
+  from join_attempts
+  where ((key_kind = 'ip' and key_hash = $1::text) or (key_kind = 'code' and key_hash = $2::text))
+    and created_at > now() - make_interval(mins => $3::int)
+  group by key_kind
+),
+at_limit as (
+  select key_kind, oldest from k
+  where (key_kind = 'ip' and n >= $4::int) or (key_kind = 'code' and n >= $5::int)
+)
+select
+  exists (select 1 from at_limit where key_kind = 'code') as code_limited,
+  (select max(oldest) + make_interval(mins => $3::int) from at_limit) as retry_at`,
+    params: [keys.ipHash, keys.codeHash, JOIN_WINDOW_MINUTES, JOIN_IP_LIMIT, JOIN_CODE_LIMIT],
+  };
+}
+
+export type JoinRetry = { by: JoinLimitedBy; retryAt: Date | null };
+
+export function joinRetryFromRows(results: Record<string, unknown>[][]): JoinRetry {
+  const row = results[0]?.[0];
+  return { by: row?.code_limited === true ? "code" : "ip", retryAt: dateFromRow(row?.retry_at) };
 }
 
 // Records the attempt and returns true if it may go ahead, or false

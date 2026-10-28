@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getQuestionModel, isQuestionWritingConfigured } from "@/lib/ai/client";
+import { logModelError } from "@/lib/ai/errors";
 import {
   QUESTION_ERROR_MESSAGES,
   questionErrorKind,
@@ -10,8 +11,10 @@ import {
   writeReplacementQuestion,
 } from "@/lib/ai/questions";
 import { effectiveGradeLevel } from "@/lib/grade-levels";
-import { recordQuestionGeneration } from "@/lib/question-generation-attempts";
+import { questionGenerationRetryAt, recordQuestionGeneration } from "@/lib/question-generation-attempts";
 import { QUESTION_GENERATION_LIMITED_MESSAGE } from "@/lib/question-rate-limit";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { getReadingForTeacher } from "@/lib/readings";
 import {
   checkPublish,
@@ -140,7 +143,12 @@ export async function questionAction(
       logDbError("questionAction: recordQuestionGeneration failed", error, readingId);
       return fail(QUESTION_ERROR_MESSAGES.failed);
     }
-    if (!allowed) return fail(QUESTION_GENERATION_LIMITED_MESSAGE);
+    if (!allowed) {
+      // A limit, not an error: an amber note with when the next one frees
+      // up (a relative time if that can't be read).
+      const retryAt = await questionGenerationRetryAt(teacher.id).catch(() => null);
+      return { intent, questionId, limit: withRetryAt(QUESTION_GENERATION_LIMITED_MESSAGE, retryAt, await requestRetryClock()) };
+    }
 
     const gradeLevel = effectiveGradeLevel(reading.gradeLevel, found.class.gradeLevel);
     const input = {
@@ -162,7 +170,7 @@ export async function questionAction(
             ]
           : await writeQuestionSet(model, input);
     } catch (error) {
-      console.error("questionAction: write failed", {
+      logModelError("questionAction: write failed", {
         ...questionErrorLogFields(error),
         intent,
         readingId,

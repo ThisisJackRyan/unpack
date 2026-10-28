@@ -3,6 +3,7 @@
 import {
   useActionState,
   useEffect,
+  startTransition,
   useRef,
   useState,
   type FormEvent,
@@ -12,7 +13,20 @@ import {
 import { questionRole, type QuestionRole } from "@/lib/ai/prompts";
 import { questionCountLabel } from "@/lib/question-modes";
 import { LAST_QUESTION_MESSAGE } from "@/lib/shared-questions";
-import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
+import { ErrorMessage } from "@/components/error-message";
+import { LimitNotice } from "@/components/limit-notice";
+import { MetaLine } from "@/components/meta-line";
+import {
+  actionButton,
+  dangerActionButton,
+  dangerButton,
+  focusRing,
+  primaryButton,
+  secondaryButton,
+} from "@/components/ui";
+import { RetryIcon } from "@/components/answer-parts";
+import { WritingQuestions } from "@/components/writing-questions";
+import { WRITING_A_SAMPLE, WRITING_ONE_QUESTION, WRITING_QUESTIONS_TEACHER } from "@/components/writing-questions-text";
 import {
   QUESTION_MAX_LENGTH,
   type QuestionActionState,
@@ -30,14 +44,12 @@ type Props = {
   questionCount: number;
   gradeLabel: string;
   questions: Question[];
+  // Arrived from "Create & generate": write the set once on load.
+  autoGenerate?: boolean;
 };
 
 type Running = { intent: QuestionIntent; questionId?: string };
 
-const smallButton = `inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`;
-const quietButton = `${smallButton} text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950`;
-// primaryButton in red, for confirming a delete.
-const dangerButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-red-700 px-5 text-base font-semibold text-white transition-colors hover:bg-red-800 ${focusRing}`;
 
 const ROLE_LABELS: Record<QuestionRole, string> = {
   detail: "From the text",
@@ -46,10 +58,10 @@ const ROLE_LABELS: Record<QuestionRole, string> = {
 };
 
 // Numbered, stacked question cards with inline edit and per-card actions
-// (modeled on the Google Gemini "Creating a quiz" flow), skeleton cards
-// while writing, and a confirm step before Regenerate all, Publish, and
+// (modeled on the Google Gemini "Creating a quiz" flow), a friendly "Writing
+// questions…" card while writing, and a confirm step before Regenerate all, Publish, and
 // Delete.
-export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questions }: Props) {
+export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questions, autoGenerate = false }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [running, setRunning] = useState<Running | null>(null);
   // Where focus goes once an action finishes (the card's Edit button after
@@ -68,6 +80,19 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
     },
     {},
   );
+
+  // "Create & generate": run the Generate button's intent once, then drop
+  // the flag from the address so a reload doesn't ask again.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoGenerate || autoStarted.current) return;
+    autoStarted.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    const data = new FormData();
+    data.set("intent", "generate");
+    setRunning({ intent: "generate" });
+    startTransition(() => dispatch(data));
+  }, [autoGenerate, dispatch]);
 
   useEffect(() => {
     if (pending || !focusAfter.current) return;
@@ -105,18 +130,19 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           <h2
             id="questions-heading"
             tabIndex={-1}
-            className="rounded text-xl font-semibold text-zinc-950 focus:outline-none"
+            className="rounded text-xl font-semibold text-ink-950 focus:outline-none"
           >
             Questions
           </h2>
-          <p className="text-base text-zinc-600">
-            {questionCountLabel(questionCount)} · Written for {gradeLabel}
-          </p>
+          <MetaLine
+            className="text-base text-ink-700"
+            parts={[questionCountLabel(questionCount), `Written for ${gradeLabel}`]}
+          />
         </div>
         {shared && hasSet && (
           <ConfirmButton
             label="Regenerate all"
-            pendingLabel="Writing questions…"
+            pendingLabel={WRITING_QUESTIONS_TEACHER}
             isPending={busy("regenerate_all")}
             disabled={pending}
             title="Write a new set?"
@@ -133,19 +159,20 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
       <p role="status" aria-live="polite" className="sr-only">
         {pending
           ? writingSet || busy("regenerate_one")
-            ? "Writing questions…"
+            ? WRITING_QUESTIONS_TEACHER
             : "Saving…"
           : state.ok
             ? state.status
             : ""}
       </p>
-      <p role="alert" className="text-base text-red-700 empty:hidden">
+      <ErrorMessage alert>
         {panelError}
-      </p>
+      </ErrorMessage>
+      {!pending && state.limit && <LimitNotice>{state.limit}</LimitNotice>}
 
       {shared ? (
         busy("generate") || busy("regenerate_all") ? (
-          <SkeletonList count={questionCount} />
+          <WritingQuestions label={WRITING_QUESTIONS_TEACHER} announce={false} />
         ) : hasSet ? (
           <ol className="flex flex-col gap-3" aria-label="Questions">
             {questions.map((q) => (
@@ -179,14 +206,14 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           >
             <IntentForm intent="generate" dispatch={dispatch} track={track}>
               <button type="submit" disabled={pending} className={primaryButton}>
-                {busy("generate") ? "Writing questions…" : "Generate questions"}
+                {busy("generate") ? WRITING_QUESTIONS_TEACHER : "Generate questions"}
               </button>
             </IntentForm>
           </EmptyState>
         )
       ) : (
         <div className="flex flex-col gap-4">
-          <p className="text-base text-zinc-700">
+          <p className="text-base text-ink-700">
             Each student gets their own {questionCountLabel(questionCount)} when they first
             open this reading. Their set is saved, so it stays the same if they try again.
           </p>
@@ -196,18 +223,18 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
             </button>
           </IntentForm>
           {busy("sample") ? (
-            <SkeletonList count={questionCount} />
+            <WritingQuestions label={WRITING_A_SAMPLE} announce={false} />
           ) : (
             state.sample && (
               <div className="flex flex-col gap-3">
-                <p className="text-sm font-medium text-zinc-600">
+                <p className="text-base font-semibold text-ink-900">
                   Sample only. It isn’t saved, and each student gets their own set.
                 </p>
                 <ol className="flex flex-col gap-3" aria-label="Sample questions">
                   {state.sample.map((prompt, i) => (
                     <li
                       key={i}
-                      className="flex gap-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4"
+                      className="flex gap-4 rounded-2xl border border-dashed border-ink-300 bg-ink-50 p-4"
                     >
                       <QuestionNumber n={i + 1} />
                       <QuestionText
@@ -223,8 +250,8 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
         </div>
       )}
 
-      <div className="flex flex-col gap-3 border-t border-zinc-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p id="publish-hint" className="text-base text-zinc-600">
+      <div className="flex flex-col gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <p id="publish-hint" className="text-base text-ink-700">
           {canPublish
             ? "Publishing shows it to the class and locks the questions."
             : "Write the questions before you publish."}
@@ -337,12 +364,12 @@ function ConfirmButton({
         ref={dialogRef}
         aria-labelledby={`${id}-title`}
         aria-describedby={`${id}-body`}
-        className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-2xl bg-white p-6 shadow-xl backdrop:bg-zinc-950/40"
+        className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-3xl bg-white p-6 shadow-xl backdrop:bg-ink-950/40"
       >
-        <h2 id={`${id}-title`} className="text-xl font-semibold text-zinc-950">
+        <h2 id={`${id}-title`} className="text-xl font-semibold text-ink-950">
           {title}
         </h2>
-        <p id={`${id}-body`} className="mt-2 text-base text-zinc-600">
+        <p id={`${id}-body`} className="mt-2 text-base text-ink-700">
           {body}
         </p>
         <IntentForm
@@ -419,15 +446,11 @@ function QuestionCard({
   }
 
   return (
-    <li className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-xs">
+    <li className="flex gap-4 rounded-2xl border border-ink-200 bg-white p-4 shadow-xs">
       <QuestionNumber n={question.position} />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {regenerating ? (
-          <div aria-hidden="true" className="flex animate-pulse flex-col gap-2 py-1">
-            <div className="h-3 w-24 rounded bg-zinc-100" />
-            <div className="h-4 w-11/12 rounded bg-zinc-200" />
-            <div className="h-4 w-2/3 rounded bg-zinc-200" />
-          </div>
+          <WritingQuestions label={WRITING_ONE_QUESTION} announce={false} size="small" />
         ) : editing ? (
           <IntentForm
             intent="update"
@@ -436,7 +459,7 @@ function QuestionCard({
             track={track}
             className="flex flex-col gap-2"
           >
-            <label htmlFor={fieldId} className="text-sm font-medium text-zinc-500">
+            <label htmlFor={fieldId} className="text-lg font-semibold text-ink-950">
               {ROLE_LABELS[role]}
               <span className="sr-only">, question {question.position}</span>
             </label>
@@ -451,22 +474,18 @@ function QuestionCard({
               onKeyDown={onKeyDown}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? errorId : `${fieldId}-count`}
-              className={`block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-base leading-relaxed text-zinc-950 aria-invalid:border-red-600 ${focusRing}`}
+              className={`block w-full rounded-2xl border-2 border-ink-400 bg-white px-3 py-2 text-base leading-relaxed text-ink-950 aria-invalid:border-danger-600 ${focusRing}`}
             />
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p id={`${fieldId}-count`} className="text-sm text-zinc-500 tabular-nums">
+              <p id={`${fieldId}-count`} className="text-base text-ink-700 tabular-nums">
                 {length} / {QUESTION_MAX_LENGTH}
                 <span className="sr-only"> characters</span>
               </p>
               <div className="flex gap-2">
-                <button type="button" onClick={onCancel} className={quietButton}>
+                <button type="button" onClick={onCancel} className={actionButton}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={disabled}
-                  className={`${smallButton} bg-indigo-600 text-white hover:bg-indigo-700`}
-                >
+                <button type="submit" disabled={disabled} className={primaryButton}>
                   {saving ? "Saving…" : "Save"}
                 </button>
               </div>
@@ -477,20 +496,21 @@ function QuestionCard({
         )}
 
         {error && (
-          <p id={errorId} role="alert" className="text-sm text-red-700">
+          <ErrorMessage id={errorId} alert>
             {error}
-          </p>
+          </ErrorMessage>
         )}
 
         {!editing && (
-          <div className="-ml-3 flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-2">
             <button
               id={`edit-${question.id}`}
               type="button"
               disabled={disabled}
               onClick={onEdit}
-              className={quietButton}
+              className={actionButton}
             >
+              <EditIcon />
               Edit<span className="sr-only"> question {question.position}</span>
             </button>
             <IntentForm
@@ -499,7 +519,8 @@ function QuestionCard({
               dispatch={dispatch}
               track={track}
             >
-              <button type="submit" disabled={disabled} className={quietButton}>
+              <button type="submit" disabled={disabled} className={actionButton}>
+                <RetryIcon className="h-5 w-5" />
                 {regenerating ? "Writing…" : "Regenerate"}
                 <span className="sr-only"> question {question.position}</span>
               </button>
@@ -507,6 +528,7 @@ function QuestionCard({
             <ConfirmButton
               label={
                 <>
+                  <TrashIcon />
                   Delete<span className="sr-only"> question {question.position}</span>
                 </>
               }
@@ -522,7 +544,7 @@ function QuestionCard({
               questionId={question.id}
               dispatch={dispatch}
               track={track}
-              className={`${smallButton} text-red-700 hover:bg-red-50`}
+              className={dangerActionButton}
             />
           </div>
         )}
@@ -534,8 +556,8 @@ function QuestionCard({
 export function QuestionText({ role, prompt }: { role: QuestionRole; prompt: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-zinc-500">{ROLE_LABELS[role]}</span>
-      <p className="text-base leading-relaxed break-words text-zinc-900">{prompt}</p>
+      <span className="text-base font-semibold text-primary-700">{ROLE_LABELS[role]}</span>
+      <p className="text-base leading-relaxed break-words text-ink-900">{prompt}</p>
     </div>
   );
 }
@@ -544,37 +566,35 @@ export function QuestionNumber({ n }: { n: number }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-sm font-semibold text-indigo-700 tabular-nums"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-50 text-base font-semibold text-primary-700 tabular-nums"
     >
       {n}
     </span>
   );
 }
 
-// Placeholder cards for the set being written, one per expected question.
-function SkeletonList({ count }: { count: number }) {
+function EmptyState({ title, body, children }: { title: string; body: string; children: ReactNode }) {
   return (
-    <ol aria-hidden="true" className="flex animate-pulse flex-col gap-3">
-      {Array.from({ length: count }, (_, i) => (
-        <li key={i} className="flex gap-4 rounded-xl border border-zinc-200 bg-white p-4">
-          <div className="h-8 w-8 shrink-0 rounded-full bg-zinc-200" />
-          <div className="flex flex-1 flex-col gap-2 py-1">
-            <div className="h-3 w-24 rounded bg-zinc-100" />
-            <div className="h-4 w-11/12 rounded bg-zinc-200" />
-            <div className="h-4 w-2/3 rounded bg-zinc-200" />
-          </div>
-        </li>
-      ))}
-    </ol>
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-10 text-center">
+      <h3 className="text-lg font-semibold text-ink-950">{title}</h3>
+      <p className="max-w-md text-base text-ink-700">{body}</p>
+      <div className="mt-2">{children}</div>
+    </div>
   );
 }
 
-function EmptyState({ title, body, children }: { title: string; body: string; children: ReactNode }) {
+function EditIcon() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-6 py-10 text-center">
-      <h3 className="text-lg font-semibold text-zinc-950">{title}</h3>
-      <p className="max-w-md text-base text-zinc-600">{body}</p>
-      <div className="mt-2">{children}</div>
-    </div>
+    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12.5 4.5l3 3L7 16H4v-3l8.5-8.5Z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.5 5.5h13M8 5.5V4h4v1.5M5 5.5l1 11h8l1-11M8.5 9v4.5M11.5 9v4.5" />
+    </svg>
   );
 }

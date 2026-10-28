@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useOptimistic, useRef, useState } from "react";
 import { focusRing, primaryButton, secondaryButton } from "@/components/ui";
+import { ErrorBox } from "@/components/error-message";
 import type { JoinCodeState } from "./state";
 
 type Action = (state: JoinCodeState, formData: FormData) => Promise<JoinCodeState>;
@@ -48,13 +49,13 @@ export function JoinCodeSettings({
   const busy = switchPending || newPending;
 
   return (
-    <div className="flex w-full flex-col divide-y divide-zinc-200 border-t border-zinc-200 text-left">
+    <div className="flex w-full flex-col divide-y divide-ink-200 border-t border-ink-200 text-left">
       <div className="flex items-center justify-between gap-6 py-5">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <p id="code-switch-label" className="text-base font-semibold text-zinc-950">
+          <p id="code-switch-label" className="text-base font-semibold text-ink-950">
             Join code on
           </p>
-          <p id="code-switch-help" className="text-sm text-zinc-600">
+          <p id="code-switch-help" className="text-base text-ink-700">
             Turn it off when everyone’s in. Students who already joined keep their access.
           </p>
         </div>
@@ -68,7 +69,7 @@ export function JoinCodeSettings({
             aria-describedby="code-switch-help"
             disabled={busy}
             className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-              optimisticActive ? "bg-indigo-600" : "bg-zinc-300"
+              optimisticActive ? "bg-primary-600" : "bg-ink-300"
             } ${focusRing}`}
           >
             <span
@@ -84,8 +85,8 @@ export function JoinCodeSettings({
       <div className="flex flex-col gap-4 py-5">
         <div className="flex items-center justify-between gap-6">
           <div className="flex min-w-0 flex-col gap-0.5">
-            <p className="text-base font-semibold text-zinc-950">New code</p>
-            <p id="new-code-help" className="text-sm text-zinc-600">
+            <p className="text-base font-semibold text-ink-950">New code</p>
+            <p id="new-code-help" className="text-base text-ink-700">
               For a code that got shared too widely. The old one stops working right away.
             </p>
           </div>
@@ -112,9 +113,9 @@ export function JoinCodeSettings({
             }}
             role="group"
             aria-labelledby="new-code-confirm"
-            className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4"
+            className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-ink-50 px-4 py-4"
           >
-            <p id="new-code-confirm" className="text-base text-zinc-800">
+            <p id="new-code-confirm" className="text-base text-ink-800">
               Make a new code? <span className="font-mono font-semibold tracking-wider">{code}</span> stops working
               right away. Students who already joined stay in.
             </p>
@@ -135,15 +136,12 @@ export function JoinCodeSettings({
             </div>
           </form>
         )}
-        {newPending && <p className="text-sm text-zinc-600">Making a new code…</p>}
+        {newPending && <p className="text-base text-ink-700">Making a new code…</p>}
       </div>
 
-      <p
-        aria-live="polite"
-        className={`pt-5 text-base font-medium empty:hidden ${shown.error ? "text-red-700" : "text-indigo-900"}`}
-      >
-        {shown.error ?? shown.message ?? ""}
-      </p>
+      <div aria-live="polite" className="pt-5 text-base font-medium text-primary-900 empty:hidden">
+        {shown.error ? <ErrorBox>{shown.error}</ErrorBox> : (shown.message ?? "")}
+      </div>
     </div>
   );
 }

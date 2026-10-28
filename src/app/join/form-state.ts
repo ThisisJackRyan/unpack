@@ -6,4 +6,6 @@ export { FIRST_NAME_MAX_LENGTH, LAST_INITIALS_MAX_LENGTH } from "@/lib/student-n
 export type JoinState = {
   errors?: { code?: string; firstName?: string; lastInitials?: string; form?: string };
   values?: { code: string; firstName: string; lastInitials: string };
+  // At a join limit: an amber note with the retry time (not an error).
+  limit?: string;
 };

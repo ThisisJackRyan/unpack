@@ -26,6 +26,9 @@
 //   past the new cap make exactly 300 in all. The class page's badge
 //   reads Full at 150, nothing just after the raise, and Full at 300; the
 //   reading page shows full at 300 with no raise button.
+// - Readings list (the class page): drafts are listed next to published
+//   readings, each with its status (the page shows the Draft badge from
+//   it); another teacher gets an empty list for the class.
 // - Teacher delete (the Clerk webhook's user.deleted, through
 //   handleClerkEvent): a teacher with a class, students, a published
 //   per-student reading with a row in every table under it, RESOLVED
@@ -34,67 +37,67 @@
 //   (counted per table) and another teacher's rows are all intact. A
 //   repeat delete is already_gone, and a late user.updated after it
 //   brings no row back.
+// - Under-13 delete (the /welcome under-13 answer's local delete,
+//   deleteRolelessAccountStatements): an account with a role is refused
+//   (has_role) and keeps every row, with no hash listed; a role-less
+//   account with a class tree, a self-learner reading and its own logs is
+//   deleted (0 rows in every table) and its hash listed once; the later
+//   webhook user.deleted for the same id is already_gone and lists
+//   nothing new; a first visit can't bring it back; and the two deletes
+//   run at the same moment on a fresh role-less id leave no row, one hash
+//   (confirmed).
+// - Pending Clerk deletes (deleteUnder13Account with a fake Clerk that
+//   fails; the real local delete and confirm): both deleteUser tries
+//   failing leave the hash pending; the ops listing returns exactly this
+//   run's pending hashes (and matchPendingClerkIds exactly their ids); a
+//   pending row backdated past 30 days survives the prune and a first
+//   visit is still refused; a failed sign-in retry keeps it pending; a
+//   retry that succeeds, and one that gets a 404, confirm theirs; the
+//   webhook user.deleted confirms the first (keeping deleted_at), a later
+//   pending write doesn't un-confirm it, the prune keeps it until its
+//   confirmation is past 30 days, then removes it.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-teacher-gaps [flags]
 //
 // Flags:
 //   --raises=20      concurrent cap raises (default 20)
 //   --claims=200     parallel opens per cap round (default 200, > 150)
-//   --concurrency=20 DB requests in flight for the opens (default 20)
+//   --concurrency=8  DB requests in flight for the opens (default
+//                    DB_CHECK_CONCURRENCY, 8)
 //
-// Same host guard and NEON_FETCH_ENDPOINT handling as check-class-limit.ts;
-// set CHECK_CLASS_LIMIT_HOST to opt in for one Neon dev branch. Writes
+// Same database guard, connection cap, and NEON_FETCH_ENDPOINT handling as
+// every check (scripts/lib/db-check.ts). Writes
 // teachers named test_gaps_<run>, test_gaps_other_<run>,
-// test_gaps_gone_<run> and test_gaps_kept_<run> and deletes them (and
+// test_gaps_gone_<run>, test_gaps_kept_<run> and test_gaps_u13*_<run>
+// and deletes them (and
 // everything under them) at the end. Never run against production.
-import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import { countDraftsClearedByGradeChange, updateClassSettings } from "@/lib/classes";
 import { deletedAccountRows, deleteTeacherStatements, handleClerkEvent } from "@/lib/clerk-webhook";
 import type { StatementExecutor } from "@/lib/link-rate-limit";
 import { neonExecutor } from "@/lib/neon-executor";
 import { capView } from "@/lib/reading-cap";
-import { deleteReading, getClassCapBadges, getReadingCap, raiseReadingCap } from "@/lib/readings";
+import { deleteReading, getClassCapBadges, getReadingCap, listReadings, raiseReadingCap } from "@/lib/readings";
 import { getOrCreateStudentQuestions, postgresStudentQuestionStore } from "@/lib/student-questions";
 import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "@/lib/student-questions-core";
+import {
+  confirmClerkDeletedStatement,
+  createAccountStatements,
+  hashClerkUserId,
+  pendingClerkDeletesStatement,
+  pruneDeletedStatement,
+} from "@/lib/deleted-accounts";
+import {
+  deleteRolelessAccountStatements,
+  deleteUnder13Account,
+  retryClerkDelete,
+  rolelessDeleteOutcome,
+  type Under13DeleteDeps,
+} from "@/lib/under-13-account";
+import { matchPendingClerkIds } from "./lib/pending-clerk-deletes";
+import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is not set. Refusing to run.");
-  process.exit(2);
-}
-const LOCAL_DB_HOSTS = ["localhost", "127.0.0.1", "::1", "db.localtest.me"];
-let dbHost: string;
-try {
-  dbHost = new URL(process.env.DATABASE_URL).hostname.replace(/^\[|\]$/g, "");
-} catch {
-  console.error("DATABASE_URL is not a valid URL. Refusing to run.");
-  process.exit(2);
-}
-if (
-  !LOCAL_DB_HOSTS.includes(dbHost) &&
-  process.env.CHECK_CLASS_LIMIT_HOST !== dbHost
-) {
-  console.error(
-    `Refusing to run against database host "${dbHost}". This script writes ` +
-      `and deletes rows, so it only runs against ${LOCAL_DB_HOSTS.join(", ")} ` +
-      `by default. To use a Neon dev branch, set CHECK_CLASS_LIMIT_HOST=${dbHost}. ` +
-      "Never use production.",
-  );
-  process.exit(2);
-}
-if (process.env.ALLOW_DB_WRITES !== "1") {
-  console.error(
-    "This script writes and deletes rows. Set ALLOW_DB_WRITES=1 to run it.",
-  );
-  process.exit(2);
-}
-// Belt and braces: the mock model is always injected, but make sure no
-// code path could reach the model with real credentials.
-for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
-const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
-if (fetchEndpoint) {
-  neonConfig.fetchEndpoint = () => fetchEndpoint;
-}
+const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
 
 function intFlag(name: string, fallback: number): number {
   const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -109,8 +112,10 @@ function intFlag(name: string, fallback: number): number {
 
 const RAISES = intFlag("raises", 20);
 const CLAIMS = intFlag("claims", 200);
-const DB_CONCURRENCY = intFlag("concurrency", 20);
+const DB_CONCURRENCY = intFlag("concurrency", DB_CHECK_CONCURRENCY);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
+// Rounds of the user.created / user.deleted race.
+const RACE_ROUNDS = 10;
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
 
@@ -187,20 +192,8 @@ select $1::uuid, null, p.position, p.prompt from unnest($2::int[], $3::text[]) a
   );
 }
 
-// neonExecutor with at most `limit` batches in flight.
 function throttled(limit: number): StatementExecutor {
-  let active = 0;
-  const waiting: (() => void)[] = [];
-  return async (statements) => {
-    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
-    active++;
-    try {
-      return await neonExecutor(statements);
-    } finally {
-      active--;
-      waiting.shift()?.();
-    }
-  };
+  return throttledExecutor(neonExecutor, limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +332,19 @@ async function readingGrade(readingId: string) {
 
 async function classRow(classId: string) {
   return one<{ name: string; grade_level: string }>(sql`select name, grade_level from classes where id = ${classId}`);
+}
+
+async function checkReadingsList() {
+  console.log("\n== READINGS LIST ==");
+  const classId = await newClass("Room 7", "4");
+  const draft = await newReading(classId, "A draft", "shared", "draft");
+  const published = await newReading(classId, "A published one", "per_student", "published");
+  const list = await listReadings(classId, teacherId);
+  const byId = new Map(list.map((r) => [r.id, r.status]));
+  check(list.length === 2, `the owner sees both readings (got ${list.length})`);
+  check(byId.get(draft) === "draft", `...the draft is listed as a draft: ${byId.get(draft)}`);
+  check(byId.get(published) === "published", `...the published one as published: ${byId.get(published)}`);
+  check((await listReadings(classId, otherTeacherId)).length === 0, "another teacher sees no readings for the class");
 }
 
 async function checkClassSettings() {
@@ -493,6 +499,14 @@ async function checkCap() {
     "...still one log row",
   );
 
+  // Almost full at the raised limit: 290 of 300 shows the amber note.
+  await openAll(readingId, students.slice(0, to - 10));
+  const capNear = await getReadingCap(classId, teacherId, readingId);
+  check(
+    capNear !== undefined && capNear.used === to - 10 && capView(capNear).kind === "raised_near",
+    `at ${to - 10} of ${to} the page shows the almost-full note, with no button: ${JSON.stringify(capNear)}`,
+  );
+
   // Every student at once: the 150 with a set, the ones turned away, and
   // enough new ones to pass 300.
   const next = await openAll(readingId, students);
@@ -626,6 +640,51 @@ async function checkTeacherDelete() {
   check(rows.n === 0, `...and no teacher row came back (${rows.n})`);
   check(JSON.stringify(await teacherCounts(kept)) === JSON.stringify(keptBefore), "...and the other teacher is still intact");
 
+  // The deleted list: only the hash is stored, and a late user.created or
+  // a first visit can't recreate the row.
+  const listed = await one<{ n: number }>(
+    sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(goneClerkId)}`,
+  );
+  check(listed.n === 1, `user.deleted listed the id's hash (${listed.n} row)`);
+  const raw = await one<{ n: number }>(sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${goneClerkId}`);
+  check(raw.n === 0, "...and never the raw id");
+  const lateCreate = await handleClerkEvent(
+    {
+      type: "user.created",
+      data: { id: goneClerkId, first_name: "Late", email_addresses: [{ id: "idn_1", email_address: "late@example.invalid" }] },
+    },
+    neonExecutor,
+  );
+  check(lateCreate === "deleted_account", `a late user.created after user.deleted: ${lateCreate}`);
+  const [, firstVisit = []] = await neonExecutor(createAccountStatements(goneClerkId, "Late", "late@example.invalid"));
+  check(firstVisit.length === 0, `a first visit on a leftover session creates nothing (${firstVisit.length} rows)`);
+  const stillGone = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${goneClerkId}`);
+  check(stillGone.n === 0, `...and no teacher row came back (${stillGone.n})`);
+
+  // A user.created racing the user.deleted of a fresh id: whichever
+  // commits first, no row is left. Repeated, since one round can miss the
+  // window (both take the id's account lock, deleted-accounts.ts).
+  const raceOutcomes: string[] = [];
+  let raceLeftovers = 0;
+  for (let round = 0; round < RACE_ROUNDS; round++) {
+    const racedId = `test_gaps_raced_${RUN_ID}_${round}`;
+    const raceData = { id: racedId, first_name: "Raced", email_addresses: [{ id: "idn_1", email_address: "raced@example.invalid" }] };
+    const raced = await Promise.all([
+      handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
+      handleClerkEvent({ type: "user.deleted", data: { id: racedId, deleted: true } }, neonExecutor),
+      handleClerkEvent({ type: "user.created", data: raceData }, neonExecutor),
+    ]);
+    const racedRows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${racedId}`);
+    raceLeftovers += racedRows.n;
+    if (racedRows.n > 0) raceOutcomes.push(raced.join(", "));
+  }
+  check(
+    raceLeftovers === 0,
+    `user.created racing user.deleted leaves no row (${RACE_ROUNDS} rounds${raceOutcomes.length ? `; left a row after: ${raceOutcomes.join(" | ")}` : ""})`,
+  );
+  const [, fresh = []] = await neonExecutor(createAccountStatements(`test_gaps_fresh_${RUN_ID}`, "Fresh", "fresh@example.invalid"));
+  check(fresh.length === 1, "a first visit for an account that was never deleted still creates its row");
+
   const renamed = await handleClerkEvent(
     { type: "user.updated", data: { id: keptClerkId, first_name: "Kept", last_name: "Fake", email_addresses: [{ id: "idn_1", email_address: "kept@example.invalid" }] } },
     neonExecutor,
@@ -638,15 +697,216 @@ async function checkTeacherDelete() {
 }
 
 // ---------------------------------------------------------------------------
+// Under-13 delete (the /welcome under-13 answer, under-13-account.ts)
+
+async function selfReadingCount(teacherId: string): Promise<number> {
+  return (await one<{ n: number }>(sql`select count(*)::int as n from self_readings where account_id = ${teacherId}`)).n;
+}
+
+async function listedCount(clerkUserId: string): Promise<number> {
+  return (
+    await one<{ n: number }>(
+      sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(clerkUserId)}`,
+    )
+  ).n;
+}
+
+async function checkUnder13Delete() {
+  console.log("\n== UNDER-13 DELETE (role-less account, local delete) ==");
+  const childId = `test_gaps_u13_${RUN_ID}`;
+  const holderId = `test_gaps_u13role_${RUN_ID}`;
+  const racedId = `test_gaps_u13race_${RUN_ID}`;
+  // A role-less row never has classes or readings through the app; given
+  // some here, so the check proves the delete reaches everything under it.
+  const child = await fullTeacher(childId, "Child");
+  await sql`
+    insert into self_readings (account_id, title, body_text, grade_level, question_count)
+    values (${child.teacherId}, 'Child self reading', ${BODY}, '5', ${PROMPTS.length})`;
+  const holder = await fullTeacher(holderId, "Holder");
+  await sql`update teachers set role = 'teacher' where id = ${holder.teacherId}`;
+
+  const childBefore = await teacherCounts(child);
+  const holderBefore = await teacherCounts(holder);
+  check(TEACHER_TABLES.every((t) => childBefore[t] > 0), "the role-less account has rows in every table");
+  check((await selfReadingCount(child.teacherId)) === 1, "...and a self-learner reading");
+
+  const refused = rolelessDeleteOutcome(await neonExecutor(deleteRolelessAccountStatements(holderId)));
+  check(refused === "has_role", `an account with a role is refused: ${refused}`);
+  check(JSON.stringify(await teacherCounts(holder)) === JSON.stringify(holderBefore), "...and keeps every row");
+  check((await listedCount(holderId)) === 0, "...and its hash is not listed");
+
+  const outcome = rolelessDeleteOutcome(await neonExecutor(deleteRolelessAccountStatements(childId)));
+  check(outcome === "deleted", `the role-less account: ${outcome}`);
+  const childAfter = await teacherCounts(child);
+  for (const t of TEACHER_TABLES) {
+    check(childAfter[t] === 0, `${t}: the role-less account's ${childBefore[t]} rows are gone (now ${childAfter[t]})`);
+  }
+  check((await selfReadingCount(child.teacherId)) === 0, "self_readings: its reading is gone");
+  check((await listedCount(childId)) === 1, "its hash is listed once");
+  const raw = await one<{ n: number }>(sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${childId}`);
+  check(raw.n === 0, "...and never the raw id");
+  check(JSON.stringify(await teacherCounts(holder)) === JSON.stringify(holderBefore), "the role holder is still intact");
+
+  const webhook = await handleClerkEvent({ type: "user.deleted", data: { id: childId, deleted: true } }, neonExecutor);
+  check(webhook === "already_gone", `the webhook's user.deleted afterwards is a no-op: ${webhook}`);
+  check((await listedCount(childId)) === 1, "...and lists nothing new");
+  const [, firstVisit = []] = await neonExecutor(createAccountStatements(childId, "Child", "child@example.invalid"));
+  check(firstVisit.length === 0, `a first visit afterwards creates nothing (${firstVisit.length} rows)`);
+
+  await sql`insert into teachers (clerk_user_id, email) values (${racedId}, 'raced@example.invalid')`;
+  const raced = await Promise.all([
+    neonExecutor(deleteRolelessAccountStatements(racedId)).then(rolelessDeleteOutcome),
+    handleClerkEvent({ type: "user.deleted", data: { id: racedId, deleted: true } }, neonExecutor),
+  ]);
+  const racedRows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${racedId}`);
+  check(
+    racedRows.n === 0 && (await listedCount(racedId)) === 1 && raced.filter((r) => r === "deleted").length === 1,
+    `the local delete and the webhook at the same moment: no row, one hash (${raced.join(", ")})`,
+  );
+  check((await listState(racedId)) === "confirmed", "...confirmed, whichever ran first (the webhook's write never loses to a pending one)");
+}
+
+// ---------------------------------------------------------------------------
+// Pending Clerk deletes (deleted_clerk_users.clerk_deleted_at, PR 16 review G2)
+
+async function listState(clerkUserId: string): Promise<"missing" | "pending" | "confirmed"> {
+  const rows = await sql`select clerk_deleted_at from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(clerkUserId)}`;
+  if (rows.length === 0) return "missing";
+  return rows[0].clerk_deleted_at === null ? "pending" : "confirmed";
+}
+
+function clerkFailure(status: number): Error {
+  return Object.assign(new Error(`Clerk ${status}`), { name: "ClerkAPIResponseError", status });
+}
+
+// The real local delete and confirm (as under-13-server.ts), a fake Clerk.
+function under13Deps(deleteClerkUser: Under13DeleteDeps["deleteClerkUser"]): Under13DeleteDeps {
+  return {
+    deleteLocal: async (id) => rolelessDeleteOutcome(await neonExecutor(deleteRolelessAccountStatements(id))),
+    deleteClerkUser,
+    confirmClerkDeleted: async (id) => {
+      await neonExecutor([confirmClerkDeletedStatement(id)]);
+    },
+    log: () => {},
+  };
+}
+
+const clerkDown = async (): Promise<never> => {
+  throw clerkFailure(503);
+};
+
+async function prune(): Promise<void> {
+  await neonExecutor([pruneDeletedStatement()]);
+}
+
+// This run's hashes among the ops listing's rows.
+async function pendingOfRun(ids: string[]): Promise<string[]> {
+  const run = new Map(ids.map((id) => [hashClerkUserId(id), id]));
+  const [rows = []] = await neonExecutor([pendingClerkDeletesStatement()]);
+  return rows
+    .map((r) => run.get(String(r.clerk_user_hash)))
+    .filter((id): id is string => id !== undefined)
+    .sort();
+}
+
+async function checkPendingClerkDeletes() {
+  console.log("\n== PENDING CLERK DELETES (under-13 delete whose Clerk call failed) ==");
+  const pendId = `test_gaps_u13pend_${RUN_ID}`;
+  const retryId = `test_gaps_u13retry_${RUN_ID}`;
+  const goneId = `test_gaps_u13r404_${RUN_ID}`;
+  const runIds = [pendId, retryId, goneId, `test_gaps_u13_${RUN_ID}`, `test_gaps_u13race_${RUN_ID}`, `test_gaps_u13role_${RUN_ID}`];
+
+  for (const id of [pendId, retryId, goneId]) {
+    await sql`insert into teachers (clerk_user_id, email) values (${id}, ${`${id}@example.invalid`})`;
+    let clerkCalls = 0;
+    const result = await deleteUnder13Account(
+      id,
+      under13Deps(async () => {
+        clerkCalls++;
+        return clerkDown();
+      }),
+    );
+    const rows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${id}`);
+    check(
+      result === "deleted" && clerkCalls === 2 && rows.n === 0 && (await listState(id)) === "pending",
+      `Clerk failing both tries: row gone, hash listed pending (${result}, ${clerkCalls} Clerk calls, ${rows.n} rows, ${await listState(id)})`,
+    );
+  }
+
+  const listed = await pendingOfRun(runIds);
+  const expected = [pendId, retryId, goneId].sort();
+  check(JSON.stringify(listed) === JSON.stringify(expected), `the ops listing returns exactly the pending hashes (${listed.length} of this run)`);
+  const [opsRows = []] = await neonExecutor([pendingClerkDeletesStatement()]);
+  const matched = matchPendingClerkIds(runIds, new Set(opsRows.map((r) => String(r.clerk_user_hash)))).sort();
+  check(JSON.stringify(matched) === JSON.stringify(expected), "...and matching Clerk ids against it finds exactly their ids");
+
+  await sql`update deleted_clerk_users set deleted_at = now() - interval '40 days' where clerk_user_hash = ${hashClerkUserId(pendId)}`;
+  await prune();
+  check((await listState(pendId)) === "pending", "a pending row 40 days old survives the prune");
+  const [, firstVisit = []] = await neonExecutor(createAccountStatements(pendId, "Child", `${pendId}@example.invalid`));
+  check(firstVisit.length === 0, `...and a first visit is still refused (${firstVisit.length} rows)`);
+
+  await retryClerkDelete(pendId, under13Deps(clerkDown));
+  check((await listState(pendId)) === "pending", "a sign-in retry that fails again keeps it pending");
+  await retryClerkDelete(retryId, under13Deps(async () => undefined));
+  check((await listState(retryId)) === "confirmed", "a sign-in retry that succeeds confirms it");
+  await retryClerkDelete(
+    goneId,
+    under13Deps(async () => {
+      throw clerkFailure(404);
+    }),
+  );
+  check((await listState(goneId)) === "confirmed", "a sign-in retry that gets a 404 confirms it");
+  const stillPending = await pendingOfRun(runIds);
+  check(JSON.stringify(stillPending) === JSON.stringify([pendId]), `the ops listing now has only the failed one (${stillPending.length})`);
+
+  const webhook = await handleClerkEvent({ type: "user.deleted", data: { id: pendId, deleted: true } }, neonExecutor);
+  const after = await one<{ age: number }>(
+    sql`select extract(day from now() - deleted_at)::int as age from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(pendId)}`,
+  );
+  check(
+    webhook === "already_gone" && (await listState(pendId)) === "confirmed" && after.age >= 39,
+    `the webhook's user.deleted confirms it and keeps deleted_at (${webhook}, ${after.age} days)`,
+  );
+  await neonExecutor(deleteRolelessAccountStatements(pendId));
+  check((await listState(pendId)) === "confirmed", "a later pending write never un-confirms it");
+  await prune();
+  check((await listState(pendId)) === "confirmed", "the prune keeps it: retention counts from the confirmation, just now");
+  await sql`update deleted_clerk_users set clerk_deleted_at = now() - interval '31 days' where clerk_user_hash = ${hashClerkUserId(pendId)}`;
+  await prune();
+  check((await listState(pendId)) === "missing", "confirmed 31 days ago: the prune removes it");
+  check((await listState(retryId)) === "confirmed", "...and keeps a row confirmed just now");
+  check((await pendingOfRun(runIds)).length === 0, "the ops listing has none of this run left");
+}
+
+// ---------------------------------------------------------------------------
 
 // Through the webhook's delete (classes first), so a resolved challenge
 // left by a failed run can't block it.
 async function cleanup(): Promise<void> {
   let deleted = 0;
-  for (const prefix of ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept"]) {
+  const raced = Array.from({ length: RACE_ROUNDS }, (_, round) => `test_gaps_raced_${RUN_ID}_${round}`);
+  const prefixes = [
+    "test_gaps",
+    "test_gaps_other",
+    "test_gaps_gone",
+    "test_gaps_kept",
+    "test_gaps_fresh",
+    "test_gaps_u13",
+    "test_gaps_u13role",
+    "test_gaps_u13race",
+    "test_gaps_u13pend",
+    "test_gaps_u13retry",
+    "test_gaps_u13r404",
+  ];
+  for (const prefix of prefixes) {
     const results = await neonExecutor(deleteTeacherStatements(`${prefix}_${RUN_ID}`));
     deleted += deletedAccountRows(results);
   }
+  for (const id of raced) deleted += deletedAccountRows(await neonExecutor(deleteTeacherStatements(id)));
+  // The delete lists each test id; take them off again.
+  const hashes = [...prefixes.map((p) => hashClerkUserId(`${p}_${RUN_ID}`)), ...raced.map(hashClerkUserId)];
+  await sql`delete from deleted_clerk_users where clerk_user_hash = any(${hashes})`;
   console.log(`\ncleanup: deleted ${deleted} test teachers (and everything under them)`);
 }
 
@@ -657,9 +917,12 @@ async function main(): Promise<void> {
     await setup();
     await checkCascades();
     await checkReadingDelete();
+    await checkReadingsList();
     await checkClassSettings();
     await checkCap();
     await checkTeacherDelete();
+    await checkUnder13Delete();
+    await checkPendingClerkDeletes();
   } finally {
     await cleanup();
   }

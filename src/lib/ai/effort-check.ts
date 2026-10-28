@@ -227,6 +227,9 @@ export type EffortCheckOptions = {
   deadlineMs?: number;
   // "solo" for a self-learner's reading; class readings leave it out.
   audience?: PromptAudience;
+  // Called each time the model replies (before the reply is checked), so
+  // the caller knows a failure afterwards reached the model and counts.
+  onModelResponse?: () => void;
 };
 
 // Every answer in one call, and once more if the output is invalid. One
@@ -253,6 +256,7 @@ export async function checkEffort(
       model.create(buildEffortRequest(model.model, text, options.audience), { signal }),
       signal,
     );
+    options.onModelResponse?.();
     const parsed = parseEffortResponse(response, count);
     if (parsed.ok) {
       return parsed.verdicts.map((v, i) => ({ questionId: input.items[i].questionId, ...v }));

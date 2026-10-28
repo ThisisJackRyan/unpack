@@ -4,8 +4,10 @@ import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import { getQuestionModel, isQuestionWritingConfigured } from "./ai/client";
 import { writeQuestionSet } from "./ai/questions";
+import { logModelError } from "./ai/errors";
 import { isUuid } from "./classes";
 import type { GradeLevel } from "./grade-levels";
+import { dateFromRow } from "./local-time";
 import {
   claimOutcome,
   claimStatements,
@@ -16,6 +18,7 @@ import {
   studentQuestionsStatement,
   takeOverOutcome,
   takeOverStatements,
+  throttledUntilStatement,
   type StudentQuestionStore,
   type StudentQuestionWriter,
   type StudentQuestionsResult,
@@ -74,6 +77,10 @@ export function postgresStudentQuestionStore(
       const results = await execute(commitStatements(readingId, studentId, token, prompts));
       return (results[1]?.length ?? 0) === prompts.length;
     },
+    async throttledUntil(readingId, studentId) {
+      const [row] = await one(throttledUntilStatement(readingId, studentId));
+      return dateFromRow(row?.retry_at);
+    },
   };
 }
 
@@ -122,6 +129,6 @@ export async function getOrCreateStudentQuestions(
     // An injected writer (the DB checks) needs no key.
     configured: options.write ? true : isQuestionWritingConfigured(),
     onError: (fields) =>
-      console.error("getOrCreateStudentQuestions: write failed", { ...fields, readingId }),
+      logModelError("getOrCreateStudentQuestions: write failed", { ...fields, readingId }),
   });
 }

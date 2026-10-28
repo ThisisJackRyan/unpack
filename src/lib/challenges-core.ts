@@ -26,7 +26,7 @@
 
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { isUniqueViolation } from "./pg-errors";
-import { checksAllowedSql, effortLockStatement, limitsFromRow, triesAllowedSql } from "./reading-limits";
+import { checksAllowedSql, countedCheckSql, effortLockStatement, limitsFromRow, triesAllowedSql } from "./reading-limits";
 import { EFFORT_CLAIM_STALE_SECONDS } from "./submit-answers-core";
 import { MAX_TRIES, validateChallengeNote } from "./validate-answers";
 
@@ -64,9 +64,10 @@ const FAILS = `(select count(*) from attempts
 const PASSED = `exists (
   select 1 from attempts where student_id = $1::uuid and reading_id = $2::uuid and result = 'pass'
 )`;
-// Every effort check started, failed ones included (the same count the
-// claim in submit-answers-core.ts limits).
-const CHECKS = `(select count(*) from effort_checks where student_id = $1::uuid and reading_id = $2::uuid)`;
+// Every effort check the model answered, failed ones included (the same
+// count the claim in submit-answers-core.ts limits; given-back checks
+// don't count).
+const CHECKS = `(select count(*) from effort_checks where student_id = $1::uuid and reading_id = $2::uuid and ${countedCheckSql()})`;
 const TRIES_ALLOWED = triesAllowedSql("$1::uuid", "$2::uuid");
 const CHECKS_ALLOWED = checksAllowedSql("$1::uuid", "$2::uuid");
 // A challenge that blocks a new one: open, approved, closed (the student

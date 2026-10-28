@@ -3,12 +3,16 @@ import { describe, it } from "node:test";
 import {
   cellKey,
   classStatus,
+  classStatusCell,
   classStatusStatements,
   NOT_STARTED_CELL,
+  passedSummary,
+  passedSummaryLabel,
   statusCounts,
   studentDisplayName,
   triesLabel,
 } from "./class-status";
+import { STUDENT_READING_STATUS_LABELS, TEACHER_READING_STATUS_LABELS } from "./reading-progress";
 import { EFFORT_CHECK_LIMIT, MAX_TRIES } from "./validate-answers";
 import { STUDENT_GENERATION_CALL_LIMIT } from "./student-questions-core";
 
@@ -52,6 +56,26 @@ describe("classStatus", () => {
     ],
   ]);
 
+  // F3: 3 failed tries and no note is Waiting, not In progress.
+  it("is Waiting for teacher after every try fails, with no note sent", () => {
+    const cell = classStatusCell({ passed: false, tries: 3, checks: 3, challenge: null });
+    assert.equal(cell.status, "waiting");
+    assert.equal(TEACHER_READING_STATUS_LABELS[cell.status], "Waiting for teacher");
+    assert.equal(STUDENT_READING_STATUS_LABELS[cell.status], "Waiting for your teacher");
+    // A used one more try, too.
+    assert.equal(classStatusCell({ passed: false, tries: 4, checks: 4, challenge: "denied", extra_try: true, tries_allowed: 4, checks_allowed: 5 }).status, "waiting");
+    assert.equal(classStatusCell({ passed: false, tries: 2, checks: 2, challenge: null }).status, "in_progress");
+  });
+
+  // F2: the header counts Passed with the student's own rule (a pass on
+  // any try, or an accepted note).
+  it("labels the passed count with students", () => {
+    assert.equal(passedSummary(status, "r1"), "2 of 3 students passed");
+    assert.equal(passedSummary(status, "r2"), "0 of 3 students passed");
+    assert.equal(passedSummaryLabel(0, 2), "0 of 2 students passed");
+    assert.equal(passedSummaryLabel(1, 1), "1 of 1 student passed");
+  });
+
   it("derives each cell with the shared status rule and the student's limits", () => {
     const at = (s: string, r: string) => status.cells[cellKey(s, r)];
     assert.equal(at("s1", "r1").status, "passed");
@@ -72,7 +96,7 @@ describe("classStatus", () => {
   });
 
   it("counts statuses per reading, a missing cell as Not started", () => {
-    assert.deepEqual(statusCounts(status, "r1"), { not_started: 0, in_progress: 0, passed: 2, challenged: 0, challenge_denied: 1 });
+    assert.deepEqual(statusCounts(status, "r1"), { not_started: 0, in_progress: 0, waiting: 0, passed: 2, challenged: 0, challenge_denied: 1 });
     assert.deepEqual(statusCounts({ ...status, cells: {} }, "r1").not_started, 3);
     assert.deepEqual(NOT_STARTED_CELL, { status: "not_started", tries: 0, triesAllowed: MAX_TRIES, checks: 0, checksAllowed: EFFORT_CHECK_LIMIT, needsReset: false });
   });

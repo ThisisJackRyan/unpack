@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AnswerForm } from "@/components/answer-form";
+import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
+import { PassCelebration } from "@/components/celebration";
+import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
-import { QuestionSkeletons } from "@/components/question-skeletons";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
-import { backLink, card, primaryButton, secondaryButton } from "@/components/ui";
+import { MetaLine } from "@/components/meta-line";
+import { backLink, card, primaryButtonLarge, secondaryButtonLarge } from "@/components/ui";
 import { requireSelfLearner } from "@/lib/account";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { gradeLevelLabel } from "@/lib/grade-levels";
 import { questionCountLabel } from "@/lib/question-modes";
 import { soloAnnouncement, soloStage, type SoloStage } from "@/lib/self-answers-core";
@@ -17,6 +20,7 @@ import { getOrCreateSelfQuestions, getSelfReading, loadSelfProgress } from "@/li
 import type { StudentQuestion } from "@/lib/student-questions-core";
 import { PENDING_MAX_REFRESHES, readingParagraphs, sourceHost } from "@/lib/student-reading-view";
 import { MAX_TRIES } from "@/lib/validate-answers";
+import { AllowanceLimit } from "../../allowance";
 import { submitSelfAnswersAction } from "./actions";
 
 // The first open writes the questions (QUESTION_WRITE_DEADLINE_MS, 110s,
@@ -44,7 +48,9 @@ export default async function SelfReadingPage({ params }: Props) {
   const reading = await getSelfReading(account.id, readingId);
   if (!reading) notFound();
 
-  const view = selfQuestionsView(await getOrCreateSelfQuestions(account.id, reading.id));
+  const result = await getOrCreateSelfQuestions(account.id, reading.id);
+  const clock = await requestRetryClock();
+  const view = selfQuestionsView(result, clock);
   if (view.kind === "not_found") notFound();
   const stage = view.kind === "questions" ? soloStage(await loadSelfProgress(account.id, reading.id)) : null;
   const host = sourceHost(reading.sourceUrl);
@@ -56,25 +62,17 @@ export default async function SelfReadingPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-2">
-        <p className="text-lg text-zinc-600">
-          {gradeLevelLabel(reading.gradeLevel)}
-          <span aria-hidden="true"> · </span>
-          <span className="sr-only">, </span>
-          {questionCountLabel(reading.questionCount)}
-          {host && (
-            <>
-              <span aria-hidden="true"> · </span>
-              <span className="sr-only">, </span>From <span className="break-all">{host}</span>
-            </>
-          )}
-        </p>
-        <h1 id="reading-title" className="text-4xl font-semibold tracking-tight break-words text-zinc-950">
+        <MetaLine
+          className="text-lg font-medium text-ink-700"
+          parts={[gradeLevelLabel(reading.gradeLevel), questionCountLabel(reading.questionCount), host && `From ${host}`]}
+        />
+        <h1 id="reading-title" className="text-4xl font-bold tracking-tight break-words text-ink-950">
           {reading.title}
         </h1>
       </div>
 
-      <article aria-labelledby="reading-title" className={`${card} rounded-2xl px-6 py-8 sm:px-10 sm:py-10`}>
-        <NoCopyText className="flex max-w-[65ch] flex-col gap-6 text-[1.1875rem] leading-[1.8] text-zinc-800 sm:text-xl sm:leading-[1.8]">
+      <article aria-labelledby="reading-title" className={`${card} px-6 py-8 sm:px-12 sm:py-12`}>
+        <NoCopyText className="flex max-w-[65ch] flex-col gap-7 text-xl leading-[1.85] text-ink-900 sm:text-[1.375rem]">
           {readingParagraphs(reading.bodyText).map((p, i) => (
             <p key={i} className="break-words whitespace-pre-line">
               {p}
@@ -90,26 +88,54 @@ export default async function SelfReadingPage({ params }: Props) {
       </p>
 
       <section aria-labelledby="questions-heading" className="flex flex-col gap-5">
-        <h2 id="questions-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+        <h2 id="questions-heading" className="text-2xl font-bold tracking-tight text-ink-950">
           Your questions
         </h2>
 
         {view.kind === "questions" && stage && (
-          <SoloQuestions readingId={reading.id} questions={view.questions} stage={stage} />
+          <>
+            <SoloQuestions readingId={reading.id} accountId={account.id} questions={view.questions} stage={stage} />
+            {stage.kind !== "answer" && <ClearAnswerDrafts mode="self" readingId={reading.id} ownerId={account.id} />}
+          </>
         )}
 
         {view.kind === "pending" && (
-          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES}>
-            <QuestionSkeletons count={reading.questionCount} />
-          </PendingRefresh>
+          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES} />
         )}
 
-        {(view.kind === "throttled" || view.kind === "error") && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p aria-live="polite" className="text-lg text-zinc-700">
+        {/* This reading's questions failed before, so it gave its weekly
+            slot back, and every slot is in use now. */}
+        {result.status === "limit_reached" && (
+          <div className="flex flex-col items-start gap-5">
+            <AllowanceLimit state={result.state} now={clock.now} timeZone={clock.timeZone} utcLabel={clock.utcLabel} />
+            <RetryButton />
+          </div>
+        )}
+
+        {/* The question limit: a break, not an error. */}
+        {view.kind === "throttled" && (
+          <div className="flex flex-col items-start gap-5">
+            <LimitNotice large>{view.message}</LimitNotice>
+            <RetryButton />
+          </div>
+        )}
+
+        {view.kind === "error" && (
+          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+            <p aria-live="polite" className="text-lg text-ink-700">
               {view.message}
             </p>
             <RetryButton />
+          </div>
+        )}
+
+        {/* Question writing is unavailable: coming back later is the fix,
+            so no Try again. */}
+        {view.kind === "unavailable" && (
+          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+            <p role="status" className="text-lg text-ink-700">
+              {view.message}
+            </p>
           </div>
         )}
       </section>
@@ -119,10 +145,12 @@ export default async function SelfReadingPage({ params }: Props) {
 
 function SoloQuestions({
   readingId,
+  accountId,
   questions,
   stage,
 }: {
   readingId: string;
+  accountId: string;
   questions: StudentQuestion[];
   stage: SoloStage;
 }) {
@@ -136,6 +164,7 @@ function SoloQuestions({
           maxTries={stage.maxTries}
           previous={stage.previous}
           extraTry={false}
+          drafts={{ mode: "self", readingId, ownerId: accountId }}
         />
       );
     case "passed":
@@ -144,6 +173,7 @@ function SoloQuestions({
           <Banner tone="done" title="You passed! Nice work.">
             This reading is done. Here are your answers.
           </Banner>
+          <PassCelebration tryNumber={stage.attempt?.tryNumber} />
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults={false} />}
           <NextSteps />
         </>
@@ -169,10 +199,10 @@ function SoloQuestions({
 function NextSteps() {
   return (
     <div className="flex flex-col gap-3 sm:flex-row">
-      <Link href="/learn/new" className={`${primaryButton} min-h-14 px-7 text-lg`}>
+      <Link href="/learn/new" className={primaryButtonLarge}>
         Start a new reading
       </Link>
-      <Link href="/learn/history" className={`${secondaryButton} min-h-14 px-7 text-lg`}>
+      <Link href="/learn/history" className={secondaryButtonLarge}>
         See your history
       </Link>
     </div>

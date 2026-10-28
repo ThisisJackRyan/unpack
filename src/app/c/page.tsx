@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
-import { card, focusRing } from "@/components/ui";
+import { OpenBook, ReadingBuddy } from "@/components/illustrations";
+import { card, focusRing, textLink } from "@/components/ui";
+import { MetaLine } from "@/components/meta-line";
+import { doneLabel } from "@/lib/done-count";
 import { questionCountLabel } from "@/lib/question-modes";
 import type { StudentReadingListItem } from "@/lib/reading-progress";
 import { listReadingsWithStatus } from "@/lib/reading-progress-db";
@@ -13,8 +16,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 // The student's class home: their published readings, each with the
-// student's status (Not started, In progress, Passed, Challenged, or
-// Challenge denied). Already-joined students keep access even after the
+// student's status (Not started, In progress, Waiting for your teacher,
+// Passed, or Challenge denied). Already-joined students keep access even after the
 // teacher turns the join code off; the code only gates joining.
 export default async function StudentHomePage() {
   const session = await requireStudentSession();
@@ -22,21 +25,25 @@ export default async function StudentHomePage() {
 
   return (
     <div className="flex flex-col gap-10">
-      <div className="flex flex-col gap-1">
-        <p className="text-lg font-medium break-words text-indigo-700">{session.class.name}</p>
-        <h1 className="text-4xl font-semibold tracking-tight break-words text-zinc-950">
-          Hi, {session.student.firstName}
-        </h1>
+      <div className="flex items-center gap-5 rounded-3xl bg-primary-50 px-6 py-6 sm:px-8">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="text-lg font-semibold break-words text-primary-700">{session.class.name}</p>
+          <h1 className="text-4xl font-bold tracking-tight break-words text-ink-950">
+            Hi, {session.student.firstName}
+          </h1>
+        </div>
+        <ReadingBuddy className="h-24 w-24 shrink-0 sm:h-28 sm:w-28" />
       </div>
 
       <section aria-labelledby="readings-heading" className="flex flex-col gap-4">
-        <h2 id="readings-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+        <h2 id="readings-heading" className="text-2xl font-bold tracking-tight text-ink-950">
           Readings
         </h2>
         {readings.length === 0 ? (
-          <p className={`${card} rounded-2xl px-6 py-10 text-center text-lg text-zinc-600`}>
-            No readings yet. Your teacher will add some soon.
-          </p>
+          <div className={`${card} flex flex-col items-center gap-4 px-6 py-10 text-center`}>
+            <OpenBook className="h-24 w-32" />
+            <p className="text-lg text-ink-700">No readings yet. Your teacher will add some soon.</p>
+          </div>
         ) : (
           <ul className="flex flex-col gap-3">
             {readings.map((r) => (
@@ -46,12 +53,9 @@ export default async function StudentHomePage() {
         )}
       </section>
 
-      <p className="text-base text-zinc-600">
+      <p className="text-lg text-ink-700">
         Not {session.student.firstName}?{" "}
-        <Link
-          href="/join"
-          className={`rounded font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900 ${focusRing}`}
-        >
+        <Link href="/join" className={textLink}>
           Join with your name
         </Link>
       </p>
@@ -64,16 +68,26 @@ function ReadingCard({ reading }: { reading: StudentReadingListItem }) {
     <li>
       <Link
         href={`/c/r/${reading.id}`}
-        className={`${card} flex min-h-20 items-center justify-between gap-4 rounded-2xl px-6 py-5 transition-colors hover:border-indigo-300 hover:bg-indigo-50/40 ${focusRing}`}
+        className={`${card} flex min-h-20 items-center justify-between gap-4 px-6 py-5 transition-colors hover:border-primary-300 hover:bg-primary-50 ${focusRing}`}
       >
         <span className="flex min-w-0 flex-col gap-1">
-          <span className="text-xl font-semibold break-words text-zinc-950">{reading.title}</span>
+          <span className="text-xl font-bold break-words text-ink-950">{reading.title}</span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <StudentReadingStatusBadge status={reading.status} />
-            <span className="text-base text-zinc-600">{questionCountLabel(reading.questionCount)}</span>
+            <StudentReadingStatusBadge audience="student" status={reading.status} />
+            <MetaLine
+              as="span"
+              className="text-lg text-ink-700"
+              parts={[
+                questionCountLabel(reading.questionCount),
+                (reading.status === "in_progress" || reading.status === "waiting") && doneLabel(reading.passedAnswers, reading.questionCount),
+              ]}
+            />
           </span>
         </span>
-        <span aria-hidden="true" className="text-2xl text-indigo-600">
+        <span
+          aria-hidden="true"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-600 text-2xl font-bold text-white"
+        >
           →
         </span>
       </Link>

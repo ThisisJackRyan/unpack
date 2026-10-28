@@ -9,6 +9,7 @@ import {
   releaseStatement,
   STUDENT_GENERATION_CALL_LIMIT,
   STUDENT_GENERATION_THROTTLED_MESSAGE,
+  throttledUntilStatement,
   STUDENT_GENERATION_WINDOW_LIMIT,
   STUDENT_GENERATION_WINDOW_MINUTES,
   STUDENT_SETS_LIMITED_MESSAGE,
@@ -287,7 +288,24 @@ describe("the Try again throttle", () => {
     assert.equal(STUDENT_GENERATION_WINDOW_LIMIT, 3);
     assert.equal(STUDENT_GENERATION_WINDOW_MINUTES, 10);
     assert.equal(STUDENT_GENERATION_CALL_LIMIT, 6);
-    assert.equal(STUDENT_GENERATION_THROTTLED_MESSAGE, "Let’s take a little break. Try again in a few minutes.");
+    assert.equal(
+      STUDENT_GENERATION_THROTTLED_MESSAGE,
+      "We tried a few times to get your questions ready, so let’s take a short break.",
+    );
+  });
+
+  it("throttled says when the next call frees up, from the store", async () => {
+    const { store } = fakeStore();
+    const at = new Date("2026-10-27T14:40:00Z");
+    const timed = { ...store, throttledUntil: async () => at };
+    const failing = fakeWriter(unusable(), 1);
+    for (let i = 0; i < STUDENT_GENERATION_WINDOW_LIMIT; i++) await open(timed, failing.write);
+    assert.deepEqual(await open(timed, failing.write), { status: "throttled", retryAt: at });
+    const s = throttledUntilStatement("r1", "s1");
+    assert.match(s.text, /^select min\(created_at\) \+ make_interval\(mins => \$3::int\) as retry_at\nfrom student_question_calls/);
+    // Every call row counts toward the window, given back or not.
+    assert.equal(/given_back/.test(s.text), false);
+    assert.deepEqual(s.params, ["r1", "s1", STUDENT_GENERATION_WINDOW_MINUTES]);
   });
 
   it("stops calling the model after the window limit, then allows more after the window", async () => {
@@ -296,7 +314,7 @@ describe("the Try again throttle", () => {
     for (let i = 0; i < STUDENT_GENERATION_WINDOW_LIMIT; i++) {
       assert.equal((await open(store, failing.write)).status, "error");
     }
-    assert.deepEqual(await open(store, failing.write), { status: "throttled" });
+    assert.deepEqual(await open(store, failing.write), { status: "throttled", retryAt: null });
     assert.equal(failing.calls(), STUDENT_GENERATION_WINDOW_LIMIT);
     advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
     const ok = fakeWriter();
@@ -342,7 +360,7 @@ describe("the Try again throttle", () => {
     claims.set(`${READING}:${STUDENT}`, { token: "dead", status: "pending", claimedAt: 0 });
     advance(CLAIM_STALE_SECONDS + 1);
     const writer = fakeWriter();
-    assert.deepEqual(await open(store, writer.write), { status: "throttled" });
+    assert.deepEqual(await open(store, writer.write), { status: "throttled", retryAt: null });
     assert.equal(writer.calls(), 0);
     advance(STUDENT_GENERATION_WINDOW_MINUTES * 60);
     assert.equal((await open(store, writer.write)).status, "ready");
@@ -408,7 +426,7 @@ describe("which failures count toward the throttle", () => {
       for (let i = 0; i < STUDENT_GENERATION_CALL_LIMIT + 2; i++) {
         if (i > 0 && i % STUDENT_GENERATION_WINDOW_LIMIT === 0) {
           // The window is full of given-back calls: no model call.
-          assert.deepEqual(await attempt(), { status: "throttled" }, `${name} #${i}`);
+          assert.deepEqual(await attempt(), { status: "throttled", retryAt: null }, `${name} #${i}`);
           advance(STUDENT_GENERATION_WINDOW_MINUTES * 60 + 1);
         }
         assert.equal((await attempt()).status, "error", `${name} #${i}`);

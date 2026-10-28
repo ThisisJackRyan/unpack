@@ -1,4 +1,4 @@
-import { focusRing, pill } from "@/components/ui";
+import { card, focusRing, pill } from "@/components/ui";
 import type { SavedAnswer } from "@/lib/reading-progress";
 import type { StudentQuestion } from "@/lib/student-questions-core";
 
@@ -41,13 +41,13 @@ export function LightbulbIcon({ className = "h-5 w-5" }: { className?: string })
 
 export function ResultBadge({ pass }: { pass: boolean }) {
   return pass ? (
-    <span className={`${pill} bg-emerald-50 px-3 py-1 text-base text-emerald-800`}>
-      <CheckIcon />
+    <span className={`${pill} bg-success-50 px-4 py-1.5 text-lg text-success-800`}>
+      <CheckIcon className="h-5 w-5" />
       Looks good
     </span>
   ) : (
-    <span className={`${pill} bg-amber-50 px-3 py-1 text-base text-amber-900`}>
-      <RetryIcon />
+    <span className={`${pill} bg-warning-50 px-4 py-1.5 text-lg text-warning-900`}>
+      <RetryIcon className="h-5 w-5" />
       Needs more
     </span>
   );
@@ -55,8 +55,8 @@ export function ResultBadge({ pass }: { pass: boolean }) {
 
 export function Nudge({ id, text }: { id?: string; text: string }) {
   return (
-    <p id={id} className="flex gap-2.5 rounded-xl bg-amber-50 px-4 py-3 text-lg leading-relaxed text-amber-950">
-      <LightbulbIcon className="mt-1 h-5 w-5 shrink-0 text-amber-700" />
+    <p id={id} className="flex gap-3 rounded-2xl bg-warning-50 px-5 py-4 text-xl leading-relaxed text-warning-950">
+      <LightbulbIcon className="mt-1 h-6 w-6 shrink-0 text-warning-700" />
       <span>
         <span className="font-semibold">Tip: </span>
         {text}
@@ -69,10 +69,37 @@ export function QuestionNumber({ position }: { position: number }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-lg font-semibold text-indigo-700 tabular-nums"
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-100 text-lg font-bold text-primary-800 tabular-nums"
     >
       {position}
     </span>
+  );
+}
+
+// A question that passed on an earlier try: locked as done (the server
+// won't take a new answer for it), shown read-only with its answer.
+export function LockedAnswer({ question, text }: { question: StudentQuestion; text: string }) {
+  return (
+    <li className={`${card} flex flex-col gap-4 p-5 sm:p-6`}>
+      <div className="flex gap-4">
+        <QuestionNumber position={question.position} />
+        <p className="pt-1.5 text-xl leading-relaxed font-semibold break-words text-ink-950">
+          <span className="sr-only">Question {question.position}: </span>
+          {question.prompt}
+        </p>
+      </div>
+      <div className="flex flex-col items-start gap-3 sm:pl-14">
+        <span className={`${pill} bg-success-50 px-4 py-1.5 text-lg text-success-800`}>
+          <CheckIcon />
+          Done
+        </span>
+        <p className="text-lg font-semibold text-ink-700">Your answer</p>
+        <p className="w-full rounded-2xl bg-ink-50 px-4 py-3 text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">
+          {text}
+        </p>
+        <p className="text-lg text-ink-700">This one passed, so it’s done. No need to change it.</p>
+      </div>
+    </li>
   );
 }
 
@@ -92,18 +119,18 @@ export function AnswerReview({
       {questions.map((q) => {
         const answer = answers[q.id];
         return (
-          <li key={q.id} className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 sm:p-6">
+          <li key={q.id} className={`${card} flex flex-col gap-4 p-5 sm:p-6`}>
             <div className="flex gap-4">
               <QuestionNumber position={q.position} />
-              <p className="pt-1.5 text-lg leading-relaxed font-medium break-words text-zinc-900">
+              <p className="pt-1.5 text-xl leading-relaxed font-semibold break-words text-ink-950">
                 <span className="sr-only">Question {q.position}: </span>
                 {q.prompt}
               </p>
             </div>
             {answer && (
               <div className="flex flex-col gap-3 sm:pl-14">
-                <p className="text-base font-medium text-zinc-600">Your answer</p>
-                <p className="rounded-xl bg-zinc-50 px-4 py-3 text-lg leading-relaxed whitespace-pre-line break-words text-zinc-900">
+                <p className="text-lg font-semibold text-ink-700">Your answer</p>
+                <p className="rounded-2xl bg-ink-50 px-4 py-3 text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">
                   {answer.text}
                 </p>
                 {showResults && (
@@ -125,7 +152,7 @@ export function AnswerReview({
 export function CharacterCount({ id, length, max }: { id: string; length: number; max: number }) {
   const near = length >= max * 0.9;
   return (
-    <p id={id} className={`text-base tabular-nums ${near ? "font-medium text-amber-800" : "text-zinc-500"}`}>
+    <p id={id} className={`text-lg tabular-nums ${near ? "font-medium text-warning-800" : "text-ink-700"}`}>
       <span aria-hidden="true">
         {length.toLocaleString("en-US")} / {max.toLocaleString("en-US")}
       </span>
@@ -136,9 +163,9 @@ export function CharacterCount({ id, length, max }: { id: string; length: number
   );
 }
 
-export const answerBox = `block min-h-32 w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 text-lg leading-relaxed text-zinc-950 aria-invalid:border-amber-500 aria-invalid:bg-amber-50/30 disabled:bg-zinc-50 ${focusRing}`;
+export const answerBox = `block min-h-32 w-full resize-y rounded-2xl border-2 border-ink-400 bg-white px-4 py-3 text-lg leading-relaxed text-ink-950 aria-invalid:border-warning-600 aria-invalid:bg-warning-50/30 disabled:bg-ink-50 ${focusRing}`;
 
-export const fieldError = "text-base font-medium text-amber-900";
+export const fieldError = "text-lg font-medium text-warning-900";
 
 // For a button while its action runs.
 export function Spinner() {

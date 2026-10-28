@@ -6,6 +6,7 @@ import { isUuid } from "./classes";
 import { listSharedQuestions } from "./shared-questions-db";
 import type { StudentSession } from "./student-lookup";
 import { getOrCreateStudentQuestions, type GetStudentQuestionsOptions } from "./student-questions";
+import type { RetryClock } from "./local-time";
 import { perStudentView, sharedView, type StudentReadingView } from "./student-reading-view";
 
 // Server-only reading queries for students. Every one is scoped to the
@@ -58,13 +59,15 @@ export async function loadStudentReading(
   readingId: string,
   // For scripts/check-student-join.ts (a mock model); the app passes none.
   options: GetStudentQuestionsOptions = {},
+  // Now and the reader's zone, for a "Try again" retry time.
+  clock: RetryClock | null = null,
 ): Promise<StudentReadingPage> {
   const reading = await getPublishedReading(session.class.id, readingId);
   if (!reading) return { reading: null, view: { kind: "not_found" } };
   const view =
     reading.questionMode === "shared"
       ? sharedView(await listSharedQuestions(reading.id))
-      : perStudentView(await getOrCreateStudentQuestions(reading.id, session.student.id, options));
+      : perStudentView(await getOrCreateStudentQuestions(reading.id, session.student.id, options), clock);
   if (view.kind === "not_found") return { reading: null, view };
   return { reading, view };
 }

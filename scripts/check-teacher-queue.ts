@@ -22,20 +22,24 @@
 // - Another teacher can't decide (not_found, still open) or see the queue.
 // - The class view's statuses (loadClassStatus) match the student's own
 //   (listReadingsWithStatus) and what each case expects.
+// - Teacher answers (loadTeacherAnswers): every try's answer per question,
+//   pass or not yet, the kept answer, and the latest tip, by student and
+//   by reading; another teacher, a wrong class, or another class's
+//   student id gets nothing.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-teacher-queue [flags]
 //
 // Flags:
 //   --n=20               parallel calls per burst (default 20)
 //   --delay-ms=300       fake checker delay (default 300)
-//   --db-concurrency=60  most DB requests in flight (default 60)
+//   --db-concurrency=8   most DB requests in flight (default
+//                        DB_CHECK_CONCURRENCY, 8)
 //
-// Same host guard and NEON_FETCH_ENDPOINT handling as check-class-limit.ts;
-// set CHECK_CLASS_LIMIT_HOST to opt in for one Neon dev branch. Writes
+// Same database guard, connection cap, and NEON_FETCH_ENDPOINT handling as
+// every check (scripts/lib/db-check.ts). Writes
 // teachers named test_queue_<run> and test_queue_other_<run> and deletes
 // them (and everything under them, by cascade) at the end. Never run
 // against production.
-import { neonConfig } from "@neondatabase/serverless";
 import { getSql } from "@/db";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
 import { decideChallenge, loadChallengeQueue, countOpenChallenges, type DecideResult } from "@/lib/challenge-queue";
@@ -48,40 +52,14 @@ import { EXTRA_TRY_CHECKS } from "@/lib/reading-limits";
 import { answerStage, type StudentReadingStatus } from "@/lib/reading-progress";
 import { listReadingsWithStatus, loadReadingProgress } from "@/lib/reading-progress-db";
 import { submitAnswers, type SubmitResult } from "@/lib/submit-answers";
-import { EFFORT_CHECK_LIMIT } from "@/lib/submit-answers-core";
+import { answersFor } from "@/lib/teacher-answers";
+import { loadTeacherAnswers } from "@/lib/teacher-answers-db";
+import { EFFORT_CHECK_LIMIT, type EffortCheckHooks } from "@/lib/submit-answers-core";
 import { MAX_TRIES, type AnswerEntry } from "@/lib/validate-answers";
+import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
+import { openQuestionIds } from "./lib/open-questions";
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL is not set. Refusing to run.");
-  process.exit(2);
-}
-const LOCAL_DB_HOSTS = ["localhost", "127.0.0.1", "::1", "db.localtest.me"];
-let dbHost: string;
-try {
-  dbHost = new URL(process.env.DATABASE_URL).hostname.replace(/^\[|\]$/g, "");
-} catch {
-  console.error("DATABASE_URL is not a valid URL. Refusing to run.");
-  process.exit(2);
-}
-if (!LOCAL_DB_HOSTS.includes(dbHost) && process.env.CHECK_CLASS_LIMIT_HOST !== dbHost) {
-  console.error(
-    `Refusing to run against database host "${dbHost}". This script writes ` +
-      `and deletes rows, so it only runs against ${LOCAL_DB_HOSTS.join(", ")} ` +
-      `by default. To use a Neon dev branch, set CHECK_CLASS_LIMIT_HOST=${dbHost}. ` +
-      "Never use production.",
-  );
-  process.exit(2);
-}
-if (process.env.ALLOW_DB_WRITES !== "1") {
-  console.error("This script writes and deletes rows. Set ALLOW_DB_WRITES=1 to run it.");
-  process.exit(2);
-}
-// Belt and braces: the fake checker is always injected.
-for (const name of ["AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "ANTHROPIC_API_KEY"]) delete process.env[name];
-const fetchEndpoint = process.env.NEON_FETCH_ENDPOINT;
-if (fetchEndpoint) {
-  neonConfig.fetchEndpoint = () => fetchEndpoint;
-}
+const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
 
 function intFlag(name: string, fallback: number): number {
   const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -96,7 +74,7 @@ function intFlag(name: string, fallback: number): number {
 
 const N = intFlag("n", 20);
 const DELAY_MS = intFlag("delay-ms", 300);
-const DB_CONCURRENCY = intFlag("db-concurrency", 60);
+const DB_CONCURRENCY = intFlag("db-concurrency", DB_CHECK_CONCURRENCY);
 const RUN_ID = Math.random().toString(36).slice(2, 10);
 const BODY = "Mia walked to the river after the storm and found a fox. ".repeat(10);
 const PROMPTS = ["Why did Mia go to the river?", "What did the fox do?", "What do you think, and why?"];
@@ -109,28 +87,24 @@ function check(ok: boolean, message: string) {
 }
 
 function throttled(limit: number): StatementExecutor {
-  let active = 0;
-  const waiting: (() => void)[] = [];
-  return async (statements) => {
-    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
-    active++;
-    try {
-      return await neonExecutor(statements);
-    } finally {
-      active--;
-      waiting.shift()?.();
-    }
-  };
+  return throttledExecutor(neonExecutor, limit);
 }
 const execute = throttled(DB_CONCURRENCY);
 
-type Mode = "pass" | "fail" | "error";
+// "error": the model replied, but not usably (counts toward the check
+// limit). "outage": it never replied (given back; see
+// submit-answers-core.ts).
+type Mode = "pass" | "fail" | "error" | "outage";
 let modelCalls = 0;
 function fakeChecker(mode: Mode, delayMs = DELAY_MS) {
-  return async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+  return async (input: EffortCheckInput, hooks?: EffortCheckHooks): Promise<EffortVerdict[]> => {
     modelCalls++;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (mode === "error") throw new Error("fake model failure");
+    if (mode === "outage") throw new Error("fake model outage");
+    if (mode === "error") {
+      hooks?.onModelResponse();
+      throw new Error("fake unusable reply");
+    }
     return input.items.map((item, i) => {
       const pass = mode === "pass" || i < input.items.length - 1;
       return { questionId: item.questionId, pass, nudge: pass ? "" : "Look at the end of the story again." };
@@ -183,12 +157,15 @@ async function setup() {
   questionIds = (rows as { id: string; position: number }[]).sort((a, b) => a.position - b.position).map((r) => r.id);
 }
 
-function answers(): AnswerEntry[] {
-  return questionIds.map((questionId) => ({ questionId, value: "Mia went to see the river after the storm." }));
+function answers(ids = questionIds): AnswerEntry[] {
+  return ids.map((questionId) => ({ questionId, value: "Mia went to see the river after the storm." }));
 }
 
-function submit(studentId: string, mode: Mode, delayMs?: number): Promise<SubmitResult> {
-  return submitAnswers(studentId, readingId, answers(), { check: fakeChecker(mode, delayMs), execute });
+// Like the answer form: only the questions that aren't locked yet (passed
+// on the latest try).
+async function submit(studentId: string, mode: Mode, delayMs?: number): Promise<SubmitResult> {
+  const open = await openQuestionIds(execute, studentId, readingId);
+  return submitAnswers(studentId, readingId, answers(open), { check: fakeChecker(mode, delayMs), execute });
 }
 
 function send(studentId: string, note = "I tried my best."): Promise<ChallengeResult> {
@@ -395,10 +372,15 @@ async function checkSecondTab() {
     for (let i = 0; i < 2; i++) await submit(student, "fail", 5);
     for (let i = 2; i < EFFORT_CHECK_LIMIT - 1; i++) await submit(student, "error", 5);
     const c = await counts(student);
-    // The last allowed check, slow.
-    const last = submit(student, outcome, 1500);
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    const live = await counts(student);
+    // The last allowed check, slow. Wait until its claim is counted (not a
+    // fixed delay, which a busy machine can outrun), so the notes below
+    // all land while it runs.
+    const last = submit(student, outcome, 4000);
+    let live = await counts(student);
+    for (let waited = 0; live.checks < EFFORT_CHECK_LIMIT && waited < 2000; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      live = await counts(student);
+    }
     const settled = await Promise.allSettled(Array.from({ length: N }, () => send(student, "Please look.")));
     const { statuses, thrown } = tally(settled as PromiseSettledResult<ChallengeResult>[]);
     const during = await counts(student);
@@ -482,10 +464,76 @@ async function checkOwnership() {
   expected.set(student, "challenged");
 }
 
+async function checkTeacherAnswers() {
+  console.log("\n== TEACHER ANSWERS: per try, owner scoped ==");
+  const student = await newStudent();
+  // Try 1: q1 and q2 pass, q3 not yet; try 2 sends only q3, not yet again.
+  await submit(student, "fail", 5);
+  await submit(student, "fail", 5);
+  const byStudent = answersFor(await loadTeacherAnswers(classId, teacherId, { studentId: student }, execute), student, readingId);
+  const [q1, , q3] = byStudent;
+  check(
+    byStudent.length === PROMPTS.length && byStudent.every((q, i) => q.prompt === PROMPTS[i]),
+    `by student: ${byStudent.length} questions in order`,
+  );
+  check(
+    JSON.stringify(q1?.tries.map((t) => [t.tryNumber, t.pass, t.keptFrom])) === JSON.stringify([[1, true, null], [2, true, 1]]),
+    `q1 passed on try 1, kept on try 2: ${JSON.stringify(q1?.tries.map((t) => [t.tryNumber, t.pass, t.keptFrom]))}`,
+  );
+  check(
+    JSON.stringify(q3?.tries.map((t) => [t.tryNumber, t.pass])) === JSON.stringify([[1, false], [2, false]]) &&
+      q3?.tries.every((t) => t.text === answers()[0].value) === true &&
+      q3?.latestTip?.tryNumber === 2 && q3.latestTip.text === "Look at the end of the story again.",
+    `q3 not yet on tries 1 and 2, latest tip from try ${q3?.latestTip?.tryNumber}`,
+  );
+  const byReading = await loadTeacherAnswers(classId, teacherId, { readingId }, execute);
+  check(
+    JSON.stringify(answersFor(byReading, student, readingId)) === JSON.stringify(byStudent),
+    "by reading: the same answers for this student",
+  );
+
+  // Another teacher's class, reading, and student with a saved try.
+  const { id: theirClass } = await one<{ id: string }>(sql`
+    insert into classes (teacher_id, name, grade_level, join_code)
+    values (${otherTeacherId}, 'Other class', '3', ${`QO${RUN_ID}`.toUpperCase().slice(0, 8)}) returning id`);
+  const { id: theirReading } = await one<{ id: string }>(sql`
+    insert into readings (class_id, title, body_text, question_count, question_mode, status)
+    values (${theirClass}, 'Other reading', ${BODY}, 1, 'shared', 'published') returning id`);
+  const { id: theirQuestion } = await one<{ id: string }>(sql`
+    insert into questions (reading_id, student_id, position, prompt) values (${theirReading}, null, 1, 'Why?') returning id`);
+  const { id: theirStudent } = await one<{ id: string }>(sql`
+    insert into students (class_id, first_name, last_initials, name_key, session_token_hash)
+    values (${theirClass}, 'Other', 'K', 'other k', ${`hash_queue_${RUN_ID}_other`}) returning id`);
+  const { id: theirAttempt } = await one<{ id: string }>(sql`
+    insert into attempts (student_id, reading_id, try_number, result) values (${theirStudent}, ${theirReading}, 1, 'fail') returning id`);
+  await sql`insert into answers (attempt_id, question_id, text, ai_pass, ai_feedback)
+    values (${theirAttempt}, ${theirQuestion}, 'Because.', false, 'Say more.')`;
+
+  const leaks = {
+    otherTeacherOurClass: Object.keys(await loadTeacherAnswers(classId, otherTeacherId, { studentId: student }, execute)).length,
+    otherTeacherOurReading: Object.keys(await loadTeacherAnswers(classId, otherTeacherId, { readingId }, execute)).length,
+    usTheirClass: Object.keys(await loadTeacherAnswers(theirClass, teacherId, {}, execute)).length,
+    usTheirStudent: Object.keys(await loadTeacherAnswers(classId, teacherId, { studentId: theirStudent }, execute)).length,
+    usTheirReading: Object.keys(await loadTeacherAnswers(classId, teacherId, { readingId: theirReading }, execute)).length,
+    wrongClass: Object.keys(await loadTeacherAnswers(crypto.randomUUID(), teacherId, { studentId: student }, execute)).length,
+    malformed: Object.keys(await loadTeacherAnswers("not-a-uuid", teacherId, {}, execute)).length,
+  };
+  check(Object.values(leaks).every((n) => n === 0), `nothing across teachers or classes: ${JSON.stringify(leaks)}`);
+  const theirs = answersFor(await loadTeacherAnswers(theirClass, otherTeacherId, {}, execute), theirStudent, theirReading);
+  check(theirs.length === 1 && theirs[0].tries[0]?.text === "Because.", "the other teacher sees their own student's answer");
+  await sql`delete from classes where id = ${theirClass}`;
+  // 2 of 3 tries used.
+  expected.set(student, "in_progress");
+}
+
 async function checkStatusDerivation() {
   console.log("\n== STATUS: class view vs student view vs expected ==");
   const notStarted = await newStudent();
   expected.set(notStarted, "not_started");
+  // Every try failed, no note yet: Waiting on both sides (F3).
+  const outOfTries = await newStudent();
+  for (let i = 0; i < MAX_TRIES; i++) await submit(outOfTries, "fail", 5);
+  expected.set(outOfTries, "waiting");
   const status = await loadClassStatus(classId, teacherId, execute);
   let mismatches = 0;
   for (const [student, want] of expected) {
@@ -526,6 +574,7 @@ async function main(): Promise<void> {
     await checkSecondTab();
     await checkAutoClose();
     await checkOwnership();
+    await checkTeacherAnswers();
     await checkStatusDerivation();
   } finally {
     await cleanup();

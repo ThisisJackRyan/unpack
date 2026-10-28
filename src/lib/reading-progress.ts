@@ -5,7 +5,7 @@
 // both go through studentReadingStatus.
 
 import type { Statement } from "./link-rate-limit";
-import { DEFAULT_LIMITS, latestChallengeSql, limitsFromRow, checksAllowedSql, triesAllowedSql, type Limits } from "./reading-limits";
+import { countedCheckSql, DEFAULT_LIMITS, latestChallengeSql, limitsFromRow, checksAllowedSql, triesAllowedSql, type Limits } from "./reading-limits";
 import { MAX_TRIES } from "./validate-answers";
 
 // closed: auto-closed because the student passed (see
@@ -17,14 +17,32 @@ export type ChallengeStatus = "open" | "approved" | "denied" | "closed";
 // try fails too).
 export type LatestChallenge = { status: ChallengeStatus; extraTry: boolean };
 
-export type StudentReadingStatus = "not_started" | "in_progress" | "passed" | "challenged" | "challenge_denied";
+export type StudentReadingStatus =
+  | "not_started"
+  | "in_progress"
+  | "waiting"
+  | "passed"
+  | "challenged"
+  | "challenge_denied";
 
+// What the student sees. Out of tries (waiting) and a sent note
+// (challenged) both read "Waiting for your teacher": either way the next
+// step is the teacher's (the out-of-tries page has the note box).
 export const STUDENT_READING_STATUS_LABELS: Record<StudentReadingStatus, string> = {
   not_started: "Not started",
   in_progress: "In progress",
+  waiting: "Waiting for your teacher",
   passed: "Passed",
-  challenged: "Challenged",
+  challenged: "Waiting for your teacher",
   challenge_denied: "Challenge denied",
+};
+
+// What the teacher sees: the same statuses, with Challenged (a note in the
+// queue) apart from Waiting for teacher (out of tries, no note yet).
+export const TEACHER_READING_STATUS_LABELS: Record<StudentReadingStatus, string> = {
+  ...STUDENT_READING_STATUS_LABELS,
+  waiting: "Waiting for teacher",
+  challenged: "Challenged",
 };
 
 // `checks` is every effort check started, failed ones included. `limits`
@@ -42,8 +60,11 @@ export type StatusInput = {
 //   closed), or the teacher accepted the latest challenge.
 // - Challenged: the latest challenge is open.
 // - Challenge denied: the latest challenge was denied, with no extra try.
-// - In progress: any try, or every check used (all failed on our side),
-//   or a denial with one more try (whether or not it's used yet).
+// - Waiting: every try used, or every check used (all failed on our
+//   side), still not passed, and no note sent since (a used one more try
+//   counts too). The answer form is gone; only a note to the teacher is
+//   left. The same rule as answerStage's out_of_tries and check_limit.
+// - In progress: any try, or a denial with one more try not used yet.
 // - Not started.
 export function studentReadingStatus(input: StatusInput): StudentReadingStatus {
   const { challenge } = input;
@@ -51,7 +72,8 @@ export function studentReadingStatus(input: StatusInput): StudentReadingStatus {
   if (input.passed || challenge?.status === "approved") return "passed";
   if (challenge?.status === "open") return "challenged";
   if (challenge?.status === "denied" && !challenge.extraTry) return "challenge_denied";
-  if (input.tries > 0 || input.checks >= limits.checks || challenge) return "in_progress";
+  if (input.tries >= limits.tries || input.checks >= limits.checks) return "waiting";
+  if (input.tries > 0 || challenge) return "in_progress";
   return "not_started";
 }
 
@@ -138,6 +160,12 @@ export function stageAnnouncement(stage: AnswerStage): string {
   }
 }
 
+// The questions locked as done: those that passed on the latest try (the
+// server only takes answers for the rest; see submit-answers-core.ts).
+export function lockedQuestionIds(latest: AttemptView | null): Set<string> {
+  return new Set(Object.entries(latest?.answers ?? {}).filter(([, a]) => a.pass).map(([id]) => id));
+}
+
 // "2 of 3 answers passed."
 export function passedCountLabel(attempt: AttemptView): string {
   const all = Object.values(attempt.answers);
@@ -175,7 +203,7 @@ left join lateral ${latestChallengeSql("$1::uuid", "$2::uuid")} lc on true`,
       params: [studentId, readingId],
     },
     {
-      text: `select count(*)::int as checks from effort_checks where student_id = $1::uuid and reading_id = $2::uuid`,
+      text: `select count(*)::int as checks from effort_checks where student_id = $1::uuid and reading_id = $2::uuid and ${countedCheckSql()}`,
       params: [studentId, readingId],
     },
   ];
@@ -219,8 +247,13 @@ export function readingListStatement(classId: string, studentId: string): Statem
     where a.reading_id = r.id and a.student_id = $2::uuid and a.result = 'pass'
   ) as passed,
   (select count(*)::int from attempts a where a.reading_id = r.id and a.student_id = $2::uuid) as tries,
+  (select count(*)::int from answers an
+    where an.ai_pass and an.attempt_id = (
+      select a.id from attempts a where a.reading_id = r.id and a.student_id = $2::uuid order by a.try_number desc limit 1
+    )) as passed_answers,
   lc.status as challenge, lc.extra_try,
-  (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid) as checks,
+  (select count(*)::int from effort_checks e where e.reading_id = r.id and e.student_id = $2::uuid and ${countedCheckSql("e")}) as checks,
+  ${triesAllowedSql("$2::uuid", "r.id")} as tries_allowed,
   ${checksAllowedSql("$2::uuid", "r.id")} as checks_allowed
 from readings r
 left join lateral ${latestChallengeSql("$2::uuid", "r.id")} lc on true
@@ -235,6 +268,8 @@ export type StudentReadingListItem = {
   title: string;
   questionCount: number;
   status: StudentReadingStatus;
+  // Answers that passed on the latest try (see done-count.ts).
+  passedAnswers: number;
 };
 
 export function readingListItems(rows: Record<string, unknown>[]): StudentReadingListItem[] {
@@ -242,6 +277,7 @@ export function readingListItems(rows: Record<string, unknown>[]): StudentReadin
     id: String(row.id),
     title: String(row.title),
     questionCount: Number(row.question_count),
+    passedAnswers: Number(row.passed_answers ?? 0),
     status: studentReadingStatus({
       passed: row.passed === true,
       tries: Number(row.tries ?? 0),

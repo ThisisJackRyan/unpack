@@ -13,7 +13,7 @@ let cached: { key: string; call: ModelCall } | undefined;
 
 // True when an API key or an OIDC token is available. Logs loudly when
 // not (naming what's missing, never a value), since every caller then
-// shows "isn't set up yet" and nothing else would say why.
+// shows "isn't available right now" and nothing else would say why.
 export function isQuestionWritingConfigured(): boolean {
   if (resolveAiCredentials(process.env).method !== "none") return true;
   console.error(AI_NOT_CONFIGURED_LOG);

@@ -3,7 +3,10 @@
 import { redirect } from "next/navigation";
 import { getClassForTeacher } from "@/lib/classes";
 import { fetchArticle } from "@/lib/fetch-article";
-import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { linkFetchRetryAt, recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { resolveReadingSource, SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
 import {
   getReadingForTeacher,
@@ -15,6 +18,7 @@ import { PUBLISHED_TITLE_ONLY_MESSAGE } from "@/lib/shared-questions";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import { validateReadingForm } from "@/lib/validate-reading";
 import type { ReadingFormState } from "@/components/reading-form-state";
+import { GENERATE_FLAG } from "./[readingId]/question-state";
 
 function readForm(formData: FormData, source: unknown) {
   return validateReadingForm({
@@ -58,11 +62,13 @@ export async function createReading(
 
   const resolved = await resolveReadingSource(data, {
     recordLinkFetch: () => recordLinkFetchAttempt(teacher.id),
+    limitedMessage: async () =>
+      withRetryAt(LINK_FETCH_LIMITED_MESSAGE, await linkFetchRetryAt(teacher.id), await requestRetryClock()),
     fetchArticle: (url) => fetchArticle(url),
     log: (message, fields) => console.error(`createReading: ${message}`, fields),
   });
   if (!resolved.ok) {
-    return { errors: resolved.errors, values, suggestText: resolved.suggestText };
+    return { errors: resolved.errors, values, suggestText: resolved.suggestText, limit: resolved.limit };
   }
   const draft: ReadingDraft = {
     ...resolved.source,
@@ -87,7 +93,11 @@ export async function createReading(
     };
   }
 
-  redirect(`/teacher/classes/${classId}/readings/${readingId}`);
+  // "Create & generate": the reading page starts writing the shared set
+  // with the same action as its Generate button (same checks and limits).
+  // A per-student reading has no set to write, so it just saves.
+  const generate = formData.get("then") === "generate" && draft.questionMode === "shared";
+  redirect(`/teacher/classes/${classId}/readings/${readingId}${generate ? `?${GENERATE_FLAG}=1` : ""}`);
 }
 
 export async function updateReading(

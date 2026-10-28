@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useRef, type FormEvent } from "react";
 import { dangerButton, dangerOutlineButton, secondaryButton } from "@/components/ui";
+import { ErrorMessage } from "@/components/error-message";
 import type { DeleteReadingState } from "./reading-state";
 
 type Action = () => Promise<DeleteReadingState>;
@@ -38,23 +39,23 @@ export function DeleteReadingButton({ action, title }: { action: Action; title: 
         onCancel={(e) => {
           if (pending) e.preventDefault();
         }}
-        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-2xl border border-zinc-200 bg-white p-0 text-left shadow-xl backdrop:bg-zinc-950/40"
+        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-3xl border border-ink-200 bg-white p-0 text-left shadow-xl backdrop:bg-ink-950/40"
       >
         <form onSubmit={onSubmit} aria-busy={pending} className="flex flex-col gap-5 p-6">
-          <h2 id="delete-reading-title" className="text-xl font-semibold break-words text-zinc-950">
+          <h2 id="delete-reading-title" className="text-xl font-semibold break-words text-ink-950">
             Delete “{title}”?
           </h2>
-          <div id="delete-reading-body" className="flex flex-col gap-3 text-base text-zinc-700">
+          <div id="delete-reading-body" className="flex flex-col gap-3 text-base text-ink-700">
             <p>
               This deletes the reading, its questions, and every student’s answers and tries for it, including their
               notes to you. It can’t be undone.
             </p>
             <p>Students stay in the class, and their work on other readings is kept.</p>
-            <p className="text-sm text-zinc-500">Our database backups keep deleted data for a short time, then it’s gone.</p>
+            <p className="text-base text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
           </div>
-          <p aria-live="polite" className="text-base font-medium text-red-700 empty:hidden">
+          <ErrorMessage>
             {state.error ?? ""}
-          </p>
+          </ErrorMessage>
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button
               ref={cancel}

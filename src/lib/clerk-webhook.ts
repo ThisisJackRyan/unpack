@@ -17,17 +17,22 @@
 //   lazy creation (a first visit and the webhook at the same moment end
 //   with one row), and a redelivery is harmless. It never sets a role:
 //   a new account chooses on /welcome (see account-role.ts), and the
-//   upsert leaves an existing row's role alone.
+//   upsert leaves an existing row's role alone. An account on the deleted
+//   list (deleted-accounts.ts) is refused in the same statement: nothing
+//   is written, and it is still a 200 ("deleted_account") so Clerk stops
+//   retrying.
 // - user.updated: update only (update teachers ... where clerk_user_id),
 //   never an insert. Svix doesn't promise delivery order, so a late
 //   user.updated can arrive after user.deleted; an upsert would bring the
-//   deleted teacher's row (and email) back. No row is a 200 ("no_teacher"):
+//   deleted teacher's row (and email) back; it also skips a listed
+//   deleted account. No row is a 200 ("no_teacher"):
 //   a teacher who never visited gets their row from the lazy creation.
 //   A user with no email address at all is skipped on either event (email
 //   is required); the lazy creation refuses such a user too.
 // - user.deleted: deletes the account's classes, then its self-learner
-//   readings, then the teachers row, in one transaction
-//   (deleteTeacherStatements). The classes cascade to their readings,
+//   readings, lists the id's hash as deleted (Clerk's delete confirmed),
+//   then deletes the teachers
+//   row, in one transaction (deleteTeacherStatements). The classes cascade to their readings,
 //   students, and all student work; the self-learner readings to their
 //   questions, tries, answers, and effort checks; the account row then to
 //   its own logs (see docs/privacy.md). The Clerk
@@ -39,6 +44,7 @@
 // Logs: only the event type and the outcome. Never a name, an email, or
 // an id from the payload.
 
+import { accountLockStatement, hashClerkUserId, notDeletedSql, pruneDeletedStatement, recordDeletedStatement } from "./deleted-accounts";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 
 export type ClerkEmail = { id?: string; email_address?: string };
@@ -70,22 +76,26 @@ export function teacherProfile(data: ClerkUserData): TeacherProfile | { missing:
   return { clerkUserId: data.id, name, email };
 }
 
+// Both refuse a deleted account (its hash on deleted_clerk_users, see
+// deleted-accounts.ts) in the same statement, so a late delivery can't
+// bring the row back. $4 the hash.
 export function upsertTeacherStatement(profile: TeacherProfile): Statement {
   return {
     text: `insert into teachers (clerk_user_id, name, email)
-values ($1::text, $2::text, $3::text)
+select $1::text, $2::text, $3::text
+where ${notDeletedSql(4)}
 on conflict (clerk_user_id) do update set name = excluded.name, email = excluded.email
 returning id`,
-    params: [profile.clerkUserId, profile.name, profile.email],
+    params: [profile.clerkUserId, profile.name, profile.email, hashClerkUserId(profile.clerkUserId)],
   };
 }
 
 export function updateTeacherStatement(profile: TeacherProfile): Statement {
   return {
     text: `update teachers set name = $2::text, email = $3::text
-where clerk_user_id = $1::text
+where clerk_user_id = $1::text and ${notDeletedSql(4)}
 returning id`,
-    params: [profile.clerkUserId, profile.name, profile.email],
+    params: [profile.clerkUserId, profile.name, profile.email, hashClerkUserId(profile.clerkUserId)],
   };
 }
 
@@ -96,6 +106,9 @@ returning id`,
 // Postgres fails it with 23503 (the set null update re-checks the
 // challenge's student_id foreign key after the student is gone). So:
 //
+// 0. Take the id's account lock (deleted-accounts.ts), so a concurrent
+//    user.created or first visit either commits first and is deleted
+//    below, or waits and then sees the id listed (step 4).
 // 1. Lock the account row, so a class or self-learner reading created
 //    right now (insertClassIfAllowed and the self-learner create take the
 //    same lock) either commits first and is deleted below, or waits and
@@ -108,15 +121,23 @@ returning id`,
 //    self_attempts, self_answers, and self_effort_checks (every self_*
 //    foreign key is ON DELETE CASCADE, none SET NULL or RESTRICT). An
 //    account that switched roles has both kinds, so both steps always run.
-// 4. Delete the account row: what's left under it is the teacher's own
+// 4. List the id's hash on deleted_clerk_users (deleted-accounts.ts), so
+//    a late user.created or a first visit can't recreate the row, and
+//    prune that list's confirmed rows past its retention. Listed even
+//    when there was no row (an account that never visited): it is
+//    deleted in Clerk either way. Listed as confirmed, since Clerk sent
+//    the event: this also confirms the pending row of an under-13 delete
+//    whose deleteUser calls failed (under-13-account.ts).
+// 5. Delete the account row: what's left under it is the teacher's own
 //    logs (link_fetch_attempts, question_generation_attempts, and any
 //    reading_cap_raises left), and the cascade would reach any self_*
 //    row step 3 missed. Applied when this returns the row.
 //
-// With no such account every statement matches nothing.
+// With no such account steps 1 to 3 and 5 match nothing.
 export function deleteTeacherStatements(clerkUserId: string): Statement[] {
   const params = [clerkUserId];
   return [
+    accountLockStatement(clerkUserId),
     { text: `select id from teachers where clerk_user_id = $1::text for update`, params },
     {
       text: `delete from classes
@@ -128,6 +149,8 @@ where teacher_id in (select id from teachers where clerk_user_id = $1::text)`,
 where account_id in (select id from teachers where clerk_user_id = $1::text)`,
       params,
     },
+    recordDeletedStatement(clerkUserId, "confirmed"),
+    pruneDeletedStatement(),
     { text: `delete from teachers where clerk_user_id = $1::text returning id`, params },
   ];
 }
@@ -139,6 +162,9 @@ export function deletedAccountRows(results: Record<string, unknown>[][]): number
 
 export type WebhookOutcome =
   | "upserted"
+  // user.created for an account that was deleted: nothing written (a 200,
+  // so Clerk stops retrying).
+  | "deleted_account"
   | "updated"
   | "no_teacher"
   | "deleted"
@@ -153,8 +179,9 @@ export async function handleClerkEvent(event: ClerkEvent, execute: StatementExec
     const profile = teacherProfile(data);
     if ("missing" in profile) return profile.missing === "id" ? "skipped_no_id" : "skipped_no_email";
     if (event.type === "user.created") {
-      await execute([upsertTeacherStatement(profile)]);
-      return "upserted";
+      // After the account lock, so it can't slip past a concurrent delete.
+      const [, rows = []] = await execute([accountLockStatement(profile.clerkUserId), upsertTeacherStatement(profile)]);
+      return rows.length > 0 ? "upserted" : "deleted_account";
     }
     const [rows = []] = await execute([updateTeacherStatement(profile)]);
     return rows.length > 0 ? "updated" : "no_teacher";

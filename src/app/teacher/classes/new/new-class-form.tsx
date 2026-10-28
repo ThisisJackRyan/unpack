@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { GRADE_LEVELS, gradeLevelLabel } from "@/lib/grade-levels";
 import { field, primaryButton } from "@/components/ui";
+import { ErrorMessage } from "@/components/error-message";
 import { createClass } from "./actions";
 import { CLASS_NAME_MAX_LENGTH, type CreateClassState } from "./form-state";
 
@@ -18,7 +19,7 @@ export function NewClassForm() {
   return (
     <form action={formAction} noValidate className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <label htmlFor="name" className="text-base font-semibold text-zinc-900">
+        <label htmlFor="name" className="text-lg font-semibold text-ink-950">
           Class name
         </label>
         <input
@@ -31,17 +32,17 @@ export function NewClassForm() {
           defaultValue={state.values?.name}
           aria-invalid={errors.name ? true : undefined}
           aria-describedby={errors.name ? "name-error" : undefined}
-          className={field}
+          className={`${field} text-lg`}
         />
-        <p id="name-error" aria-live="polite" className="text-base text-red-700">
+        <ErrorMessage id="name-error">
           {errors.name}
-        </p>
+        </ErrorMessage>
       </div>
 
       <div className="flex flex-col gap-2">
         <label
           htmlFor="gradeLevel"
-          className="text-base font-semibold text-zinc-900"
+          className="text-lg font-semibold text-ink-950"
         >
           Grade level
         </label>
@@ -54,7 +55,7 @@ export function NewClassForm() {
           defaultValue={state.values?.gradeLevel ?? ""}
           aria-invalid={errors.gradeLevel ? true : undefined}
           aria-describedby={errors.gradeLevel ? "grade-error" : undefined}
-          className={field}
+          className={`${field} text-lg`}
         >
           <option value="" disabled>
             Choose a grade
@@ -65,18 +66,14 @@ export function NewClassForm() {
             </option>
           ))}
         </select>
-        <p
-          id="grade-error"
-          aria-live="polite"
-          className="text-base text-red-700"
-        >
+        <ErrorMessage id="grade-error">
           {errors.gradeLevel}
-        </p>
+        </ErrorMessage>
       </div>
 
-      <p aria-live="polite" className="text-base text-red-700 empty:hidden">
+      <ErrorMessage>
         {errors.form}
-      </p>
+      </ErrorMessage>
 
       <button type="submit" disabled={pending} className={primaryButton}>
         {pending ? "Creating…" : "Create class"}

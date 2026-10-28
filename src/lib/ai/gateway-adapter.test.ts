@@ -9,7 +9,8 @@ import { EFFORT_SYSTEM_PROMPT, effortCheckPrompt } from "./effort-prompts";
 import { createGatewayCall, GATEWAY_ROUTING, withRequestTimeout } from "./gateway-adapter";
 import type { QuestionModel } from "./model";
 import { QUESTIONS_SYSTEM_PROMPT, QUESTIONS_TOOL_NAME, questionSetPrompt, SOLO_QUESTIONS_SYSTEM_PROMPT } from "./prompts";
-import { QUESTIONS_TOOL, questionErrorKind, writeQuestionSet } from "./questions";
+import { AI_OUT_OF_CREDITS_LOG, logModelError } from "./errors";
+import { QUESTIONS_TOOL, questionErrorKind, questionErrorLogFields, writeQuestionSet } from "./questions";
 import { AI_MAX_RETRIES, AI_TIMEOUT_MS } from "./settings";
 
 const MODEL = "anthropic/claude-sonnet-5.5";
@@ -268,6 +269,32 @@ describe("gateway failures", () => {
     } finally {
       if (saved === undefined) delete (process.env as Record<string, string | undefined>).NODE_ENV;
       else (process.env as Record<string, string>).NODE_ENV = saved;
+    }
+  });
+
+  it("a 402 logs a loud out-of-credits line with the safe fields only; other failures don't", async () => {
+    for (const [status, type, loud] of [
+      [402, "insufficient_funds", true],
+      [500, "internal_server_error", false],
+    ] as const) {
+      const { model } = adapter(() => gatewayError(status, type), { maxRetries: 0 });
+      const logged: [string, Record<string, unknown>][] = [];
+      await assert.rejects(writeQuestionSet(model, input), (error: unknown) => {
+        logModelError("questionAction: write failed", { ...questionErrorLogFields(error), readingId: "r1" }, (m, f) =>
+          logged.push([m, f]),
+        );
+        return true;
+      });
+      assert.equal(logged[0][0], "questionAction: write failed");
+      assert.equal(logged.length, loud ? 2 : 1, String(status));
+      if (loud) {
+        assert.equal(logged[1][0], AI_OUT_OF_CREDITS_LOG);
+        assert.match(AI_OUT_OF_CREDITS_LOG, /out of credits \(402\)/);
+        assert.equal(logged[1][1].status, 402);
+        assert.equal(logged[1][1].where, "questionAction: write failed");
+      }
+      const text = JSON.stringify(logged);
+      for (const secret of [KEY, BODY.trim(), "nope"]) assert.ok(!text.includes(secret), secret);
     }
   });
 

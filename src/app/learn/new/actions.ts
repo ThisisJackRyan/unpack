@@ -1,12 +1,15 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { requireSelfLearner } from "@/lib/account";
 import { fetchArticle } from "@/lib/fetch-article";
-import { recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { linkFetchRetryAt, recordLinkFetchAttempt } from "@/lib/link-fetch-attempts";
+import { LINK_FETCH_LIMITED_MESSAGE } from "@/lib/link-rate-limit";
+import { withRetryAt } from "@/lib/local-time";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { resolveReadingSource, SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
-import type { CreateOutcome } from "@/lib/self-allowance";
+import { createOutcomeRedirect, type CreateOutcome } from "@/lib/self-allowance";
 import { validateSoloReadingForm } from "@/lib/self-reading-form";
 import { createSelfReading, getAllowance } from "@/lib/self-readings";
 
@@ -45,14 +48,16 @@ export async function createSelfReadingAction(_prev: ReadingFormState, formData:
     logDbError("createSelfReadingAction: getAllowance failed", error);
     return { errors: { form: SAVE_READING_FAILED_MESSAGE }, values };
   }
-  if (remaining === 0) redirect("/learn/new");
+  if (remaining === 0) redirect("/learn/new", RedirectType.replace);
 
   const resolved = await resolveReadingSource(data, {
     recordLinkFetch: () => recordLinkFetchAttempt(account.id),
+    limitedMessage: async () =>
+      withRetryAt(LINK_FETCH_LIMITED_MESSAGE, await linkFetchRetryAt(account.id), await requestRetryClock()),
     fetchArticle: (url) => fetchArticle(url),
     log: (message, fields) => console.error(`createSelfReadingAction: ${message}`, fields),
   });
-  if (!resolved.ok) return { errors: resolved.errors, values, suggestText: resolved.suggestText };
+  if (!resolved.ok) return { errors: resolved.errors, values, suggestText: resolved.suggestText, limit: resolved.limit };
 
   // redirect() throws, so it stays outside this try.
   let outcome: CreateOutcome;
@@ -66,8 +71,6 @@ export async function createSelfReadingAction(_prev: ReadingFormState, formData:
     logDbError("createSelfReadingAction: createSelfReading failed", error);
     return { errors: { form: SAVE_READING_FAILED_MESSAGE }, values };
   }
-  if (outcome.status === "created") redirect(`/learn/r/${outcome.id}`);
-  if (outcome.status === "limit_reached") redirect("/learn/new");
-  // Not a self-learner any more (switched in another tab).
-  redirect("/home");
+  const next = createOutcomeRedirect(outcome);
+  redirect(next.path, next.type);
 }

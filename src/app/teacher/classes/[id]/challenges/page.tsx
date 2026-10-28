@@ -6,6 +6,7 @@ import { getOrCreateTeacher } from "@/lib/teacher";
 import { loadClass } from "../loaders";
 import { decideChallengeAction } from "./actions";
 import { ChallengeQueue } from "./queue";
+import { PaperPlane } from "@/components/illustrations";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -32,10 +33,10 @@ export default async function ChallengesPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-1">
-        <h1 id="queue-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-zinc-950 focus:outline-none">
+        <h1 id="queue-heading" tabIndex={-1} className="text-3xl font-semibold tracking-tight text-ink-950 focus:outline-none">
           Challenges
         </h1>
-        <p className="text-lg text-zinc-600">
+        <p className="text-lg text-ink-700">
           Students who think they did their best can ask you to look. Accept counts the reading as passed.
         </p>
       </div>
@@ -43,9 +44,10 @@ export default async function ChallengesPage({ params }: Props) {
       <ChallengeQueue action={decideChallengeAction.bind(null, found.id)} items={items} />
 
       {items.length === 0 && (
-        <p className={`${card} px-6 py-12 text-center text-lg text-zinc-600`}>
-          You’re all caught up. New challenges show up here.
-        </p>
+        <div className={`${card} flex flex-col items-center gap-4 px-6 py-12 text-center`}>
+          <PaperPlane className="h-24 w-32" />
+          <p className="text-lg text-ink-700">You’re all caught up. New challenges show up here.</p>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import "server-only";
 import { getSql } from "@/db";
-import { checkLinkFetchLimit, type StatementExecutor } from "./link-rate-limit";
+import { dateFromRow } from "./local-time";
+import { checkLinkFetchLimit, linkFetchRetryAtStatement, type StatementExecutor } from "./link-rate-limit";
 
 // Server-only: runs the link fetch rate limit against Postgres. sql.transaction
 // sends the statements as one non-interactive batch, run as a single READ
@@ -16,4 +17,10 @@ const neonExecutor: StatementExecutor = async (statements) => {
 
 export function recordLinkFetchAttempt(teacherId: string): Promise<boolean> {
   return checkLinkFetchLimit(teacherId, neonExecutor);
+}
+
+// When the next link fetch frees up (after a refusal), or null.
+export async function linkFetchRetryAt(teacherId: string): Promise<Date | null> {
+  const [rows = []] = await neonExecutor([linkFetchRetryAtStatement(teacherId)]);
+  return dateFromRow(rows[0]?.retry_at);
 }

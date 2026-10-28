@@ -57,6 +57,8 @@ function soloStore() {
     challengeRows: 0,
   };
   const passed = () => state.attempts.some((a) => a.result === "pass");
+  // Locked: passed on the latest try.
+  const locked = () => Object.entries(state.attempts.at(-1)?.answers ?? {}).filter(([, a]) => a.pass);
   const settle = () => {
     if (state.status !== "in_progress") return;
     if (passed()) state.status = "passed";
@@ -70,16 +72,18 @@ function soloStore() {
           bodyText: "text",
           gradeLevel: "6",
           questions: QUESTIONS,
+          lockedQuestionIds: locked().map(([id]) => id),
           tries: state.attempts.length,
           triesAllowed: MAX_TRIES,
           passed: passed(),
         },
       };
     },
-    async claim(_a, _r, claimId) {
+    async claim(_a, _r, claimId, expectedTries) {
       if (passed()) return "already_passed";
       if (state.attempts.length >= MAX_TRIES) return "out_of_tries";
       if (state.checks.some((c) => !c.finished)) return "busy";
+      if (state.attempts.length !== expectedTries) return "stale";
       if (state.checks.length >= EFFORT_CHECK_LIMIT) return "too_many_checks";
       state.checks.push({ id: claimId, finished: false });
       return "claimed";
@@ -97,7 +101,11 @@ function soloStore() {
       state.attempts.push({
         tryNumber,
         result: input.passed ? "pass" : "fail",
-        answers: Object.fromEntries(input.verdicts.map((v) => [v.questionId, { text: v.text, pass: v.pass, nudge: v.nudge }])),
+        // The locked answers carried over, never replaced.
+        answers: {
+          ...Object.fromEntries(input.verdicts.map((v) => [v.questionId, { text: v.text, pass: v.pass, nudge: v.nudge }])),
+          ...Object.fromEntries(locked().map(([id, a]) => [id, { ...a, nudge: "" }])),
+        },
       });
       settle();
       return tryNumber;
@@ -177,6 +185,35 @@ describe("solo flow (submitAnswersWith over the self store)", () => {
   });
 });
 
+describe("solo flow: passed answers are locked", () => {
+  it("pass q1 on try 1: try 2 sends only q2, a crafted q1 is refused, and q1 stays as it was", async () => {
+    const { store, state, progress } = soloStore();
+    const seen: string[][] = [];
+    const check = async (input: EffortCheckInput): Promise<EffortVerdict[]> => {
+      seen.push(input.items.map((i) => i.questionId));
+      return input.items.map((i) => ({
+        questionId: i.questionId,
+        pass: seen.length > 1 || i.questionId === "q1",
+        nudge: seen.length > 1 || i.questionId === "q1" ? "" : "Say why.",
+      }));
+    };
+    const one = await submitAnswersWith(ACCOUNT, READING, ANSWERS, { store, check, newId });
+    assert.equal(one.status === "checked" && one.passed, false);
+    // Try 2 from a crafted form that also changes q1: nothing is checked.
+    const crafted = [{ questionId: "q1", value: "changed" }, ANSWERS[1]];
+    assert.deepEqual(await submitAnswersWith(ACCOUNT, READING, crafted, { store, check, newId }), { status: "stale" });
+    assert.equal(state.checks.length, 1);
+    const two = await submitAnswersWith(ACCOUNT, READING, [ANSWERS[1]], { store, check, newId });
+    assert.equal(two.status === "checked" && two.passed, true);
+    assert.deepEqual(seen, [["q1", "q2"], ["q2"]]);
+    assert.equal(state.status, "passed");
+    assert.equal(state.attempts[1].answers.q1.text, "to see the snow");
+    assert.equal(state.attempts[1].answers.q1.pass, true);
+    assert.equal(state.checks.length, 2);
+    assert.equal(soloStage(progress()).kind, "passed");
+  });
+});
+
 describe("soloStage and messages", () => {
   const fail: AttemptView = { tryNumber: 1, result: "fail", answers: { q1: { text: "a", pass: false, nudge: "Say more." } } };
 
@@ -217,7 +254,7 @@ describe("self store statements", () => {
   it("touch only self_* tables, never challenges, classes, or students", () => {
     const text = all([
       ...selfSubmitContextStatements(ACCOUNT, READING),
-      ...selfClaimCheckStatements(ACCOUNT, READING, "c1"),
+      ...selfClaimCheckStatements(ACCOUNT, READING, "c1", 0),
       ...selfReleaseCheckStatements(ACCOUNT, READING, "c1"),
       ...selfCommitStatements(input),
       ...selfProgressStatements(ACCOUNT, READING),
@@ -229,23 +266,53 @@ describe("self store statements", () => {
   });
 
   it("scope every read and write to the account", () => {
-    for (const s of [...selfSubmitContextStatements(ACCOUNT, READING), ...selfClaimCheckStatements(ACCOUNT, READING, "c1").slice(1)]) {
+    for (const s of [...selfSubmitContextStatements(ACCOUNT, READING), ...selfClaimCheckStatements(ACCOUNT, READING, "c1", 0).slice(1)]) {
       assert.match(s.text, /account_id = \$1::uuid/);
       assert.equal(s.params[0], ACCOUNT);
     }
   });
 
+  it("the claim, its report, and the commit check ownership and the self-learner role in the statement", () => {
+    const owned = "select 1 from self_readings r join teachers t on t.id = r.account_id\n  where r.id = $2::uuid and r.account_id = $1::uuid and t.role = 'self_learner'";
+    const [, insert, why] = selfClaimCheckStatements(ACCOUNT, READING, "c1", 0);
+    assert.ok(insert.text.includes(`where exists (\n  ${owned}\n)`), insert.text);
+    assert.ok(why.text.includes(owned));
+    const [, commit] = selfCommitStatements(input);
+    // In the claim's update, so the attempt and its answers are only
+    // inserted for an owned reading of a self-learner.
+    const update = commit.text.slice(0, commit.text.indexOf("returning id"));
+    assert.ok(update.includes(owned), commit.text);
+    assert.match(update, /account_id = \$1::uuid and reading_id = \$2::uuid/);
+  });
+
   it("claim and commit take the reading's advisory lock first", () => {
-    for (const batch of [selfClaimCheckStatements(ACCOUNT, READING, "c1"), selfCommitStatements(input), selfReleaseCheckStatements(ACCOUNT, READING, "c1")]) {
+    for (const batch of [selfClaimCheckStatements(ACCOUNT, READING, "c1", 0), selfCommitStatements(input), selfReleaseCheckStatements(ACCOUNT, READING, "c1")]) {
       assert.equal(batch[0].text, "select pg_advisory_xact_lock($1::int, hashtext($2::text))");
       assert.deepEqual(batch[0].params, [SELF_EFFORT_LOCK_SPACE, READING]);
     }
   });
 
   it("the claim enforces 3 tries, one live check, and the check limit", () => {
-    const [, insert] = selfClaimCheckStatements(ACCOUNT, READING, "c1");
+    const [, insert] = selfClaimCheckStatements(ACCOUNT, READING, "c1", 0);
     assert.match(insert.text, /^insert into self_effort_checks \(id, account_id, reading_id\)/);
-    assert.deepEqual(insert.params, [ACCOUNT, READING, "c1", EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES, EFFORT_CHECK_LIMIT]);
+    assert.deepEqual(insert.params, [ACCOUNT, READING, "c1", EFFORT_CLAIM_STALE_SECONDS, MAX_TRIES, EFFORT_CHECK_LIMIT, 10, 3, 0]);
+    // Still exactly the tries the answers were validated against.
+    assert.match(insert.text, /and \(select count\(\*\) from self_attempts where reading_id = \$2::uuid and account_id = \$1::uuid\) = \$9::int/);
+    assert.match(insert.text, /and outcome is distinct from 'given_back'\) < \$6::int/);
+    assert.match(insert.text, /outcome = 'given_back'\n    and created_at > now\(\) - make_interval\(mins => \$7::int\)\) < \$8::int/);
+    const [, release] = selfReleaseCheckStatements(ACCOUNT, READING, "c1", true);
+    assert.match(release.text, /outcome = case when \$4::boolean then 'given_back' else 'error' end/);
+    assert.deepEqual(release.params, [ACCOUNT, READING, "c1", true]);
+  });
+
+  it("lock passed answers over the self tables: read from the latest try, carried into the new one, never replaced", () => {
+    const locked = selfSubmitContextStatements(ACCOUNT, READING)[3];
+    assert.match(locked.text, /^select an\.question_id from self_answers an\nwhere an\.ai_pass and an\.attempt_id = \(\s*select a\.id from self_attempts a\s*where a\.account_id = \$1::uuid/);
+    const [, , carry, answers] = selfCommitStatements(input);
+    assert.match(carry.text, /^insert into self_answers \(attempt_id, question_id, text, ai_pass, ai_feedback\)\nselect \$3::uuid, p\.question_id, p\.text, true, null\nfrom self_answers p/);
+    assert.match(carry.text, /a\.account_id = \$1::uuid and a\.reading_id = \$2::uuid and a\.id <> \$3::uuid/);
+    assert.deepEqual(carry.params, [ACCOUNT, READING, "a1"]);
+    assert.match(answers.text, /^insert into self_answers[\s\S]*on conflict \(attempt_id, question_id\) do nothing/);
   });
 
   it("the commit and the release end by settling the status", () => {
@@ -263,7 +330,7 @@ describe("self store statements", () => {
       "out_of_tries",
     );
     assert.equal(claimOutcome([[], [], [{ eligible: false }]]), "not_found");
-    assert.equal(committedTry([[], [{ try_number: 2 }], [], []]), 2);
+    assert.equal(committedTry([[], [{ try_number: 2 }], [], [], []]), 2);
     const lookup = submitLookup([[{ body_text: "b", grade_level: "6" }], [{ id: "q1", position: 1, prompt: "p" }], [{ tries: 1, passed: false, tries_allowed: 3 }]]);
     assert.equal(lookup.status === "ok" && lookup.context.triesAllowed, 3);
     assert.deepEqual(submitLookup([[], [], []]), { status: "not_found" });
@@ -279,10 +346,10 @@ describe("self store statements", () => {
       batches.push(statements);
       return statements.map(() => []);
     });
-    await store.claim(ACCOUNT, READING, "c1");
+    await store.claim(ACCOUNT, READING, "c1", 0);
     await store.release(ACCOUNT, READING, "c1");
     assert.equal(await store.commit(input), null);
-    assert.deepEqual(batches.map((b) => b.length), [3, 3, 4]);
+    assert.deepEqual(batches.map((b) => b.length), [3, 3, 5]);
   });
 });
 

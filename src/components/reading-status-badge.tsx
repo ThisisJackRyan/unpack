@@ -1,16 +1,17 @@
 import type { Reading } from "@/db/schema";
 import { pill } from "./ui";
 
-// Draft is a neutral zinc pill; Published uses the indigo accent.
+// Draft is a neutral ink pill (never red: a draft is fine, just not
+// visible to students yet); Published uses the primary accent.
 export function ReadingStatusBadge({ status }: { status: Reading["status"] }) {
   return status === "published" ? (
-    <span className={`${pill} bg-indigo-50 text-indigo-700`}>
-      <span aria-hidden="true" className="h-2 w-2 rounded-full bg-indigo-600" />
+    <span className={`${pill} bg-primary-50 text-primary-700 text-base`}>
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-primary-600" />
       Published
     </span>
   ) : (
-    <span className={`${pill} bg-zinc-100 text-zinc-700`}>
-      <span aria-hidden="true" className="h-2 w-2 rounded-full bg-zinc-400" />
+    <span className={`${pill} bg-ink-100 text-ink-700 text-base`}>
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-ink-400" />
       Draft
     </span>
   );

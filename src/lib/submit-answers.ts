@@ -4,6 +4,7 @@ import type { StatementExecutor } from "./link-rate-limit";
 import { neonExecutor } from "./neon-executor";
 import { getEffortCheckModel } from "./ai/client";
 import { checkEffort, effortErrorLogFields } from "./ai/effort-check";
+import { logModelError } from "./ai/errors";
 import { isUuid } from "./classes";
 import {
   postgresAttemptStore,
@@ -20,7 +21,9 @@ import type { AnswerEntry } from "./validate-answers";
 export type { SubmitResult } from "./submit-answers-core";
 
 // The real checker: the configured model, all answers in one call.
-const modelChecker: EffortChecker = (input) => checkEffort(getEffortCheckModel(), input);
+// It reports each reply, so a failure with no reply is given back.
+const modelChecker: EffortChecker = (input, hooks) =>
+  checkEffort(getEffortCheckModel(), input, { onModelResponse: hooks?.onModelResponse });
 
 export type SubmitAnswersOptions = {
   // For scripts/check-student-answers.ts: a fake checker (no model
@@ -41,6 +44,6 @@ export async function submitAnswers(
     check: options.check ?? modelChecker,
     newId: randomUUID,
     onError: (error) =>
-      console.error("submitAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
+      logModelError("submitAnswers: effort check failed", { ...effortErrorLogFields(error), readingId }),
   });
 }

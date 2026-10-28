@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { backLink, card } from "@/components/ui";
 import { questionCountLabel } from "@/lib/question-modes";
@@ -9,15 +10,17 @@ import { loadReadingProgress } from "@/lib/reading-progress-db";
 import { getStudentSession, requireStudentSession } from "@/lib/student-auth";
 import type { StudentQuestion } from "@/lib/student-questions-core";
 import { PENDING_MAX_REFRESHES, readingParagraphs, sourceHost } from "@/lib/student-reading-view";
+import { requestRetryClock } from "@/lib/request-time-zone";
 import { getPublishedReading, loadStudentReading } from "@/lib/student-readings";
 import { MAX_TRIES } from "@/lib/validate-answers";
 import { sendChallengeAction, submitAnswersAction } from "./actions";
-import { AnswerForm } from "@/components/answer-form";
+import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
+import { PassCelebration } from "@/components/celebration";
 import { ChallengeForm } from "./challenge-form";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
-import { QuestionSkeletons } from "@/components/question-skeletons";
+import { MetaLine } from "@/components/meta-line";
 
 // A student's first open of a unique per student reading writes their set,
 // which QUESTION_WRITE_DEADLINE_MS (110s, in src/lib/ai/settings.ts) ends
@@ -43,7 +46,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function StudentReadingPage({ params }: Props) {
   const { readingId } = await params;
   const session = await requireStudentSession();
-  const { reading, view } = await loadStudentReading(session, readingId);
+  const { reading, view } = await loadStudentReading(session, readingId, {}, await requestRetryClock());
   if (!reading) notFound();
 
   const host = sourceHost(reading.sourceUrl);
@@ -57,22 +60,14 @@ export default async function StudentReadingPage({ params }: Props) {
       </Link>
 
       <div className="flex flex-col gap-2">
-        <p className="text-lg text-zinc-600">
-          {questionCountLabel(reading.questionCount)}
-          {host && (
-            <>
-              <span aria-hidden="true"> · </span>
-              <span className="sr-only">, </span>From <span className="break-all">{host}</span>
-            </>
-          )}
-        </p>
-        <h1 id="reading-title" className="text-4xl font-semibold tracking-tight break-words text-zinc-950">
+        <MetaLine className="text-lg font-medium text-ink-700" parts={[questionCountLabel(reading.questionCount), host && `From ${host}`]} />
+        <h1 id="reading-title" className="text-4xl font-bold tracking-tight break-words text-ink-950">
           {reading.title}
         </h1>
       </div>
 
-      <article aria-labelledby="reading-title" className={`${card} rounded-2xl px-6 py-8 sm:px-10 sm:py-10`}>
-        <NoCopyText className="flex max-w-[65ch] flex-col gap-6 text-[1.1875rem] leading-[1.8] text-zinc-800 sm:text-xl sm:leading-[1.8]">
+      <article aria-labelledby="reading-title" className={`${card} px-6 py-8 sm:px-12 sm:py-12`}>
+        <NoCopyText className="flex max-w-[65ch] flex-col gap-7 text-xl leading-[1.85] text-ink-900 sm:text-[1.375rem]">
           {readingParagraphs(reading.bodyText).map((p, i) => (
             <p key={i} className="break-words whitespace-pre-line">
               {p}
@@ -88,48 +83,54 @@ export default async function StudentReadingPage({ params }: Props) {
       </p>
 
       <section aria-labelledby="questions-heading" className="flex flex-col gap-5">
-        <h2 id="questions-heading" className="text-2xl font-semibold tracking-tight text-zinc-950">
+        <h2 id="questions-heading" className="text-2xl font-bold tracking-tight text-ink-950">
           Your questions
         </h2>
 
         {view.kind === "questions" && stage && (
-          <QuestionsStage readingId={reading.id} questions={view.questions} stage={stage} />
+          <>
+            <QuestionsStage readingId={reading.id} studentId={session.student.id} questions={view.questions} stage={stage} />
+            {stage.kind !== "answer" && (
+              <ClearAnswerDrafts
+                mode="class"
+                readingId={reading.id}
+                ownerId={session.student.id}
+                keepNote={stage.kind === "out_of_tries" || stage.kind === "check_limit"}
+              />
+            )}
+          </>
         )}
 
         {view.kind === "pending" && (
-          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES}>
-            <QuestionSkeletons count={reading.questionCount} />
-          </PendingRefresh>
+          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES} />
         )}
 
-        {view.kind === "limit_reached" && (
-          <p className={`${card} rounded-2xl px-6 py-10 text-center text-lg text-zinc-700`}>{view.message}</p>
-        )}
+        {/* Limits, not errors: amber notes. */}
+        {view.kind === "limit_reached" && <LimitNotice large>{view.message}</LimitNotice>}
 
-        {view.kind === "calls_used_up" && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p aria-live="polite" className="text-lg text-zinc-700">
-              {view.message}
-            </p>
-            <RetryButton />
-          </div>
-        )}
-
-        {view.kind === "throttled" && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p aria-live="polite" className="text-lg text-zinc-700">
-              {view.message}
-            </p>
+        {(view.kind === "calls_used_up" || view.kind === "throttled") && (
+          <div className="flex flex-col items-start gap-5">
+            <LimitNotice large>{view.message}</LimitNotice>
             <RetryButton />
           </div>
         )}
 
         {view.kind === "error" && (
-          <div className={`${card} flex flex-col items-start gap-5 rounded-2xl p-6`}>
-            <p aria-live="polite" className="text-lg text-zinc-700">
+          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+            <p aria-live="polite" className="text-lg text-ink-700">
               {view.message}
             </p>
             <RetryButton />
+          </div>
+        )}
+
+        {/* Question writing is unavailable: coming back later is the fix,
+            so no Try again. */}
+        {view.kind === "unavailable" && (
+          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+            <p role="status" className="text-lg text-ink-700">
+              {view.message}
+            </p>
           </div>
         )}
       </section>
@@ -139,10 +140,12 @@ export default async function StudentReadingPage({ params }: Props) {
 
 function QuestionsStage({
   readingId,
+  studentId,
   questions,
   stage,
 }: {
   readingId: string;
+  studentId: string;
   questions: StudentQuestion[];
   stage: AnswerStage;
 }) {
@@ -156,6 +159,7 @@ function QuestionsStage({
           maxTries={stage.maxTries}
           previous={stage.previous}
           extraTry={stage.extraTry}
+          drafts={{ mode: "class", readingId, ownerId: studentId }}
         />
       );
     case "passed":
@@ -164,6 +168,7 @@ function QuestionsStage({
           <Banner tone="done" title={stage.byTeacher ? "Your teacher accepted your answers." : "You passed! Nice work."}>
             {stage.byTeacher ? "This reading is done. Nice work sticking with it!" : "This reading is done. Here are your answers."}
           </Banner>
+          {!stage.byTeacher && <PassCelebration tryNumber={stage.attempt?.tryNumber} />}
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults={false} />}
         </>
       );
@@ -176,6 +181,7 @@ function QuestionsStage({
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
           <ChallengeForm
             action={sendChallengeAction.bind(null, readingId)}
+            draft={{ mode: "class", readingId, ownerId: studentId }}
             intro={
               stage.extraTry
                 ? "If you think you did your best, you can send your teacher a new note. They will read your answers and your note."
@@ -195,7 +201,7 @@ function QuestionsStage({
               : "Send a note to your teacher. They will read your note."}
           </Banner>
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
-          <ChallengeForm action={sendChallengeAction.bind(null, readingId)} />
+          <ChallengeForm action={sendChallengeAction.bind(null, readingId)} draft={{ mode: "class", readingId, ownerId: studentId }} />
         </>
       );
     case "challenged":

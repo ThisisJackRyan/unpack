@@ -11,7 +11,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "test": "node --import ./scripts/ts-paths.mjs --test \"src/**/*.test.ts\"",
+    "test": "node --import ./scripts/ts-paths.mjs --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "db:check-class-limit": "node --import ./scripts/ts-paths.mjs scripts/check-class-limit.ts",
     "db:check-student-questions": "node --import ./scripts/ts-paths.mjs scripts/check-student-questions.ts",
     "db:check-student-join": "node --import ./scripts/ts-paths.mjs scripts/check-student-join.ts",
@@ -20,7 +20,9 @@
     "db:check-abuse-protection": "node --import ./scripts/ts-paths.mjs scripts/check-abuse-protection.ts",
     "db:check-teacher-gaps": "node --import ./scripts/ts-paths.mjs scripts/check-teacher-gaps.ts",
     "db:check-self-learner": "node --import ./scripts/ts-paths.mjs scripts/check-self-learner.ts",
-    "db:recompute-name-keys": "node --import ./scripts/ts-paths.mjs scripts/recompute-name-keys.ts"
+    "db:check-limiter-concurrency": "node --import ./scripts/ts-paths.mjs scripts/check-limiter-concurrency.ts",
+    "db:recompute-name-keys": "node --import ./scripts/ts-paths.mjs scripts/recompute-name-keys.ts",
+    "ops:list-pending-clerk-deletes": "node --import ./scripts/ts-paths.mjs scripts/list-pending-clerk-deletes.ts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "4.0.127",

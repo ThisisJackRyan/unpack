@@ -8,6 +8,9 @@ import {
   questionModeHint,
   questionModeLabel,
 } from "@/lib/question-modes";
+import { ErrorMessage } from "@/components/error-message";
+import { LimitNotice } from "@/components/limit-notice";
+import { MaxLengthNote } from "@/components/max-length-note";
 import { field, primaryButton, secondaryButton } from "@/components/ui";
 import {
   BODY_TEXT_MAX_LENGTH,
@@ -23,16 +26,15 @@ import {
   type ReadingFormValues,
 } from "./reading-form-state";
 
-const label = "text-base font-semibold text-zinc-900";
-const hint = "text-base text-zinc-600";
-const errorText = "text-base text-red-700";
+const label = "text-lg font-semibold text-ink-950";
+const hint = "text-base text-ink-700";
 
 // A pill segmented control: a light gray track, the chosen option white.
 // The radio inside each option is visually hidden but still focusable, so
 // arrow keys move between options and the focus ring shows on the option.
-const track = "grid gap-1 rounded-xl bg-zinc-100 p-1";
+const track = "grid gap-1 rounded-2xl bg-ink-100 p-1";
 const option =
-  "flex min-h-12 cursor-pointer rounded-lg px-4 text-zinc-600 transition-colors hover:text-zinc-950 has-checked:bg-white has-checked:text-zinc-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-zinc-200 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-indigo-600";
+  "flex min-h-12 cursor-pointer rounded-xl px-4 text-ink-700 transition-colors hover:text-ink-950 has-checked:bg-white has-checked:text-ink-950 has-checked:shadow-sm has-checked:ring-1 has-checked:ring-ink-200 has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600";
 
 const SOURCES = [
   { value: "link", label: "Paste a link" },
@@ -106,6 +108,9 @@ export function ReadingForm({
     () => normalizeBodyText(values.bodyText).length,
   );
   const [tooLong, setTooLong] = useState(false);
+  // Which create button was pressed ("save" or "generate"), for its
+  // pending label.
+  const [then, setThen] = useState("save");
   const overLimit = bodyLength > BODY_TEXT_MAX_LENGTH;
   const bodyError = (tooLong && overLimit && BODY_TEXT_TOO_LONG_MESSAGE) || errors.bodyText;
 
@@ -118,6 +123,8 @@ export function ReadingForm({
     const length = normalizeBodyText(String(data.get("bodyText") ?? "")).length;
     setSource(submitted);
     setBodyLength(length);
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    setThen(submitter instanceof HTMLButtonElement ? submitter.value : "save");
     if (submitted === "text" && length > BODY_TEXT_MAX_LENGTH) {
       event.preventDefault();
       setTooLong(true);
@@ -132,6 +139,17 @@ export function ReadingForm({
     ? "hidden flex-col gap-2 group-has-[#source-text:checked]/form:flex"
     : "flex flex-col gap-2";
   const linkOnly = "group-has-[#source-text:checked]/form:hidden";
+  // A teacher's new reading: "Create & generate" (save, then write the
+  // shared set on the reading page) with "Save draft" beside it. A
+  // per-student reading has no set to write, so "Save draft" is the main
+  // button there. CSS follows the checked mode radio, like the panels.
+  const sharedOnly = "group-has-[#mode-per_student:checked]/form:hidden";
+  const perStudentPrimary = primaryButton.replace(
+    "inline-flex",
+    "hidden group-has-[#mode-per_student:checked]/form:inline-flex",
+  );
+  const teacherCreate = mode === "create";
+  const pendingLabel = create && !textMode ? "Getting the article…" : "Saving…";
 
   return (
     <form
@@ -165,9 +183,9 @@ export function ReadingForm({
                   </label>
                 ))}
               </div>
-              <p id="source-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="source-error">
                 {errors.source}
-              </p>
+              </ErrorMessage>
             </fieldset>
 
             <div className={linkPanel}>
@@ -186,25 +204,41 @@ export function ReadingForm({
                 defaultValue={values.url}
                 aria-invalid={errors.url ? true : undefined}
                 aria-describedby={describedBy("url-hint", errors.url && "url-error")}
-                className={field}
+                className={`${field} text-lg`}
               />
               <p id="url-hint" className={hint}>
                 We’ll pull the article text from the page.
               </p>
-              <p id="url-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="url-error">
                 {errors.url}
                 {errors.url && state.suggestText && (
                   <>
                     {" "}
                     <label
                       htmlFor="source-text"
-                      className="cursor-pointer font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
+                      className="cursor-pointer font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900"
                     >
                       {state.suggestText}
                     </label>
                   </>
                 )}
-              </p>
+              </ErrorMessage>
+              {state.limit && (
+                <LimitNotice>
+                  {state.limit}
+                  {state.suggestText && (
+                    <>
+                      {" "}
+                      <label
+                        htmlFor="source-text"
+                        className="cursor-pointer font-semibold text-primary-800 underline underline-offset-2 hover:text-primary-950"
+                      >
+                        {state.suggestText}
+                      </label>
+                    </>
+                  )}
+                </LimitNotice>
+              )}
             </div>
           </>
         )}
@@ -213,7 +247,7 @@ export function ReadingForm({
           <label htmlFor="title" className={label}>
             Title
             {create && (
-              <span className={`font-normal text-zinc-500 ${linkOnly}`}> (optional)</span>
+              <span className={`font-normal text-ink-700 ${linkOnly}`}> (optional)</span>
             )}
           </label>
           <input
@@ -225,16 +259,16 @@ export function ReadingForm({
             defaultValue={values.title}
             aria-invalid={errors.title ? true : undefined}
             aria-describedby={describedBy(create && "title-hint", errors.title && "title-error")}
-            className={field}
+            className={`${field} text-lg`}
           />
           {create && (
             <p id="title-hint" className={`${hint} ${linkOnly}`}>
               Leave blank to use the page’s title.
             </p>
           )}
-          <p id="title-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+          <ErrorMessage id="title-error">
             {errors.title}
-          </p>
+          </ErrorMessage>
         </div>
 
         {!titleOnly && (
@@ -268,23 +302,24 @@ export function ReadingForm({
               <p
                 id="body-count"
                 aria-live="polite"
-                className={`text-sm tabular-nums ${overLimit ? "font-semibold text-red-700" : "text-zinc-500"}`}
+                className={`text-base tabular-nums ${overLimit ? "font-semibold text-danger-700" : "text-ink-700"}`}
               >
                 {bodyLength.toLocaleString("en-US")} /{" "}
                 {BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")}
                 <span className="sr-only"> characters</span>
               </p>
+              <MaxLengthNote id="body-max" length={bodyLength} max={BODY_TEXT_MAX_LENGTH} large={false} />
             </div>
-            <p id="body-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+            <ErrorMessage id="body-error">
               {bodyError}
-            </p>
+            </ErrorMessage>
           </div>
         )}
       </div>
 
       {!titleOnly && (
-        <div className="flex flex-col gap-6 border-t border-zinc-200 pt-8">
-          <h2 className="text-lg font-semibold text-zinc-950">Questions</h2>
+        <div className="flex flex-col gap-6 border-t border-ink-200 pt-8">
+          <h2 className="text-lg font-semibold text-ink-950">Questions</h2>
 
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="flex flex-col gap-2">
@@ -299,7 +334,7 @@ export function ReadingForm({
                 defaultValue={values.gradeLevel}
                 aria-invalid={errors.gradeLevel ? true : undefined}
                 aria-describedby={describedBy(solo && "grade-hint", errors.gradeLevel && "grade-error")}
-                className={field}
+                className={`${field} text-lg`}
               >
                 {solo ? (
                   <option value="" disabled>
@@ -319,9 +354,9 @@ export function ReadingForm({
                   Questions are written for this level.
                 </p>
               )}
-              <p id="grade-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="grade-error">
                 {errors.gradeLevel}
-              </p>
+              </ErrorMessage>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -335,7 +370,7 @@ export function ReadingForm({
                 defaultValue={values.questionCount}
                 aria-invalid={errors.questionCount ? true : undefined}
                 aria-describedby={errors.questionCount ? "count-error" : undefined}
-                className={field}
+                className={`${field} text-lg`}
               >
                 {QUESTION_COUNTS.map((n) => (
                   <option key={n} value={String(n)}>
@@ -343,9 +378,9 @@ export function ReadingForm({
                   </option>
                 ))}
               </select>
-              <p id="count-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="count-error">
                 {errors.questionCount}
-              </p>
+              </ErrorMessage>
             </div>
           </div>
 
@@ -357,6 +392,7 @@ export function ReadingForm({
                   <label key={m} className={`${option} flex-col justify-center gap-0.5 py-3`}>
                     <input
                       type="radio"
+                      id={`mode-${m}`}
                       name="questionMode"
                       value={m}
                       defaultChecked={values.questionMode === m}
@@ -367,41 +403,63 @@ export function ReadingForm({
                       className="sr-only"
                     />
                     <span className="text-base font-semibold">{questionModeLabel(m)}</span>
-                    <span id={`mode-${m}-hint`} className="text-sm text-zinc-600">
+                    <span id={`mode-${m}-hint`} className="text-base text-ink-700">
                       {questionModeHint(m)}
                     </span>
                   </label>
                 ))}
               </div>
-              <p id="mode-error" aria-live="polite" className={`${errorText} empty:hidden`}>
+              <ErrorMessage id="mode-error">
                 {errors.questionMode}
-              </p>
+              </ErrorMessage>
             </fieldset>
           )}
         </div>
       )}
 
-      <p aria-live="polite" className={`${errorText} empty:hidden`}>
+      <ErrorMessage>
         {errors.form}
-      </p>
+      </ErrorMessage>
 
-      <div className="flex flex-col-reverse gap-3 border-t border-zinc-200 pt-6 sm:flex-row sm:justify-end">
+      <div className="flex flex-col-reverse gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:justify-end">
         <Link href={cancelHref} className={secondaryButton}>
           Cancel
         </Link>
-        <button type="submit" disabled={pending} className={primaryButton}>
-          {pending
-            ? create && !textMode
-              ? "Getting the article…"
-              : solo
-                ? "Starting…"
-                : "Saving…"
-            : solo
-              ? "Start reading"
-              : create
-                ? "Save draft"
-                : "Save changes"}
-        </button>
+        {teacherCreate ? (
+          <>
+            <button
+              type="submit"
+              name="then"
+              value="save"
+              disabled={pending}
+              className={`${secondaryButton} ${sharedOnly}`}
+            >
+              {pending && then === "save" ? pendingLabel : "Save draft"}
+            </button>
+            <button
+              type="submit"
+              name="then"
+              value="save"
+              disabled={pending}
+              className={perStudentPrimary}
+            >
+              {pending && then === "save" ? pendingLabel : "Save draft"}
+            </button>
+            <button
+              type="submit"
+              name="then"
+              value="generate"
+              disabled={pending}
+              className={`${primaryButton} ${sharedOnly}`}
+            >
+              {pending && then === "generate" ? pendingLabel : "Create & generate"}
+            </button>
+          </>
+        ) : (
+          <button type="submit" disabled={pending} className={primaryButton}>
+            {pending ? (solo && textMode ? "Starting…" : pendingLabel) : solo ? "Start reading" : "Save changes"}
+          </button>
+        )}
       </div>
     </form>
   );

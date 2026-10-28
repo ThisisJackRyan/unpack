@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { primaryButton } from "@/components/ui";
+import { primaryButtonLarge } from "@/components/ui";
+import { WritingQuestions } from "@/components/writing-questions";
 
 // While another request writes this student's questions, the page asks
 // again every retryAfterMs (router.refresh re-runs the server lookup and
@@ -11,11 +12,9 @@ import { primaryButton } from "@/components/ui";
 export function PendingRefresh({
   retryAfterMs,
   maxTries,
-  children,
 }: {
   retryAfterMs: number;
   maxTries: number;
-  children: React.ReactNode;
 }) {
   const router = useRouter();
   const [tries, setTries] = useState(0);
@@ -30,12 +29,12 @@ export function PendingRefresh({
     return () => clearTimeout(timer);
   }, [router, retryAfterMs, tries, waiting]);
 
-  return (
-    <div className="flex flex-col gap-5">
-      <p aria-live="polite" className="text-lg font-medium text-zinc-700">
-        {waiting ? "Getting your questions ready…" : "This is taking longer than usual."}
-      </p>
-      {waiting ? children : <TryAgainButton onClick={() => setTries(0)} />}
+  return waiting ? (
+    <WritingQuestions />
+  ) : (
+    <div role="status" className="flex flex-col items-start gap-5">
+      <p className="text-lg font-medium text-ink-700">This is taking longer than usual.</p>
+      <TryAgainButton onClick={() => setTries(0)} />
     </div>
   );
 }
@@ -49,7 +48,7 @@ export function RetryButton() {
 
 function TryAgainButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`${primaryButton} min-h-14 self-start px-7 text-lg`}>
+    <button type="button" onClick={onClick} className={`${primaryButtonLarge} self-start`}>
       Try again
     </button>
   );

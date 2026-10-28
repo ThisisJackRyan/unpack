@@ -3,6 +3,7 @@
 import { startTransition, useActionState, type FormEvent } from "react";
 import { secondaryButton, secondarySmallButton } from "@/components/ui";
 import { resetTriesMessage } from "@/lib/student-question-reset";
+import { ErrorMessage } from "@/components/error-message";
 import { announceProgress } from "./announcer";
 import type { ResetTriesState } from "./state";
 
@@ -56,9 +57,9 @@ export function ResetTriesButton({
           ({name}, {readingTitle})
         </span>
       </button>
-      <p aria-live="polite" className="text-sm font-medium text-red-700 empty:hidden">
+      <ErrorMessage>
         {state.error ?? ""}
-      </p>
+      </ErrorMessage>
     </form>
   );
 }

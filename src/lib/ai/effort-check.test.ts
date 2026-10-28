@@ -233,6 +233,18 @@ describe("checkEffort", () => {
     assert.equal(calls.length, 2);
   });
 
+  it("reports each model reply, and none when the call fails before one", async () => {
+    const bad = () => message([toolUse({ results: [r(1, true)] })]);
+    let replies = 0;
+    const onModelResponse = () => replies++;
+    const twice = fakeModel([bad(), gatewayErrors.rateLimited()]);
+    await assert.rejects(checkEffort(twice.model, INPUT, { onModelResponse }));
+    assert.equal(replies, 1, "the unusable reply was reported, the gateway error wasn't");
+    replies = 0;
+    await assert.rejects(checkEffort(fakeModel([gatewayErrors.rateLimited()]).model, INPUT, { onModelResponse }));
+    assert.equal(replies, 0);
+  });
+
   it("passes gateway errors through without a second call", async () => {
     const { model, calls } = fakeModel([gatewayErrors.rateLimited()]);
     await assert.rejects(checkEffort(model, INPUT), (e: unknown) => effortErrorKind(e) === "busy");

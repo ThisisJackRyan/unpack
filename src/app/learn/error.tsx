@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { card, primaryButton } from "@/components/ui";
+import { card, primaryButtonLarge } from "@/components/ui";
 
 export default function LearnError({
   error,
@@ -19,16 +19,16 @@ export default function LearnError({
       role="alert"
       className={`${card} flex flex-col items-center gap-3 px-6 py-14 text-center`}
     >
-      <h1 className="text-2xl font-semibold text-zinc-950">
+      <h1 className="text-2xl font-bold text-ink-950">
         Something went wrong
       </h1>
-      <p className="text-base text-zinc-600">
+      <p className="text-lg text-ink-700">
         We couldn’t load this page. Please try again.
       </p>
       <button
         type="button"
         onClick={() => unstable_retry()}
-        className={`${primaryButton} mt-3`}
+        className={`${primaryButtonLarge} mt-3`}
       >
         Try again
       </button>

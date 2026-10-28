@@ -3,21 +3,46 @@
 // Pure (numbers, dates, SQL text), so tests cover the window edges; the
 // statements run through self-readings.ts.
 //
-// Counting: every self_readings row the account created in the window.
-// Self-learners can't delete a reading (only the Clerk account delete
-// removes them, and then the account is gone too), so live rows are the
-// creation log. If a delete is ever added, count from a separate creation
-// log instead, or a delete would hand a slot back.
+// Counting: every self_readings row the account created in the window
+// that holds its slot (slot_released_at is null). Self-learners can't
+// delete a reading (only the Clerk account delete removes them, and then
+// the account is gone too), so live rows are the creation log. If a delete
+// is ever added, count from a separate creation log instead, or a delete
+// would hand a slot back.
+//
+// A reading whose question write fails doesn't use a slot: when a write
+// was attempted (claimed and counted toward the question limit) and
+// failed, the reading's slot is released (slot_released_at set, only
+// while it has no questions), so it stops counting. An open that doesn't
+// write (not set up, the account's question limit, another tab's claim)
+// keeps the slot, so an account at its question limit can't create, open,
+// and repeat past the allowance; that reading gets its questions later on
+// the slot it kept. So while writes keep failing (a timeout, a 402, a
+// provider error), readings are capped by the question limit (30 per 10
+// minutes, each failed write counts toward it), not by the 5 slots.
+// Its Try again takes the slot back in the claim itself, under the same
+// account lock and only while a slot is free (see selfClaimStatements in
+// self-questions-core.ts); a reading with questions always holds its slot.
+// Why release rather than count only readings with questions: counting
+// only finished readings would let a burst of creates (none with questions
+// yet) all pass, then all generate, well past 5.
 //
 // Race safety: the create runs in ONE transaction that first locks the
 // account row (FOR UPDATE, the lock the link and question limiters take),
-// then inserts only while fewer than the allowance were created in the
+// then inserts only while fewer than the allowance hold a slot in the
 // window. Under READ COMMITTED the insert's fresh snapshot, taken after the
-// lock wait, sees every reading a previous holder committed, so 20
-// concurrent creates make exactly 5.
+// lock wait, sees every reading (and every slot taken back) a previous
+// holder committed, so 20 concurrent creates make exactly 5, and creates
+// racing Try agains on released readings together never pass 5. A release
+// takes no lock: it only ever frees a slot.
 
 import type { GradeLevel } from "./grade-levels";
 import type { Statement } from "./link-rate-limit";
+import { dateFromRow } from "./local-time";
+
+// The time helpers moved to local-time.ts (shared with every limiter's
+// retry time); re-exported for the allowance's callers.
+export { formatNextFree, resolveTimeZone } from "./local-time";
 
 // The plan a self-learner is on. Only "free" exists; a paid plan is TBD
 // (product). Add it here and in allowanceFor, and have the account's plan
@@ -77,38 +102,6 @@ export function allowanceFromCreations(creations: Date[], now: Date, allowance: 
   return allowanceState(inWindow.length, oldest, allowance);
 }
 
-// A time zone name from the request (Vercel's x-vercel-ip-timezone), if
-// Intl knows it; else UTC.
-export function resolveTimeZone(candidate: string | null | undefined): { timeZone: string; fallback: boolean } {
-  if (candidate) {
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: candidate });
-      return { timeZone: candidate, fallback: false };
-    } catch {
-      // Not a zone Intl knows.
-    }
-  }
-  return { timeZone: "UTC", fallback: true };
-}
-
-function dayKey(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-}
-
-// "today at 3:15 PM", "tomorrow at 9:00 AM", or "on Friday at 9:00 AM",
-// in `timeZone`. Formatted on the server only (the page passes a string),
-// so there is nothing for hydration to disagree with. `utcLabel` adds
-// " UTC" when we couldn't tell the reader's zone.
-export function formatNextFree(at: Date, now: Date, timeZone: string, utcLabel = false): string {
-  const time = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(at);
-  const zone = utcLabel ? " UTC" : "";
-  const day = dayKey(at, timeZone);
-  if (day === dayKey(now, timeZone)) return `today at ${time}${zone}`;
-  if (day === dayKey(new Date(now.getTime() + DAY_MS), timeZone)) return `tomorrow at ${time}${zone}`;
-  const weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long" }).format(at);
-  return `on ${weekday} at ${time}${zone}`;
-}
-
 // "You’ve read 5 this week. Your next one frees up on Friday at 9:00 AM."
 export function allowanceLimitMessage(used: number, when: string): string {
   return `You’ve read ${used} this week. Your next one frees up ${when}.`;
@@ -127,22 +120,31 @@ export type SelfReadingDraft = {
   questionCount: number;
 };
 
-// The account's creations in the window: how many, and the oldest.
-// $1 account, $2 window days.
+// The readings that hold a slot: created in the window ($n: window days)
+// and not released. $1 account.
+export function heldSlotsSql(n: number): string {
+  return `(select count(*) from self_readings
+  where account_id = $1::uuid and slot_released_at is null
+    and created_at > now() - make_interval(days => $${n}::int))`;
+}
+
+// The account's slot-holding creations in the window: how many, and the
+// oldest. $1 account, $2 window days.
 export function allowanceStatement(accountId: string, allowance: ReadingAllowance): Statement {
   return {
     text: `select count(*)::int as used, min(created_at) as oldest
 from self_readings
-where account_id = $1::uuid and created_at > now() - make_interval(days => $2::int)`,
+where account_id = $1::uuid and slot_released_at is null
+  and created_at > now() - make_interval(days => $2::int)`,
     params: [accountId, allowance.windowDays],
   };
 }
 
 // The create, as ONE READ COMMITTED transaction (see the top of this file):
 // 1. Lock the account row.
-// 2. Insert the reading only if the account is a self-learner and has
-//    created fewer than the allowance in the window (a fresh snapshot
-//    after the lock wait, so the count is exact).
+// 2. Insert the reading only if the account is a self-learner and fewer
+//    than the allowance hold a slot in the window (a fresh snapshot after
+//    the lock wait, so the count is exact).
 // 3. Where things stand now: the window's count and oldest, and the role.
 export function createSelfReadingStatements(
   accountId: string,
@@ -155,10 +157,7 @@ export function createSelfReadingStatements(
       text: `insert into self_readings (account_id, title, source_url, body_text, grade_level, question_count)
 select $1::uuid, $2::text, $3::text, $4::text, $5::grade_level, $6::int
 where exists (select 1 from teachers where id = $1::uuid and role = 'self_learner')
-and (
-  select count(*) from self_readings
-  where account_id = $1::uuid and created_at > now() - make_interval(days => $7::int)
-) < $8::int
+and ${heldSlotsSql(7)} < $8::int
 returning id`,
       params: [
         accountId,
@@ -176,7 +175,8 @@ returning id`,
 from (
   select count(*)::int as used, min(created_at) as oldest
   from self_readings
-  where account_id = $1::uuid and created_at > now() - make_interval(days => $2::int)
+  where account_id = $1::uuid and slot_released_at is null
+    and created_at > now() - make_interval(days => $2::int)
 ) w`,
       params: [accountId, allowance.windowDays],
     },
@@ -189,17 +189,26 @@ export type CreateOutcome =
   // No such account, or it isn't a self-learner (now).
   | { status: "not_allowed" };
 
-function asDate(value: unknown): Date | null {
-  if (value instanceof Date) return value;
-  if (typeof value === "string" && value) {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
+// Where createSelfReadingAction goes after the insert. Always a replace,
+// not a push (a server action's redirect pushes by default): Back from
+// the new reading then goes to /learn, not to the filled-in /learn/new.
+// At the allowance, /learn/new itself shows the calm limit note.
+export type CreateRedirect = { path: string; type: "replace" };
+
+export function createOutcomeRedirect(outcome: CreateOutcome): CreateRedirect {
+  switch (outcome.status) {
+    case "created":
+      return { path: `/learn/r/${outcome.id}`, type: "replace" };
+    case "limit_reached":
+      return { path: "/learn/new", type: "replace" };
+    case "not_allowed":
+      // Not a self-learner any more (switched in another tab).
+      return { path: "/home", type: "replace" };
   }
-  return null;
 }
 
 export function allowanceFromRow(row: Record<string, unknown> | undefined, allowance: ReadingAllowance): AllowanceState {
-  return allowanceState(Number(row?.used ?? 0), asDate(row?.oldest), allowance);
+  return allowanceState(Number(row?.used ?? 0), dateFromRow(row?.oldest), allowance);
 }
 
 export function createOutcome(results: Record<string, unknown>[][], allowance: ReadingAllowance): CreateOutcome {

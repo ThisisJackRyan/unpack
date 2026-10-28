@@ -1,0 +1,39 @@
+import Link from "next/link";
+import { SignOutButton } from "@clerk/nextjs";
+import { Wordmark } from "@/components/logo";
+import { card, focusRing, primaryButtonLarge } from "@/components/ui";
+
+// Where a deleted Clerk account lands if a session outlived it (see
+// src/lib/deleted-accounts.ts): the account is never recreated. Public in
+// src/proxy.ts, and it never loads the account, so it can't loop.
+export default function AccountDeleted() {
+  return (
+    <div className="flex flex-1 flex-col bg-ink-50 text-lg text-ink-900">
+      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center px-6 py-16">
+        <div className={`${card} flex flex-col gap-4 px-6 py-10 sm:px-10`}>
+          <p>
+            <Wordmark />
+          </p>
+          <h1 className="text-2xl font-bold text-ink-950">This account was deleted</h1>
+          <p className="text-lg text-ink-700">
+            It can’t be opened again, and its classes and readings were deleted with it. To use unpack again, sign
+            out, then sign up with a new account.
+          </p>
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+            <SignOutButton redirectUrl="/">
+              <button type="button" className={primaryButtonLarge}>
+                Sign out
+              </button>
+            </SignOutButton>
+            <Link
+              href="/"
+              className={`inline-flex min-h-14 items-center justify-center rounded-2xl px-4 text-lg font-semibold text-primary-700 underline underline-offset-2 hover:text-primary-900 ${focusRing}`}
+            >
+              Go to the start page
+            </Link>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

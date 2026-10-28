@@ -21,14 +21,14 @@
 //    not the name, so taking over a name would hand one student another's
 //    work.
 
-import { checkJoinLimit, JOIN_LIMITED_MESSAGE } from "./join-rate-limit";
+import { checkJoinLimit, joinRetryFromRows, joinRetryStatement, type JoinRetry } from "./join-rate-limit";
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { studentNameKey } from "./student-name";
 import { generateSessionToken, hashSessionToken } from "./student-session-token";
 import { CLASS_NOT_FOUND_MESSAGE, type JoinErrors, type JoinValues } from "./validate-join";
 import { hashJoinCode } from "./client-ip";
 
-export const NAME_TAKEN_MESSAGE = "Someone already has that name. Add another letter.";
+export const NAME_TAKEN_MESSAGE = "Someone already has that name. If it’s you, open unpack on the device you joined with, or add another letter.";
 
 const NAME_KEY_CONSTRAINT = "students_class_id_name_key_unique";
 
@@ -37,7 +37,9 @@ export type JoinOutcome =
   // Unknown code, or the class's code is turned off.
   | { status: "class_not_found" }
   | { status: "name_taken" }
-  | { status: "limited" };
+  // At the per-IP or per-code limit: which, and when the next join frees
+  // up (null when that couldn't be read).
+  | { status: "limited"; retry: JoinRetry };
 
 // Postgres unique violation (23505) on the per-class name key. Drizzle and
 // the Neon driver can wrap the error, so walk the cause chain (as
@@ -85,11 +87,18 @@ export type JoinDeps = {
 // `data` must come from validateJoin. Errors other than a name clash
 // propagate.
 export async function joinClassWith(data: JoinValues, deps: JoinDeps): Promise<JoinOutcome> {
-  const allowed = await checkJoinLimit(
-    { ipHash: deps.ipHash, codeHash: hashJoinCode(data.code) },
-    deps.execute,
-  );
-  if (!allowed) return { status: "limited" };
+  const keys = { ipHash: deps.ipHash, codeHash: hashJoinCode(data.code) };
+  const allowed = await checkJoinLimit(keys, deps.execute);
+  if (!allowed) {
+    // Only for the message: a failure here still refuses, with no time.
+    let retry: JoinRetry = { by: "ip", retryAt: null };
+    try {
+      retry = joinRetryFromRows(await deps.execute([joinRetryStatement(keys)]));
+    } catch {
+      // Keep the default.
+    }
+    return { status: "limited", retry };
+  }
 
   const token = (deps.newToken ?? generateSessionToken)();
   let rows: Record<string, unknown>[];
@@ -104,15 +113,14 @@ export async function joinClassWith(data: JoinValues, deps: JoinDeps): Promise<J
   return { status: "joined", studentId: String(row.id), classId: String(row.class_id), token };
 }
 
-// What the form shows for an outcome that isn't a join. An unknown or
-// turned-off code goes on the code field, like a malformed one (see
-// validateJoin), so every "no such class" reads the same.
+// What the form shows for an outcome that's a mistake to fix. An unknown
+// or turned-off code goes on the code field, like a malformed one (see
+// validateJoin), so every "no such class" reads the same. "limited" isn't
+// here: the join action shows it as an amber note with a retry time.
 export function joinOutcomeErrors(
-  outcome: Exclude<JoinOutcome, { status: "joined" }>,
-): JoinErrors & { form?: string } {
+  outcome: Exclude<JoinOutcome, { status: "joined" | "limited" }>,
+): JoinErrors {
   switch (outcome.status) {
-    case "limited":
-      return { form: JOIN_LIMITED_MESSAGE };
     case "class_not_found":
       return { code: CLASS_NOT_FOUND_MESSAGE };
     case "name_taken":
