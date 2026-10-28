@@ -1,10 +1,11 @@
 import "server-only";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
+import { openGraphValue, pickArticleTitle } from "./article-title";
 import { FetchArticleError } from "./fetch-errors";
 import { safeFetch, type SafeFetchOptions } from "./safe-fetch";
 import { trimToLimit } from "./trim-article";
-import { BODY_TEXT_MIN_LENGTH, normalizeBodyText, normalizeTitle } from "./validate-reading";
+import { BODY_TEXT_MIN_LENGTH, normalizeBodyText } from "./validate-reading";
 
 // Server-only: turns a web page into a reading's title and plain text.
 // linkedom parses the HTML without running scripts or loading anything, and
@@ -339,7 +340,10 @@ export function extractArticle(html: string, pageUrl: URL): Article {
       base.setAttribute("href", pageUrl.href);
       head.prepend(base);
     }
+    // Read before Readability, which changes the document.
     const pageTitle = document.title ?? "";
+    const ogTitle = openGraphValue(document, "title");
+    const siteName = openGraphValue(document, "site_name");
     const parsed = new Readability<DomNode>(document as unknown as Document, {
       // Ineffective with linkedom today (see exceedsElementLimits), but
       // harmless, and it takes over if linkedom starts counting "*".
@@ -351,7 +355,15 @@ export function extractArticle(html: string, pageUrl: URL): Article {
     // output.
     dropEmptySections(parsed.content);
     text = htmlToText(parsed.content);
-    title = normalizeTitle(parsed.title || pageTitle);
+    // See article-title.ts: og:title, else the page's <title> as written
+    // (not Readability's, which cuts titles at any dash), less a trailing
+    // site name.
+    title = pickArticleTitle({
+      ogTitle,
+      siteName,
+      documentTitle: pageTitle,
+      readabilityTitle: parsed.title,
+    });
   } catch (error) {
     if (error instanceof FetchArticleError) throw error;
     throw new FetchArticleError("extract_failed", { cause: error });

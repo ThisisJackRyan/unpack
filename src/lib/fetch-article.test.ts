@@ -138,6 +138,12 @@ describe("extractArticle: a Wikipedia article", () => {
     new URL("https://simple.wikipedia.org/wiki/Honey_bee"),
   );
 
+  it("titles it without Wikipedia's suffix", () => {
+    // Its og:title is "Honey bee - Simple English Wikipedia, the free
+    // encyclopedia", with no og:site_name.
+    assert.equal(wiki.title, "Honey bee");
+  });
+
   it("starts with the article's first paragraph", () => {
     assert.ok(
       wiki.text.startsWith(
@@ -223,6 +229,10 @@ describe("extractArticle: a page with chrome around the article", () => {
     readFileSync(new URL("./__fixtures__/blog-with-chrome.html", import.meta.url), "utf8"),
     new URL("https://blog.example.com/glaciers"),
   );
+
+  it("keeps its <title> as written when it has no og: tags", () => {
+    assert.equal(blog.title, "Why Glaciers Move | The Field Notes");
+  });
 
   it("keeps the article's paragraphs and heading, in order, starting with the first", () => {
     assert.ok(blog.text.startsWith("A glacier looks like it is standing still, but it is always moving downhill, just very slowly. Some glaciers"));
@@ -380,5 +390,49 @@ describe("htmlToText", () => {
     );
     const root = document.getElementById("r");
     assert.equal(htmlToText(root as never), "a b c\n\nx\n  y\n\nd\ne");
+  });
+});
+
+// Link titles (see article-title.ts), on small inline pages.
+describe("extractArticle: titles", () => {
+  const body = `<article>${"<p>Glaciers move downhill, slowly, under their own weight, and carve the valleys below them as they go.</p>".repeat(4)}</article>`;
+  const titleOf = (head: string) =>
+    extractArticle(`<html><head>${head}</head><body>${body}</body></html>`, PAGE).title;
+
+  it("prefers og:title over <title>", () => {
+    assert.equal(
+      titleOf('<title>Glaciers | Notes</title><meta property="og:title" content="Why Glaciers Move">'),
+      "Why Glaciers Move",
+    );
+  });
+
+  it("keeps a dash that isn't a site suffix", () => {
+    assert.equal(titleOf("<title>Spider-Man - A Hero\u2019s Journey</title>"), "Spider-Man - A Hero\u2019s Journey");
+    assert.equal(
+      titleOf('<title>COVID-19 - what we know</title><meta property="og:site_name" content="Health News">'),
+      "COVID-19 - what we know",
+    );
+  });
+
+  it("strips a suffix that is og:site_name", () => {
+    assert.equal(
+      titleOf('<title>Why Glaciers Move | The Field Notes</title><meta property="og:site_name" content="The Field Notes">'),
+      "Why Glaciers Move",
+    );
+    assert.equal(
+      titleOf('<meta name="og:title" content="Why Glaciers Move \u2013 The Field Notes"><meta name="og:site_name" content="The Field Notes">'),
+      "Why Glaciers Move",
+    );
+  });
+
+  it("keeps a title that is only the site name", () => {
+    assert.equal(
+      titleOf('<title>The Field Notes</title><meta property="og:site_name" content="The Field Notes">'),
+      "The Field Notes",
+    );
+  });
+
+  it("keeps <title> unchanged when there are no og: tags", () => {
+    assert.equal(titleOf("<title>Why Glaciers Move: A Slow Story | The Field Notes</title>"), "Why Glaciers Move: A Slow Story | The Field Notes");
   });
 });
