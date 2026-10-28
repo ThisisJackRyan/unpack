@@ -13,14 +13,32 @@
 // WebSocket and fetch: no browser library. The env is dummy values only,
 // like the CI build: no database, no model, no real Clerk keys.
 //
+// Every case but the gate runs twice: ?as=class renders the form as the
+// class reading page (/c/r) does, ?as=self as the self-learner's (/learn/r),
+// through the same components (src/components/reading-answer-form.tsx).
+//
 // Cases:
 //   slow      the action takes 10s, the form waits 2s: the no-reply message
 //             shows within 2 to 4s while the request is still pending, the
-//             button works again, the answers stay; and the late result
-//             (which re-renders the page) doesn't replace the message.
+//             button works again, the answers stay; the late result
+//             (which re-renders the page) doesn't replace the message; and
+//             a new check clears the message while it runs.
 //   fast      the action takes 200ms: its result shows, and its
 //             revalidatePath re-renders the page with no reload.
 //   redirect  the action redirects: the browser lands on the new page.
+//   network   the request fails in the browser (Fetch.failRequest: TimedOut,
+//             as Chrome's net::ERR_TIMED_OUT, and InternetDisconnected):
+//             the no-reply message at once, button back, answers kept, and
+//             the server never saw the request.
+//   latency   DevTools-style latency (Network.emulateNetworkConditions,
+//             6s) on a 200ms action that saves a try: the server gets the
+//             request at once (the latency holds the response, not the
+//             request), the form still gives up at its 2s limit, the
+//             student edits, and when the late result lands with the next
+//             try, the edit stays.
+//   precheck  a wait bounded as a lookup before the claim (1s), through
+//             the reading pages' guardAnswerCheck: the server's timeout
+//             message, well before the client limit.
 //   gate      without UNPACK_QA_ROUTES the route is a 404.
 // Prints PASS/FAIL lines and exits non-zero on any failure. Chrome and the
 // servers are always stopped.
@@ -30,6 +48,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHECK_NO_REPLY_MESSAGE } from "@/components/answer-form-state";
+import { CHECK_TIMED_OUT_MESSAGE } from "@/lib/validate-answers";
 
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const SLOW_MS = 10_000;
@@ -72,7 +91,7 @@ function start(command: string, args: string[], env: Record<string, string>, log
   const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
   const keep = (chunk: Buffer) => {
     log.push(chunk.toString());
-    if (log.length > 200) log.shift();
+    if (log.length > 2000) log.shift();
   };
   child.stdout?.on("data", keep);
   child.stderr?.on("data", keep);
@@ -124,6 +143,8 @@ async function startServer(port: number, qa: boolean, log: string[]) {
 // A minimal CDP client for one page target.
 type Cdp = {
   send: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  // One handler per event method (the last one set wins); null removes it.
+  on: (method: string, handler: ((params: Record<string, unknown>) => void) | null) => void;
   close: () => void;
 };
 
@@ -132,9 +153,19 @@ function connect(url: string): Promise<Cdp> {
     const ws = new WebSocket(url);
     let nextId = 0;
     const waiting = new Map<number, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }>();
+    const handlers = new Map<string, (params: Record<string, unknown>) => void>();
     ws.addEventListener("message", (event) => {
-      const msg = JSON.parse(String(event.data)) as { id?: number; result?: Record<string, unknown>; error?: { message: string } };
-      if (msg.id === undefined) return;
+      const msg = JSON.parse(String(event.data)) as {
+        id?: number;
+        method?: string;
+        params?: Record<string, unknown>;
+        result?: Record<string, unknown>;
+        error?: { message: string };
+      };
+      if (msg.id === undefined) {
+        if (msg.method) handlers.get(msg.method)?.(msg.params ?? {});
+        return;
+      }
       const w = waiting.get(msg.id);
       if (!w) return;
       waiting.delete(msg.id);
@@ -150,6 +181,10 @@ function connect(url: string): Promise<Cdp> {
             waiting.set(nextId, { resolve: res, reject: rej });
             ws.send(JSON.stringify({ id: nextId, method, params }));
           }),
+        on: (method, handler) => {
+          if (handler) handlers.set(method, handler);
+          else handlers.delete(method);
+        },
         close: () => ws.close(),
       }),
     );
@@ -172,6 +207,8 @@ type Snapshot = {
   busy: string | null;
   answers: string[];
   landed: boolean;
+  // The try pill: "Try 1 of 3".
+  tryLabel: string;
 };
 
 const SNAPSHOT = `(() => {
@@ -187,6 +224,7 @@ const SNAPSHOT = `(() => {
     busy: form?.getAttribute("aria-busy") ?? null,
     answers: form ? [...form.querySelectorAll("textarea")].map((t) => t.value) : [],
     landed: !!document.querySelector('[data-qa="landed"]'),
+    tryLabel: form?.querySelector("span")?.textContent ?? "",
   };
 })()`;
 
@@ -218,9 +256,21 @@ async function fillAndSubmit(cdp: Cdp): Promise<number> {
   return t0;
 }
 
-async function slowCase(cdp: Cdp, base: string) {
-  console.log(`-- slow: action ${SLOW_MS}ms, form waits ${LIMIT_MS}ms`);
-  await open(cdp, `${base}/qa/answer-timeout?sleep=${SLOW_MS}&limit=${LIMIT_MS}`);
+type Variant = "class" | "self";
+
+// The server's output, for the action's "started" marker.
+const serverLog: string[] = [];
+let runs = 0;
+function runId(as: Variant, name: string): string {
+  runs += 1;
+  return `${as}-${name}-${runs}`;
+}
+const serverSaw = (run: string) => serverLog.join("").includes(`qa-answer-action started run=${run}\n`);
+
+async function slowCase(cdp: Cdp, base: string, as: Variant) {
+  const label = `${as} slow`;
+  console.log(`-- ${label}: action ${SLOW_MS}ms, form waits ${LIMIT_MS}ms`);
+  await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=${SLOW_MS}&limit=${LIMIT_MS}&run=${runId(as, "slow")}`);
   const before = await snapshot(cdp);
   const t0 = await fillAndSubmit(cdp);
 
@@ -228,24 +278,24 @@ async function slowCase(cdp: Cdp, base: string) {
     const s = await snapshot(cdp);
     return s.disabled ? s : undefined;
   });
-  check(pending.button === "Checking your answers…" && pending.busy === "true", "slow: pending while the check runs", pending.button);
+  check(pending.button === "Checking your answers…" && pending.busy === "true", `${label}: pending while the check runs`, pending.button);
 
   const gaveUp = await waitFor("the no-reply message", SLOW_MS, async () => {
     const s = await snapshot(cdp);
     return s.message === CHECK_NO_REPLY_MESSAGE ? s : undefined;
   }).catch(() => undefined);
   const elapsed = Date.now() - t0;
-  check(!!gaveUp && elapsed >= LIMIT_MS - 200 && elapsed <= 4_000, "slow: no-reply message shows at the client limit", `${elapsed}ms`);
-  check(elapsed < SLOW_MS - 2_000, "slow: shown while the server action is still pending", `${elapsed}ms of ${SLOW_MS}ms`);
+  check(!!gaveUp && elapsed >= LIMIT_MS - 200 && elapsed <= 4_000, `${label}: no-reply message shows at the client limit`, `${elapsed}ms`);
+  check(elapsed < SLOW_MS - 2_000, `${label}: shown while the server action is still pending`, `${elapsed}ms of ${SLOW_MS}ms`);
   if (!gaveUp) return;
-  check(!gaveUp.disabled && gaveUp.button === "Check my answers" && gaveUp.busy === "false", "slow: button enabled again", gaveUp.button);
-  check(JSON.stringify(gaveUp.answers) === JSON.stringify(ANSWERS), "slow: typed answers still there");
+  check(!gaveUp.disabled && gaveUp.button === "Check my answers" && gaveUp.busy === "false", `${label}: button enabled again`, gaveUp.button);
+  check(JSON.stringify(gaveUp.answers) === JSON.stringify(ANSWERS), `${label}: typed answers still there`);
   const drafted = await evaluate<boolean>(
     cdp,
     `(() => { const all = Object.values(localStorage).join(" "); return ${JSON.stringify(ANSWERS)}.every((a) => all.includes(a)); })()`,
   );
-  check(drafted, "slow: answers saved as drafts on the device");
-  check(gaveUp.render === before.render, "slow: no re-render yet (the action is still running)", `render ${gaveUp.render}`);
+  check(drafted, `${label}: answers saved as drafts on the device`);
+  check(gaveUp.render === before.render, `${label}: no re-render yet (the action is still running)`, `render ${gaveUp.render}`);
 
   // The late result revalidates the page, as a counted timeout does: the
   // page re-renders, but the form's message stays.
@@ -254,42 +304,167 @@ async function slowCase(cdp: Cdp, base: string) {
     return s.render > before.render ? s : undefined;
   }).catch(() => undefined);
   const lateAt = Date.now() - t0;
-  check(!!late && lateAt >= SLOW_MS, "slow: the late result's revalidation re-rendered the page", `${lateAt}ms`);
+  check(!!late && lateAt >= SLOW_MS, `${label}: the late result's revalidation re-rendered the page`, `${lateAt}ms`);
   await sleep(1_000);
   const after = await snapshot(cdp);
-  check(after.message === CHECK_NO_REPLY_MESSAGE, "slow: the late result did not replace the message", after.message);
-  check(!after.disabled && JSON.stringify(after.answers) === JSON.stringify(ANSWERS), "slow: still enabled, answers kept after the late result");
+  check(after.message === CHECK_NO_REPLY_MESSAGE, `${label}: the late result did not replace the message`, after.message);
+  check(!after.disabled && JSON.stringify(after.answers) === JSON.stringify(ANSWERS), `${label}: still enabled, answers kept after the late result`);
+
+  // A new check: the old message goes while it runs, and comes back only
+  // if this one also gets no reply.
+  const t1 = Date.now();
+  await evaluate(cdp, `document.querySelector('form button[type="submit"]').click()`);
+  const again = await waitFor("the second check's pending button", 2_000, async () => {
+    const s = await snapshot(cdp);
+    return s.disabled ? s : undefined;
+  }).catch(() => undefined);
+  check(!!again && again.message === "", `${label}: a new check clears the old message while it runs`, again?.message ?? "not pending");
+  const second = await waitFor("the second no-reply message", SLOW_MS, async () => {
+    const s = await snapshot(cdp);
+    return s.message === CHECK_NO_REPLY_MESSAGE && !s.disabled ? s : undefined;
+  }).catch(() => undefined);
+  check(!!second && Date.now() - t1 >= LIMIT_MS - 200, `${label}: the message comes back when the new check gets no reply`, `${Date.now() - t1}ms`);
 }
 
-async function fastCase(cdp: Cdp, base: string) {
-  console.log("-- fast: action 200ms");
-  await open(cdp, `${base}/qa/answer-timeout?sleep=200&limit=${LIMIT_MS}`);
+async function fastCase(cdp: Cdp, base: string, as: Variant) {
+  const label = `${as} fast`;
+  console.log(`-- ${label}: action 200ms`);
+  await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=200&limit=${LIMIT_MS}&run=${runId(as, "fast")}`);
   const before = await snapshot(cdp);
   const t0 = await fillAndSubmit(cdp);
   const done = await waitFor("the result", 5_000, async () => {
     const s = await snapshot(cdp);
     return s.message.startsWith("QA check finished") ? s : undefined;
   }).catch(() => undefined);
-  check(!!done && done.message === "QA check finished after 200 ms, 2 answers.", "fast: the action's result shows", `${Date.now() - t0}ms`);
+  check(!!done && done.message === "QA check finished after 200 ms, 2 answers.", `${label}: the action's result shows`, `${Date.now() - t0}ms`);
   if (!done) return;
-  check(!done.disabled && done.button === "Check my answers", "fast: button enabled");
+  check(!done.disabled && done.button === "Check my answers", `${label}: button enabled`);
   const rerendered = await waitFor("the re-render", 3_000, async () => {
     const s = await snapshot(cdp);
     return s.render > before.render ? s : undefined;
   }).catch(() => undefined);
-  check(!!rerendered, "fast: revalidatePath re-rendered the page with no reload");
-  check(JSON.stringify(done.answers) === JSON.stringify(ANSWERS), "fast: answers kept");
+  check(!!rerendered, `${label}: revalidatePath re-rendered the page with no reload`);
+  check(JSON.stringify(done.answers) === JSON.stringify(ANSWERS), `${label}: answers kept`);
 }
 
-async function redirectCase(cdp: Cdp, base: string) {
-  console.log("-- redirect: action 200ms, then redirect");
-  await open(cdp, `${base}/qa/answer-timeout?sleep=200&limit=${LIMIT_MS}&redirect=1`);
+async function redirectCase(cdp: Cdp, base: string, as: Variant) {
+  const label = `${as} redirect`;
+  console.log(`-- ${label}: action 200ms, then redirect`);
+  await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=200&limit=${LIMIT_MS}&redirect=1&run=${runId(as, "redirect")}`);
   await fillAndSubmit(cdp);
   const landed = await waitFor("the redirect", 10_000, async () => {
     const s = await snapshot(cdp);
     return s.landed ? s : undefined;
   }).catch(() => undefined);
-  check(!!landed && landed.path === "/qa/answer-timeout/landed", "redirect: navigated to the redirect target", landed?.path ?? "no navigation");
+  check(!!landed && landed.path === "/qa/answer-timeout/landed", `${label}: navigated to the redirect target`, landed?.path ?? "no navigation");
+}
+
+// The action's POST fails in the browser, before any reply: Chrome's own
+// net::ERR_TIMED_OUT (the QA tester's class page at 30s) or an offline
+// device. The form must not wait for its limit.
+async function networkCase(cdp: Cdp, base: string, as: Variant) {
+  for (const reason of ["TimedOut", "InternetDisconnected"]) {
+    const label = `${as} network ${reason}`;
+    console.log(`-- ${label}: the POST fails in the browser`);
+    const run = runId(as, `network-${reason}`);
+    await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=200&limit=${LIMIT_MS}&run=${run}`);
+    cdp.on("Fetch.requestPaused", (params) => {
+      const { requestId, request } = params as { requestId: string; request: { method: string } };
+      void (request.method === "POST"
+        ? cdp.send("Fetch.failRequest", { requestId, errorReason: reason })
+        : cdp.send("Fetch.continueRequest", { requestId }));
+    });
+    await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*/qa/answer-timeout*", requestStage: "Request" }] });
+    try {
+      const t0 = await fillAndSubmit(cdp);
+      const failed = await waitFor("the no-reply message", LIMIT_MS + 2_000, async () => {
+        const s = await snapshot(cdp);
+        return s.message === CHECK_NO_REPLY_MESSAGE ? s : undefined;
+      }).catch(() => undefined);
+      const elapsed = Date.now() - t0;
+      check(!!failed && elapsed < LIMIT_MS - 500, `${label}: no-reply message at once, not at the client limit`, `${elapsed}ms`);
+      if (!failed) continue;
+      check(!failed.disabled && failed.button === "Check my answers", `${label}: button enabled again`);
+      check(JSON.stringify(failed.answers) === JSON.stringify(ANSWERS), `${label}: typed answers still there`);
+      check(failed.tryLabel === "Try 1 of 3", `${label}: still the same try`, failed.tryLabel);
+      check(!serverSaw(run), `${label}: the request never reached the server`);
+    } finally {
+      await cdp.send("Fetch.disable");
+      cdp.on("Fetch.requestPaused", null);
+    }
+  }
+}
+
+// Latency as DevTools' throttling adds it, on a fast action that saves a
+// try. Chrome's throttle (services/network/throttling) starts the real
+// request at once and holds the response until the latency has passed.
+const LATENCY_MS = 6_000;
+const EDIT = " Edited after the give-up.";
+
+async function latencyCase(cdp: Cdp, base: string, as: Variant) {
+  const label = `${as} latency`;
+  console.log(`-- ${label}: ${LATENCY_MS}ms network latency, action 200ms saves a try, form waits ${LIMIT_MS}ms`);
+  const run = runId(as, "latency");
+  await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=200&limit=${LIMIT_MS}&advance=1&run=${run}`);
+  const before = await snapshot(cdp);
+  check(before.tryLabel === "Try 1 of 3", `${label}: starts on try 1`, before.tryLabel);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: LATENCY_MS, downloadThroughput: -1, uploadThroughput: -1 });
+  try {
+    const t0 = await fillAndSubmit(cdp);
+    const reached = await waitFor("the server's marker", 5_000, async () => serverSaw(run)).catch(() => false);
+    const reachedAt = Date.now() - t0;
+    check(reached && reachedAt < 2_000, `${label}: the server got the request at once (the latency holds the response)`, `${reachedAt}ms`);
+
+    const gaveUp = await waitFor("the no-reply message", LATENCY_MS, async () => {
+      const s = await snapshot(cdp);
+      return s.message === CHECK_NO_REPLY_MESSAGE && !s.disabled ? s : undefined;
+    }).catch(() => undefined);
+    const elapsed = Date.now() - t0;
+    check(!!gaveUp && elapsed >= LIMIT_MS - 200 && elapsed < LATENCY_MS - 1_000, `${label}: the form still gives up at its limit`, `${elapsed}ms`);
+    if (!gaveUp) return;
+
+    // The student goes on typing after the give-up.
+    await evaluate(cdp, `(() => { const t = document.querySelectorAll("form textarea")[0]; t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
+    await cdp.send("Input.insertText", { text: EDIT });
+    const edited = [ANSWERS[0] + EDIT, ANSWERS[1]];
+    check(JSON.stringify((await snapshot(cdp)).answers) === JSON.stringify(edited), `${label}: the edit is in the box`);
+
+    const landed = await waitFor("the late result's new try", LATENCY_MS + 10_000, async () => {
+      const s = await snapshot(cdp);
+      return s.tryLabel === "Try 2 of 3" ? s : undefined;
+    }).catch(() => undefined);
+    const landedAt = Date.now() - t0;
+    check(!!landed && landedAt >= LATENCY_MS - 500, `${label}: the late result moved the page to try 2`, `${landedAt}ms`);
+    if (!landed) return;
+    check(JSON.stringify(landed.answers) === JSON.stringify(edited), `${label}: the late result kept the edit`, JSON.stringify(landed.answers));
+    check(landed.message === "", `${label}: the old try's no-reply message is gone`, landed.message);
+    await sleep(300);
+    const drafts = await evaluate<boolean>(
+      cdp,
+      `Object.entries(localStorage).some(([k, v]) => k.includes(":t2:qa-q1") && v.includes(${JSON.stringify(edited[0])}))`,
+    );
+    check(drafts, `${label}: the kept edit is saved as the new try's draft`);
+  } finally {
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await cdp.send("Network.disable");
+  }
+}
+
+// A wait bounded as a lookup before the claim, through guardAnswerCheck:
+// the server's own timeout message, long before the client's limit.
+async function precheckCase(cdp: Cdp, base: string, as: Variant) {
+  const label = `${as} precheck`;
+  console.log(`-- ${label}: action waits 5s, bounded at 1s before the claim, form waits 4s`);
+  await open(cdp, `${base}/qa/answer-timeout?as=${as}&sleep=5000&precheck=1000&limit=4000&run=${runId(as, "precheck")}`);
+  const t0 = await fillAndSubmit(cdp);
+  const done = await waitFor("the timeout message", 4_000, async () => {
+    const s = await snapshot(cdp);
+    return s.message === CHECK_TIMED_OUT_MESSAGE ? s : undefined;
+  }).catch(() => undefined);
+  const elapsed = Date.now() - t0;
+  check(!!done && elapsed >= 800 && elapsed < 3_000, `${label}: the server's timeout message at its bound`, `${elapsed}ms`);
+  check(!!done && !done.disabled && JSON.stringify(done.answers) === JSON.stringify(ANSWERS), `${label}: button back, answers kept`);
 }
 
 async function main() {
@@ -300,7 +475,6 @@ async function main() {
     if (code !== 0) throw new Error(`next build exited ${code}`);
   }
 
-  const serverLog: string[] = [];
   const port = await freePort();
   await startServer(port, true, serverLog);
   const base = `http://127.0.0.1:${port}`;
@@ -330,9 +504,14 @@ async function main() {
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
 
-    await slowCase(cdp, base);
-    await fastCase(cdp, base);
-    await redirectCase(cdp, base);
+    for (const as of ["class", "self"] as const) {
+      await slowCase(cdp, base, as);
+      await fastCase(cdp, base, as);
+      await redirectCase(cdp, base, as);
+      await networkCase(cdp, base, as);
+      await latencyCase(cdp, base, as);
+      await precheckCase(cdp, base, as);
+    }
     cdp.close();
 
     console.log("-- gate: no UNPACK_QA_ROUTES");

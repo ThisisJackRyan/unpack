@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AnswerForm, ClearAnswerDrafts } from "@/components/answer-form";
+import { ClearAnswerDrafts } from "@/components/answer-form";
 import { AnswerReview } from "@/components/answer-parts";
 import { Banner } from "@/components/banner";
 import { PassCelebration } from "@/components/celebration";
+import { SelfAnswerForm } from "@/components/reading-answer-form";
 import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
@@ -158,14 +159,12 @@ function SoloQuestions({
   switch (stage.kind) {
     case "answer":
       return (
-        <AnswerForm
+        <SelfAnswerForm
           action={submitSelfAnswersAction.bind(null, readingId)}
+          readingId={readingId}
+          ownerId={accountId}
           questions={questions}
-          tryNumber={stage.tryNumber}
-          maxTries={stage.maxTries}
-          previous={stage.previous}
-          extraTry={false}
-          drafts={{ mode: "self", readingId, ownerId: accountId }}
+          stage={stage}
         />
       );
     case "passed":

@@ -1,14 +1,21 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { AnswerForm } from "@/components/answer-form";
+import { ClassAnswerForm, SelfAnswerForm } from "@/components/reading-answer-form";
 import { qaRoutesEnabled } from "@/lib/qa-routes";
 import type { StudentQuestion } from "@/lib/student-questions-core";
+import { MAX_TRIES } from "@/lib/validate-answers";
 import { qaAnswerAction } from "./actions";
+import { qaLastTry } from "./tries";
 
 // The real answer form with a slow fake action, for
-// scripts/browser-check-answer-timeout.ts. 404 unless UNPACK_QA_ROUTES=1.
+// scripts/browser-check-answer-timeout.ts. 404 unless UNPACK_QA_ROUTES=1
+// (src/lib/qa-routes.ts: never set it in Vercel).
+// ?as=class (default) renders the form as /c/r/[readingId] does, ?as=self
+// as /learn/r/[readingId] does (src/components/reading-answer-form.tsx).
 // ?sleep=<ms> is how long the action takes, ?limit=<ms> how long the form
-// waits, and ?redirect=1 makes the action redirect.
+// waits, ?redirect=1 makes the action redirect, ?advance=1 makes it save a
+// try (the page moves to the next one), ?precheck=<ms> bounds the wait as
+// a lookup before the claim, and ?run=<id> keeps one case's tries apart.
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "QA answer timeout", robots: { index: false, follow: false } };
 
@@ -25,9 +32,13 @@ function renderNumber(): number {
   return renders;
 }
 
+function param(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function msParam(value: string | string[] | undefined, fallback: number): number {
-  const n = Number(Array.isArray(value) ? value[0] : value);
-  return Number.isFinite(n) && n >= 0 ? Math.min(n, 30_000) : fallback;
+  const n = Number(param(value));
+  return value !== undefined && Number.isFinite(n) && n >= 0 ? Math.min(n, 30_000) : fallback;
 }
 
 export default async function QaAnswerTimeoutPage({
@@ -37,20 +48,28 @@ export default async function QaAnswerTimeoutPage({
 }) {
   if (!qaRoutesEnabled()) notFound();
   const params = await searchParams;
-  const sleepMs = msParam(params.sleep, 200);
-  const limitMs = msParam(params.limit, 2_000);
+  const run = (param(params.run) ?? "default").slice(0, 40);
+  const action = qaAnswerAction.bind(null, {
+    sleepMs: msParam(params.sleep, 200),
+    redirect: param(params.redirect) === "1",
+    advance: param(params.advance) === "1",
+    run,
+    precheckMs: params.precheck === undefined ? null : msParam(params.precheck, 0),
+  });
+  const previous = qaLastTry(run);
+  const tryNumber = Math.min(1 + (previous?.tryNumber ?? 0), MAX_TRIES);
+  const stage = { kind: "answer" as const, tryNumber, maxTries: MAX_TRIES, previous, extraTry: false };
+  const Form = param(params.as) === "self" ? SelfAnswerForm : ClassAnswerForm;
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
       <p data-qa="render">{renderNumber()}</p>
-      <AnswerForm
-        action={qaAnswerAction.bind(null, sleepMs, params.redirect === "1")}
+      <Form
+        action={action}
+        readingId="qa-answer-timeout"
+        ownerId={`qa-${run}`}
         questions={questions}
-        tryNumber={1}
-        maxTries={3}
-        extraTry={false}
-        previous={null}
-        drafts={{ mode: "self", readingId: "qa-answer-timeout", ownerId: "qa" }}
-        checkTimeoutMs={limitMs}
+        stage={stage}
+        checkTimeoutMs={msParam(params.limit, 2_000)}
       />
     </main>
   );

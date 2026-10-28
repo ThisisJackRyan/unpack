@@ -57,6 +57,10 @@ The route is public (no Clerk session); every delivery's signature is checked. A
 
 `pnpm db:check-*` scripts (class limit, student questions, student join, student answers, teacher queue, abuse protection, teacher gaps, self-learner, limiter concurrency) run race checks against a local or test database with a mock model. They write and delete rows, so every one refuses to run, before any query, unless `ALLOW_DB_WRITES=1` is set for that one command and `DATABASE_URL` points at a local or test database: the host is `localhost`, `127.0.0.1`, `::1`, or `*.localtest.me` (the local Neon proxy), or the database name contains `test` (for a Neon branch made for the checks, say `unpack_test`). For example `ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-abuse-protection`. Don't export it in your shell, and never point them at production. Each script keeps at most `DB_CHECK_CONCURRENCY` (default 8) queries in flight, so a full run stays far under Postgres's `max_connections` (the shared setup is `scripts/lib/db-check.ts`).
 
+### Browser check
+
+`pnpm browser:check-answer-timeout [--no-build]` checks the answer form's client timeout in headless Chrome (`/usr/bin/google-chrome`, or `CHROME_PATH`): it builds the app, starts it with dummy env values (no database, no model, no real keys) and `UNPACK_QA_ROUTES=1`, and drives the test-only `/qa/answer-timeout` page, which renders the answer form as the class reading page and as the self-learner reading page do (`?as=class`, `?as=self`). Cases: a slow check, a fast one, a redirect, a request that fails in the browser, network latency, and the server's bound before the claim. `UNPACK_QA_ROUTES` must never be set in Vercel (any environment) or `.env.local`: with it, `/qa` skips Clerk. Without it, every `/qa` page and action is a 404.
+
 ### Migrations
 
 Apply migrations by hand, in order, one `drizzle/*.sql` file at a time, each as one transaction. Don't use `pnpm db:migrate`: the Neon database has no drizzle migrations table, so it would replay from `0000`, and port 5432 is blocked anyway.

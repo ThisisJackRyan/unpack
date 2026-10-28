@@ -40,6 +40,18 @@ describe("QA routes", () => {
     assert.match(readFileSync("src/proxy.ts", "utf8"), /if \(qaRoutesEnabled\(\) && isQaPath\(req\.nextUrl\.pathname\)\) return NextResponse\.next\(\);/);
   });
 
+  it("the QA page renders the answer form through the reading pages' own components", () => {
+    // AnswerForm is rendered in one place, for both pages and the QA route.
+    assert.match(readFileSync("src/components/reading-answer-form.tsx", "utf8"), /<AnswerForm/);
+    assert.match(readFileSync("src/app/c/r/[readingId]/page.tsx", "utf8"), /<ClassAnswerForm\b/);
+    assert.match(readFileSync("src/app/learn/r/[readingId]/page.tsx", "utf8"), /<SelfAnswerForm\b/);
+    for (const page of ["src/app/c/r/[readingId]/page.tsx", "src/app/learn/r/[readingId]/page.tsx", "src/app/qa/answer-timeout/page.tsx"]) {
+      assert.doesNotMatch(readFileSync(page, "utf8"), /<AnswerForm\b/, page);
+    }
+    const qa = readFileSync("src/app/qa/answer-timeout/page.tsx", "utf8");
+    assert.match(qa, /\? SelfAnswerForm : ClassAnswerForm/);
+  });
+
   it("only the QA page passes a client timeout to the answer form", () => {
     for (const page of ["src/app/c/r/[readingId]/page.tsx", "src/app/learn/r/[readingId]/page.tsx"]) {
       assert.doesNotMatch(readFileSync(page, "utf8"), /checkTimeoutMs/, page);
