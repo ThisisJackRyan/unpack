@@ -9,7 +9,7 @@ function channel(value: number): number {
 export function relativeLuminance(hex: string): number {
   let h = hex.trim().replace(/^#/, "");
   if (h.length === 3) h = [...h].map((c) => c + c).join("");
-  if (!/^[0-9a-f]{6}$/i.test(h)) throw new Error(`Not a hex color: ${hex}`);
+  if (!/^[0-9a-f]{6}$/i.test(h)) throw new Error("Not a hex color");
   const [r, g, b] = [0, 2, 4].map((i) => channel(parseInt(h.slice(i, i + 2), 16)));
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }

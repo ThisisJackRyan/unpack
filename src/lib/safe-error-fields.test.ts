@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { after, describe, it } from "node:test";
 import { neon, neonConfig, NeonDbError } from "@neondatabase/serverless";
 import { DrizzleQueryError, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import { readings, teachers } from "@/db/schema";
+import { ClerkUserNoEmailError } from "./clerk-user-errors";
 import { DeadlineError } from "./deadline";
 import { FetchArticleError } from "./fetch-errors";
 import { JoinCodeExhaustedError } from "./join-code";
@@ -144,6 +146,23 @@ describe("safeErrorFields cause chain", () => {
     assert.deepEqual(safeErrorFields(Object.assign(new Error("x"), { code: 42 })).code, 42);
   });
 
+  it("keeps only uppercase codes and integers, dropping id-shaped and mixed-case values", () => {
+    for (const code of ["23505", "57P01", "22P02", "ETIMEDOUT", "ECONNREFUSED", "UND_ERR_SOCKET", 404, 0]) {
+      assert.equal(safeErrorFields(Object.assign(new Error("x"), { code })).code, code);
+    }
+    for (const code of [CLERK_ID, "etimedout", "EConnRefused", "invalid_request", "E".repeat(41), 1.5, Number.NaN, Infinity]) {
+      assert.equal("code" in safeErrorFields(Object.assign(new Error("x"), { code })), false, String(code));
+    }
+    const nested = new Error("x", { cause: Object.assign(new Error("y"), { code: CLERK_ID }) });
+    assert.deepEqual(safeErrorFields(nested).causes, [{ name: "Error" }]);
+  });
+
+  it("names an Error from another realm, never its message", () => {
+    const foreign = runInNewContext(`(() => { const e = new TypeError(${JSON.stringify(READING_TEXT)}); e.code = "ECONNRESET"; return e; })()`);
+    assert.equal(foreign instanceof Error, false);
+    assert.deepEqual(safeErrorFields(foreign), { name: "TypeError", code: "ECONNRESET", causes: [], timedOut: false });
+  });
+
   it("uses the constructor's name when the name is the generic Error", () => {
     class SomeLibraryError extends Error {}
     assert.equal(safeErrorFields(new SomeLibraryError(READING_TEXT)).name, "SomeLibraryError");
@@ -160,14 +179,14 @@ describe("safeErrorFields timedOut", () => {
     assert.equal(safeErrorFields(new Error("wrapped", { cause: new Error("again", { cause: timeout }) })).timedOut, true);
     assert.equal(safeErrorFields(new Error("fetch failed", { cause: Object.assign(new Error("x"), { code: "UND_ERR_HEADERS_TIMEOUT" }) })).timedOut, true);
     assert.equal(safeErrorFields(new DeadlineError()).timedOut, true);
-    assert.equal(safeErrorFields(new FetchArticleError("timeout", "example.com")).timedOut, true);
+    assert.equal(safeErrorFields(new FetchArticleError("timeout")).timedOut, true);
     assert.equal(safeErrorFields(Object.assign(new Error("x"), { code: "57014" })).timedOut, true);
   });
 
   it("is false otherwise", () => {
     assert.equal(safeErrorFields(new Error("boom")).timedOut, false);
     assert.equal(safeErrorFields(Object.assign(new Error("x"), { code: "23505" })).timedOut, false);
-    assert.equal(safeErrorFields(new FetchArticleError("blocked", "example.com")).timedOut, false);
+    assert.equal(safeErrorFields(new FetchArticleError("blocked")).timedOut, false);
     assert.equal(safeErrorFields("TimeoutError").timedOut, false);
     assert.equal(safeErrorFields({ name: "TimeoutError" }).timedOut, false);
   });
@@ -177,7 +196,8 @@ describe("safeErrorFields message", () => {
   it("is kept for the app's own fixed-message errors", () => {
     assert.equal(safeErrorFields(new JoinCodeExhaustedError()).message, "Could not generate a unique join code in 5 attempts");
     assert.equal(safeErrorFields(new DeadlineError()).message, "pre-check deadline passed");
-    assert.equal(safeErrorFields(new FetchArticleError("not_html", "example.com")).message, "fetch article failed: not_html");
+    assert.equal(safeErrorFields(new FetchArticleError("not_html")).message, "fetch article failed: not_html");
+    assert.equal(safeErrorFields(new ClerkUserNoEmailError()).message, "Clerk user has no email address");
   });
 
   it("is dropped for everything else", () => {

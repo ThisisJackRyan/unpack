@@ -8,8 +8,10 @@
 // - name: the error's name (or its constructor's, when the name is the
 //   generic "Error"), or the value's type for a non-Error. Identifier-like
 //   names only.
-// - code: a short string or number code (a SQLSTATE like "23505", a
-//   Node code like "ETIMEDOUT"), when there is one.
+// - code: a short uppercase code (a SQLSTATE like "23505" or "57P01", a
+//   Node code like "ETIMEDOUT" or "UND_ERR_SOCKET") or a finite integer
+//   (an HTTP status), when there is one. Anything else (lowercase, mixed
+//   case, an id-shaped value) is dropped.
 // - causes: name and code of each error under it, nearest first, through
 //   `cause` (drizzle, the AI SDK, fetch) or `sourceError` (Neon), at most
 //   MAX_CAUSES deep, and cycle safe.
@@ -20,6 +22,7 @@
 // Callers add their own ids (classId, readingId: app uuids).
 
 import { DrizzleQueryError } from "drizzle-orm";
+import { ClerkUserNoEmailError } from "./clerk-user-errors";
 import { DeadlineError } from "./deadline";
 import { FetchArticleError } from "./fetch-errors";
 import { JoinCodeExhaustedError } from "./join-code";
@@ -37,10 +40,10 @@ export const MAX_CAUSES = 4;
 // Messages built only from fixed text and enums. QuestionWriterError and
 // EffortCheckError are left out: their reason can quote a schema problem
 // in the model's output.
-const MESSAGE_ALLOWED = [DeadlineError, JoinCodeExhaustedError, FetchArticleError];
+const MESSAGE_ALLOWED = [DeadlineError, JoinCodeExhaustedError, FetchArticleError, ClerkUserNoEmailError];
 
 const NAME_PATTERN = /^[A-Za-z_$][\w$.]{0,79}$/;
-const CODE_PATTERN = /^[\w.-]{1,64}$/;
+const CODE_PATTERN = /^[A-Z0-9_]{1,40}$/;
 
 const TIMEOUT_NAMES = new Set([
   "AbortError",
@@ -61,11 +64,18 @@ const TIMEOUT_CODES = new Set<string | number>([
   "57014",
 ]);
 
+// An Error, a DOMException, or an Error from another realm (a vm context),
+// which fails instanceof but keeps its [object Error] tag.
 function isErrorLike(value: unknown): value is Error {
-  return value instanceof Error || (typeof DOMException === "function" && value instanceof DOMException);
+  return (
+    value instanceof Error ||
+    (typeof DOMException === "function" && value instanceof DOMException) ||
+    Object.prototype.toString.call(value) === "[object Error]"
+  );
 }
 
-function nameOf(value: unknown): string {
+// The name rule on its own, for callers that log one level by name.
+export function safeErrorName(value: unknown): string {
   if (!isErrorLike(value)) return value === null ? "null" : typeof value;
   // DrizzleQueryError never sets its name, so it would read "Error".
   if (value instanceof DrizzleQueryError) return "DrizzleQueryError";
@@ -79,14 +89,14 @@ function nameOf(value: unknown): string {
 function codeOf(value: unknown): string | number | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const { code } = value as { code?: unknown };
-  if (typeof code === "number" && Number.isFinite(code)) return code;
+  if (typeof code === "number" && Number.isInteger(code)) return code;
   if (typeof code === "string" && CODE_PATTERN.test(code)) return code;
   return undefined;
 }
 
 function levelOf(value: unknown): SafeErrorLevel {
   const code = codeOf(value);
-  return code === undefined ? { name: nameOf(value) } : { name: nameOf(value), code };
+  return code === undefined ? { name: safeErrorName(value) } : { name: safeErrorName(value), code };
 }
 
 function isTimeout(value: unknown, level: SafeErrorLevel): boolean {
