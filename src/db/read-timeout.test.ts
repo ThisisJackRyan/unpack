@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { neon, neonConfig } from "@neondatabase/serverless";
+import { eq } from "drizzle-orm";
 import { allowanceFor, allowanceStatement, createSelfReadingStatements } from "@/lib/self-allowance";
 import {
   DB_READ_TIMEOUT_MS,
@@ -21,8 +22,6 @@ const reads = [
   "with w as (select count(*)::int as used from self_readings) select used from w",
   "with recursive t(n) as (select 1 union all select n + 1 from t where n < 3) select * from t",
   "(select 1) union (select 2)",
-  "show timezone",
-  "explain select * from readings",
   "select 'insert into x; delete from y' as text",
   "select 'it''s' as a, \"update\" from \"delete\"",
   "select 1 -- for update\n",
@@ -31,9 +30,19 @@ const reads = [
   "select now() - make_interval(days => $2::int)",
   "select r.id from readings r where r.slot_released_at is null and r.created_at > now()",
   "select exists (select 1 from classes where id = $1)",
+  'select "set", "updated_at" from "t" where "t"."note" = \'delete from t\'',
+  "select count(*), count (*), coalesce(min(created_at), now()), max(id) from t",
+  "select greatest(a, b), lower(name), bool_or(x) filter (where y) from t",
+  "select json_agg(json_build_object('a', a)) from t",
+  "select * from t where id in (select id from u) and not exists (select 1) or x = any ($1)",
+  "select * from a left join lateral (select 1) l on true",
+  "select count /* c */ (*) from t",
+  "with x(a, b) as (select 1, 2) select * from x",
+  "with x as materialized (select 1) select * from x",
 ];
 
-const writes = [
+// Not reads: writes, and anything not clearly a plain read.
+const notReads = [
   "insert into teachers (id) values ($1)",
   "update teachers set name = $1",
   "delete from teachers",
@@ -78,17 +87,262 @@ const writes = [
   "   ;  ",
   "refresh materialized view v",
   "vacuum t",
+  "show timezone",
+  "explain select * from readings",
+  // Functions off the allow-list.
+  'select "pg_advisory_lock"(1)',
+  'select "pg_advisory_lock" (1)',
+  'select "pg_advisory_lock"\n(1)',
+  'select "pg_advisory_lock"/* c */(1)',
+  'select "pg_advisory_lock"-- c\n(1)',
+  'select "pg_catalog"."pg_advisory_lock"(1)',
+  "select pg_advisory_lock(1)",
+  "select pg_try_advisory_lock(1)",
+  "select pg_catalog.pg_advisory_lock(1)",
+  "select pg_catalog . count(1)",
+  "select pg_catalog.count(*) from t",
+  "select foo.bar(1)",
+  "select pg_sleep(20)",
+  "select pg_sleep /* c */ (20)",
+  "select * from pg_sleep(20)",
+  "select set_config('a','b',false)",
+  "select nextval('s')",
+  "select setval('s',1)",
+  "select pg_notify('c','x')",
+  "select pg_terminate_backend(1)",
+  "select dblink('x')",
+  "select lo_import('x')",
+  "select pg_stat_statements_reset()",
+  "select query_to_xml('delete from t', true, true, '')",
+  "select txid_current()",
+  "select some_unknown_fn(1)",
+  "select count(*) from t where x = some_unknown_fn(1)",
+  "select $1::numeric(10, 2)",
+  "select foo$bar(1)",
+  "select f\u00e9(1)",
+  "select U&'d\\0061t\\+000061'",
+  'select U&"d\\0061t" from t',
+  // Locking clauses, also split over lines.
+  "select * from t for update",
+  "select * from t for share",
+  "select * from t for no key update",
+  "select * from t for key share",
+  "select * from t for\nupdate",
+  "select * from t for\n  no key\n update",
+  "select * from t for update nowait",
+  // Data-modifying CTEs.
+  "with d as (delete from t returning *) select * from d",
+  "with i as (insert into t values (1) returning id) select id from i",
+  // Unparsed.
+  "select 1; delete from t",
+  "select $$x$$",
+  "select E'x'",
+  "select 'x",
+  "select 1 /* x",
 ];
 
 describe("isPlainReadSql", () => {
   for (const sql of reads) {
     it(`read: ${JSON.stringify(sql)}`, () => assert.equal(isPlainReadSql(sql), true));
   }
-  for (const sql of writes) {
-    it(`write: ${JSON.stringify(sql)}`, () => assert.equal(isPlainReadSql(sql), false));
+  for (const sql of notReads) {
+    it(`not a read: ${JSON.stringify(sql)}`, () => assert.equal(isPlainReadSql(sql), false));
   }
   it("a non-string is not a read", () => {
     assert.equal(isPlainReadSql(undefined as unknown as string), false);
+  });
+});
+
+// The SQL the app really sends: its own query functions, run on the real
+// driver (src/db/index.ts) with a fetch that records each request body and
+// answers with no rows, so no database is needed. Each case lists the
+// classification of every request it sends, in order.
+describe("the app's own queries", () => {
+  const U = "00000000-0000-4000-8000-000000000001";
+  const bodies: string[] = [];
+  let previousFetch: typeof neonConfig.fetchFunction;
+  let previousUrl: string | undefined;
+
+  before(() => {
+    previousFetch = neonConfig.fetchFunction;
+    previousUrl = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = "postgresql://user:password@db.example.invalid/unpack";
+    neonConfig.fetchFunction = async (_input: unknown, init?: RequestInit) => {
+      const body = String(init?.body);
+      bodies.push(body);
+      const empty = { fields: [], rows: [], command: "SELECT", rowCount: 0, rowAsArray: false };
+      const parsed = JSON.parse(body) as { queries?: unknown[] };
+      const reply = parsed.queries ? { results: parsed.queries.map(() => empty) } : empty;
+      return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
+    };
+  });
+  after(() => {
+    neonConfig.fetchFunction = previousFetch;
+    if (previousUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUrl;
+  });
+
+  const READ = "read";
+  const WRITE = "write";
+  type Kind = typeof READ | typeof WRITE;
+
+  async function sent(run: () => Promise<unknown> | undefined): Promise<{ kinds: Kind[]; sql: string[] }> {
+    bodies.length = 0;
+    await run();
+    const sql = bodies.flatMap((b) => {
+      const parsed = JSON.parse(b) as { query?: string; queries?: { query: string }[] };
+      return parsed.queries ? parsed.queries.map((q) => q.query) : [String(parsed.query)];
+    });
+    return { kinds: bodies.map((b) => (isReadRequestBody(b) ? READ : WRITE)), sql };
+  }
+
+  const cases: [string, Kind[], () => Promise<unknown> | undefined][] = [];
+  const read = (name: string, run: () => Promise<unknown> | undefined, kinds: Kind[] = [READ]) => cases.push([name, kinds, run]);
+  const write = (name: string, run: () => Promise<unknown> | undefined) => cases.push([name, [WRITE], run]);
+
+  const lib = async () => ({
+    db: await import("@/db"),
+    classes: await import("@/lib/classes"),
+    readings: await import("@/lib/readings"),
+    shared: await import("@/lib/shared-questions-db"),
+    lookup: await import("@/lib/student-lookup"),
+    studentReadings: await import("@/lib/student-readings"),
+    sets: await import("@/lib/student-sets-db"),
+    queue: await import("@/lib/challenge-queue"),
+    status: await import("@/lib/class-status-db"),
+    progress: await import("@/lib/reading-progress-db"),
+    answers: await import("@/lib/teacher-answers-db"),
+    generations: await import("@/lib/question-generation-attempts"),
+    linkFetches: await import("@/lib/link-fetch-attempts"),
+    self: await import("@/lib/self-readings"),
+    studentQuestions: await import("@/lib/student-questions"),
+    submit: await import("@/lib/submit-answers-core"),
+    selfAnswers: await import("@/lib/self-answers-core"),
+    selfQuestions: await import("@/lib/self-questions-core"),
+    challenges: await import("@/lib/challenges"),
+    join: await import("@/lib/student-join"),
+    executor: await import("@/lib/neon-executor"),
+  });
+  let m: Awaited<ReturnType<typeof lib>>;
+  before(async () => {
+    m = await lib();
+  });
+  const ref = { classId: U, readingId: U, teacherId: U };
+  const fingerprint = { bodyMd5: "0".repeat(32), gradeLevel: "5" as const, questionCount: 3 };
+  const studentStore = () => m.studentQuestions.postgresStudentQuestionStore();
+  const attemptStore = () => m.submit.postgresAttemptStore(m.executor.neonExecutor);
+  const selfAttemptStore = () => m.selfAnswers.postgresSelfAttemptStore(m.executor.neonExecutor);
+  const selfQuestionStore = () => m.selfQuestions.postgresSelfQuestionStore(m.executor.neonExecutor);
+  const save = { studentId: U, readingId: U, claimId: U, attemptId: U, passed: true, verdicts: [{ questionId: U, text: "t", pass: true, nudge: "" }] };
+
+  // getOrCreateTeacher (account.ts, behind Clerk) looks the account up by
+  // its Clerk id with this builder; the rest are the exported functions.
+  read("getOrCreateTeacher's lookup", async () => {
+    const { db, schema } = m.db;
+    await db.select().from(schema.teachers).where(eq(schema.teachers.clerkUserId, "user_x")).limit(1);
+  });
+  // Teacher class and reading pages.
+  read("listClasses", () => m.classes.listClasses(U));
+  read("countClasses", () => m.classes.countClasses(U));
+  read("getClassForTeacher", () => m.classes.getClassForTeacher(U, U));
+  read("countDraftsClearedByGradeChange", () => m.classes.countDraftsClearedByGradeChange(U, U));
+  read("listReadings", () => m.readings.listReadings(U, U));
+  read("getReadingForTeacher", () => m.readings.getReadingForTeacher(U, U, U));
+  read("getClassCapBadges", () => m.readings.getClassCapBadges(U, U));
+  read("getReadingCap", () => m.readings.getReadingCap(U, U, U));
+  read("listSharedQuestions", () => m.shared.listSharedQuestions(U));
+  read("listStudentSets", () => m.sets.listStudentSets(U, U));
+  read("loadTeacherQueue", () => m.queue.loadTeacherQueue(U, U));
+  read("countTeacherQueue", () => m.queue.countTeacherQueue(U, U));
+  read("loadChallengeQueue", () => m.queue.loadChallengeQueue(U, U));
+  read("countOpenChallenges", () => m.queue.countOpenChallenges(U, U));
+  read("loadClassStatus", () => m.status.loadClassStatus(U, U));
+  read("loadTeacherAnswers", () => m.answers.loadTeacherAnswers(U, U, {}));
+  // Limits and retry times.
+  read("questionGenerationRetryAt", () => m.generations.questionGenerationRetryAt(U));
+  read("linkFetchRetryAt", () => m.linkFetches.linkFetchRetryAt(U));
+  read("getAllowance (the weekly count)", () => m.self.getAllowance(U));
+  // Student reading pages.
+  read("findStudentBySessionToken", () => m.lookup.findStudentBySessionToken("token"));
+  read("getPublishedReading", () => m.studentReadings.getPublishedReading(U, U));
+  read("loadReadingProgress", () => m.progress.loadReadingProgress(U, U));
+  read("listReadingsWithStatus", () => m.progress.listReadingsWithStatus(U, U));
+  // Question loads.
+  read("student questions: loadContext", () => studentStore().loadContext(U, U));
+  read("student questions: readQuestions", () => studentStore().readQuestions(U, U));
+  read("student questions: throttledUntil", () => studentStore().throttledUntil?.(U, U));
+  read("self questions: loadContext", () => selfQuestionStore().loadContext(U, U));
+  read("self questions: readQuestions", () => selfQuestionStore().readQuestions(U, U));
+  read("self questions: allowanceState", () => selfQuestionStore().allowanceState(U, m.self.currentAllowance()));
+  read("self questions: rateLimitedUntil", () => selfQuestionStore().rateLimitedUntil?.(U));
+  // Answer-check reads.
+  read("answers: loadContext", () => attemptStore().loadContext(U, U));
+  read("answers: pausedUntil", () => attemptStore().pausedUntil?.(U, U));
+  read("self answers: loadContext", () => selfAttemptStore().loadContext(U, U));
+  read("self answers: pausedUntil", () => selfAttemptStore().pausedUntil?.(U, U));
+  // Self-learner pages.
+  read("getSelfReading", () => m.self.getSelfReading(U, U));
+  read("listSelfHistory", () => m.self.listSelfHistory(U, "UTC"));
+
+  // Writes, and batches that start with one (loadSelfProgress settles a
+  // stale check first).
+  write("loadSelfProgress", () => m.self.loadSelfProgress(U, U));
+  write("insertClassIfAllowed", () => m.classes.insertClassIfAllowed(U, { name: "c", gradeLevel: "5" }));
+  write("updateClassSettings", () => m.classes.updateClassSettings(U, U, { name: "c", gradeLevel: "5" }));
+  write("setJoinCodeActive", () => m.classes.setJoinCodeActive(U, U, false));
+  write("deleteStudent", () => m.classes.deleteStudent(U, U, U));
+  write("resetStudentQuestionCalls", () => m.classes.resetStudentQuestionCalls(U, U, U, U));
+  write("insertReading", () => m.readings.insertReading(U, U, { title: "t", bodyText: "b", sourceUrl: null, gradeLevel: "5", questionCount: 3, questionMode: "shared" }));
+  write("saveReadingEdit", () => m.readings.saveReadingEdit(U, U, U, { title: "t", bodyText: "b", gradeLevel: "5", questionCount: 3, questionMode: "shared" }));
+  write("deleteReading", () => m.readings.deleteReading(U, U, U));
+  write("raiseReadingCap", () => m.readings.raiseReadingCap(U, U, U));
+  write("saveQuestionSet", () => m.shared.saveQuestionSet(ref, fingerprint, ["q"], "generate"));
+  write("updateSharedQuestion", () => m.shared.updateSharedQuestion(ref, U, "q"));
+  write("deleteSharedQuestion", () => m.shared.deleteSharedQuestion(ref, U));
+  write("publishReading", () => m.shared.publishReading(ref));
+  write("decideChallenge", () => m.queue.decideChallenge({ challengeId: U, classId: U, teacherId: U, decision: "accept", extraTry: false }));
+  write("grantExtraTry", () => m.queue.grantExtraTry({ classId: U, teacherId: U, studentId: U, readingId: U }));
+  write("sendChallenge", () => m.challenges.sendChallenge(U, U, "note"));
+  // With no rows back the join limit refuses, so the join then reads the
+  // retry time.
+  cases.push(["joinClass", [WRITE, READ], () => m.join.joinClass({ code: "ABC123", firstName: "A", lastInitials: "B" }, "hash")]);
+  write("recordQuestionGeneration", () => m.generations.recordQuestionGeneration(U));
+  write("recordLinkFetchAttempt", () => m.linkFetches.recordLinkFetchAttempt(U));
+  write("createSelfReading", () => m.self.createSelfReading(U, { title: "t", bodyText: "b", sourceUrl: null, gradeLevel: "5", questionCount: 3 }));
+  write("student questions: claim", () => studentStore().claim(U, U, U, 3));
+  write("student questions: takeOverStale", () => studentStore().takeOverStale(U, U, U, 60));
+  write("student questions: release", () => studentStore().release(U, U, U, true));
+  write("student questions: commit", () => studentStore().commit(U, U, U, ["q"]));
+  write("self questions: claim", () => selfQuestionStore().claim(U, U, U, m.self.currentAllowance()));
+  write("self questions: release", () => selfQuestionStore().release(U, U, U));
+  write("self questions: commit", () => selfQuestionStore().commit(U, U, U, ["q"]));
+  write("answers: claim", () => attemptStore().claim(U, U, U, 0));
+  write("answers: release", () => attemptStore().release(U, U, U, true));
+  write("answers: commit", () => attemptStore().commit(save));
+  write("self answers: claim", () => selfAttemptStore().claim(U, U, U, 0));
+  write("self answers: release", () => selfAttemptStore().release(U, U, U, true));
+  write("self answers: commit", () => selfAttemptStore().commit(save));
+
+  it("every case sends at least one request", async () => {
+    for (const [name, , run] of cases) {
+      const { kinds } = await sent(run);
+      assert.ok(kinds.length > 0, name);
+    }
+  });
+
+  it("each read path is a read, each write path a write", async () => {
+    for (const [name, expected, run] of cases) {
+      const { kinds, sql } = await sent(run);
+      assert.deepEqual(kinds, expected, `${name}:\n${sql.join("\n---\n")}`);
+    }
+  });
+
+  it("every statement of every read path is a plain read on its own", async () => {
+    for (const [name, expected, run] of cases) {
+      if (!expected.every((k) => k === READ)) continue;
+      const { sql } = await sent(run);
+      for (const q of sql) assert.equal(isPlainReadSql(q), true, `${name}: ${q}`);
+    }
   });
 });
 

@@ -21,18 +21,34 @@
 // counts as a write (no timeout): failing that way only gives back today's
 // behaviour.
 //
-// What counts as a plain read: a single statement (no ";" between
-// statements) that starts with select, with, show or explain (not explain
-// analyze, which runs the statement), with none of: insert, update,
-// delete, merge (so no data-modifying CTE), into (select into makes a
-// table), a locking clause (for update / for share / ...), lock, set, copy,
-// call, do, DDL, or a function known to have side effects (nextval,
-// setval, set_config, advisory locks, pg_notify, ...). Strings, quoted
-// identifiers and comments are removed first, so a column called
-// "updated_at" or a text param doesn't count. Dollar quoting and E''
-// strings are left unparsed and count as writes. The schema has no
-// user-defined functions (drizzle/ creates none); if one with side
-// effects is added, add it to SIDE_EFFECT_FUNCTIONS.
+// What counts as a plain read: an allow-list. Only a statement that is
+// clearly a plain read gets the timeout; anything else, including anything
+// the classifier doesn't recognise, gets none. Strings, quoted identifiers
+// and comments are removed first, so a column called "updated_at" or a
+// text param doesn't count. Then the statement must be:
+// - one statement (no ";" between statements) starting with select or
+//   with (show and explain are out: the app sends neither);
+// - free of the statement words in WRITE_WORDS: insert, update, delete,
+//   merge (so no data-modifying CTE), into (select into makes a table),
+//   lock, set, copy, call, do, DDL, transaction control, and the like;
+// - free of a locking clause (for update / for share / ...);
+// - and every call in it (a name followed by "(") must be a function on
+//   SAFE_FUNCTIONS, or a keyword that takes parens (PAREN_KEYWORDS: in,
+//   exists, lateral, filter, ...). An unknown function, a schema-qualified
+//   call (pg_catalog.foo(...)) or a quoted name called as a function
+//   ("pg_advisory_lock"(1)) is not a read.
+// Dollar quoting, E'' and U& strings, $ inside a name, non-ASCII names
+// and unterminated strings or comments are left unparsed: not a read.
+//
+// So there is no list of functions with side effects (nextval, advisory
+// locks, set_config, ...): the allow-list leaves them all out. SAFE_FUNCTIONS
+// holds the functions the app's reads call, nothing more (the tests
+// capture the SQL of the real read paths and check each is a read). A read
+// query that starts calling a function not on it silently loses its
+// timeout, which only gives back the old behaviour: add the function to
+// SAFE_FUNCTIONS if it is pure. The schema has no user-defined functions,
+// views or rules (drizzle/ creates none), so a name on the list is always
+// the Postgres built-in.
 
 export const DB_READ_TIMEOUT_MS = 15_000;
 
@@ -55,15 +71,66 @@ export function isDbReadTimeout(error: unknown): boolean {
   return false;
 }
 
-const READ_STARTS = new Set(["select", "with", "show", "explain"]);
+const READ_STARTS = new Set(["select", "with"]);
 
 const WRITE_WORDS =
   /\b(insert|update|delete|merge|into|lock|set|copy|call|do|create|drop|alter|truncate|grant|revoke|comment|refresh|vacuum|analyze|analyse|cluster|reindex|notify|listen|unlisten|prepare|execute|deallocate|discard|reset|begin|commit|rollback|savepoint|release|checkpoint|import|security|nowait|skip)\b/;
 
 const LOCKING_CLAUSE = /\bfor\s+(update|share|no\s+key\s+update|key\s+share)\b/;
 
-const SIDE_EFFECT_FUNCTIONS =
-  /\b(nextval|setval|set_config|pg_(try_)?advisory\w*|pg_notify|txid_current\w*|pg_current_xact_id\w*|lo_\w+|dblink\w*|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_switch_wal|pg_create_\w+|pg_drop_\w+|pg_logical_emit_message|pg_stat_reset\w*|pg_rotate_logfile|pg_promote|pg_file_\w+|pg_write\w*|pg_import_system_collations|pg_replication_origin_\w+)\s*\(/;
+// The functions a plain read may call. Each is a Postgres built-in that
+// only computes a value: no writes, locks, sequences, settings,
+// notifications, waits or calls out.
+const SAFE_FUNCTIONS = new Set([
+  // Aggregates over the rows read.
+  "count",
+  "min",
+  "max",
+  "bool_or",
+  "json_agg",
+  // Building a value from its arguments.
+  "json_build_object",
+  "coalesce",
+  "greatest",
+  "lower",
+  // Time: the transaction's start time, and an interval from numbers.
+  "now",
+  "make_interval",
+]);
+
+// Keywords that take a parenthesised list or subquery, so "word (" is not
+// a function call. None of them names a function.
+const PAREN_KEYWORDS = new Set([
+  "select",
+  "from",
+  "where",
+  "and",
+  "or",
+  "not",
+  "in",
+  "exists",
+  "any",
+  "all",
+  "some",
+  "join",
+  "lateral",
+  "on",
+  "as",
+  "filter",
+  "over",
+  "union",
+  "intersect",
+  "except",
+  "when",
+  "then",
+  "else",
+  "by",
+  "having",
+]);
+
+// What stripSql leaves for a quoted identifier: a name on neither list,
+// so a quoted name called as a function is an unknown call.
+const QUOTED_NAME = "quoted_name";
 
 // The statement with comments, strings and quoted identifiers taken out,
 // lower-cased; null when it can't be parsed with certainty.
@@ -95,6 +162,8 @@ function stripSql(sql: string): string | null {
     } else if (c === "'") {
       // An E'' string's backslash escapes aren't parsed: unsure.
       if (/[eE]$/.test(out) && !/[\w$]$/.test(out.slice(0, -1))) return null;
+      // Nor are U&'' strings.
+      if (/[uU]&$/.test(out)) return null;
       i += 1;
       for (;;) {
         if (i >= sql.length) return null;
@@ -106,6 +175,7 @@ function stripSql(sql: string): string | null {
       i += 1;
       out += " '' ";
     } else if (c === '"') {
+      if (/[uU]&$/.test(out)) return null;
       i += 1;
       for (;;) {
         if (i >= sql.length) return null;
@@ -115,10 +185,11 @@ function stripSql(sql: string): string | null {
         } else i += 1;
       }
       i += 1;
-      out += " x ";
+      out += ` ${QUOTED_NAME} `;
     } else if (c === "$") {
-      // $1 is a parameter; anything else is dollar quoting: unsure.
-      if (!/[0-9]/.test(next ?? "")) return null;
+      // $1 is a parameter; anything else is dollar quoting, and a $ inside
+      // a name (foo$bar) isn't parsed either: unsure.
+      if (!/[0-9]/.test(next ?? "") || /\w$/.test(out)) return null;
       out += c;
       i += 1;
     } else {
@@ -129,6 +200,34 @@ function stripSql(sql: string): string | null {
   return out.toLowerCase();
 }
 
+// Whether every "name (" in the stripped statement is allowed: a function
+// on SAFE_FUNCTIONS, a keyword on PAREN_KEYWORDS, or the column list of an
+// alias ("as p(a, b)") or of a CTE ("t(n) as (...)"), which call nothing.
+// A qualified name (pg_catalog.foo, or a type's modifier after ::) is not.
+function callsAllowed(body: string): boolean {
+  for (const match of body.matchAll(/(\w+)\s*\(/g)) {
+    const name = match[1];
+    const before = body.slice(0, match.index).trimEnd();
+    if (before.endsWith(".") || before.endsWith(":")) return false;
+    if (SAFE_FUNCTIONS.has(name) || PAREN_KEYWORDS.has(name)) continue;
+    if (/\bas$/.test(before) || isCteColumnList(body, match.index + match[0].length)) continue;
+    return false;
+  }
+  return true;
+}
+
+// Whether the list opened just before `from` closes into "as (" (or "as
+// [not] materialized ("): a CTE's column list, never a call.
+function isCteColumnList(body: string, from: number): boolean {
+  let depth = 1;
+  let i = from;
+  for (; i < body.length && depth > 0; i += 1) {
+    if (body[i] === "(") depth += 1;
+    else if (body[i] === ")") depth -= 1;
+  }
+  return depth === 0 && /^\s*as\s+(not\s+)?(materialized\s*)?\(/.test(body.slice(i));
+}
+
 // Whether one SQL statement is a plain read (see the top of this file).
 export function isPlainReadSql(sql: string): boolean {
   if (typeof sql !== "string") return false;
@@ -136,10 +235,13 @@ export function isPlainReadSql(sql: string): boolean {
   if (stripped === null) return false;
   const body = stripped.trim().replace(/[\s;]+$/, "");
   if (!body || body.includes(";")) return false;
+  // Outside strings and quoted names, non-ASCII can only be part of a
+  // name, which the call check below can't see whole.
+  if (/[^\x00-\x7f]/.test(body)) return false;
   const first = body.match(/^\(*\s*([a-z]+)/)?.[1];
   if (!first || !READ_STARTS.has(first)) return false;
-  if (WRITE_WORDS.test(body) || LOCKING_CLAUSE.test(body) || SIDE_EFFECT_FUNCTIONS.test(body)) return false;
-  return true;
+  if (WRITE_WORDS.test(body) || LOCKING_CLAUSE.test(body)) return false;
+  return callsAllowed(body);
 }
 
 // Whether a driver request body is all plain reads: one query, or a batch
