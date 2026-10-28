@@ -126,7 +126,7 @@ describe("deleteUnder13Account", () => {
       local: "failed",
       clerk: "deleted",
       listed: "confirmed",
-      localError: { name: "NeonDbError", code: "40001", status: undefined },
+      localError: { name: "NeonDbError", code: "40001", causes: [], timedOut: false, status: undefined },
     });
     assertSafeLogs(logs);
   });
@@ -148,7 +148,7 @@ describe("deleteUnder13Account", () => {
       local: "deleted",
       clerk: "failed",
       listed: "pending",
-      clerkError: { name: "ClerkAPIResponseError", code: undefined, status: 503 },
+      clerkError: { name: "ClerkAPIResponseError", causes: [], timedOut: false, status: 503 },
     });
     assertSafeLogs(twice.logs);
   });
@@ -172,7 +172,7 @@ describe("deleteUnder13Account", () => {
       local: "deleted",
       clerk: "deleted",
       listed: "confirm_failed",
-      confirmError: { name: "NeonDbError", code: "57014", status: undefined },
+      confirmError: { name: "NeonDbError", code: "57014", causes: [], timedOut: true, status: undefined },
     });
     assertSafeLogs(logs);
   });
@@ -211,7 +211,7 @@ describe("retryClerkDelete", () => {
     assert.deepEqual(broken.logs[0].fields, {
       retry: "deleted",
       listed: "confirm_failed",
-      confirmError: { name: "NeonDbError", code: "57014", status: undefined },
+      confirmError: { name: "NeonDbError", code: "57014", causes: [], timedOut: true, status: undefined },
     });
     assertSafeLogs(broken.logs);
   });

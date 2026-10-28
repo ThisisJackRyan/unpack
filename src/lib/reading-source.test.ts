@@ -103,7 +103,15 @@ describe("resolveReadingSource", () => {
       errors: { url: LINK_ERRORS.not_html },
       suggestText: "Paste the text instead.",
     });
-    assert.deepEqual(calls.logs.at(-1), { kind: "not_html", host: "example.com", name: "FetchArticleError" });
+    assert.deepEqual(calls.logs.at(-1), {
+      kind: "not_html",
+      host: "example.com",
+      name: "FetchArticleError",
+      causes: [],
+      timedOut: false,
+      // A fixed app string (safe-error-fields.ts allows it).
+      message: "fetch article failed: not_html",
+    });
     const tooLong = deps({
       fetchArticle: async () => {
         throw new FetchArticleError("too_long", "example.com");

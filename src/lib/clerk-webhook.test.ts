@@ -280,7 +280,7 @@ describe("handleClerkWebhookRequest (with the real verifier)", () => {
     });
     const res = await handleClerkWebhookRequest(signed(body("user.updated")), d);
     assert.equal(res.status, 500);
-    assert.deepEqual(logs[0].fields, { type: "user.updated", name: "Error", code: "XX000" });
+    assert.deepEqual(logs[0].fields, { type: "user.updated", name: "Error", code: "XX000", causes: [], timedOut: false });
   });
 
   it("a user.updated for no teacher (say, after user.deleted) is a 200, logging only type and outcome", async () => {

@@ -14,6 +14,7 @@ import {
   type ReadingFormData,
   type ReadingFormErrors,
 } from "./validate-reading";
+import { safeErrorFields } from "./safe-error-fields";
 
 export const LINK_ERRORS: Record<FetchArticleErrorKind, string> = {
   invalid_url: "Enter a full web link, like https://example.com/story.",
@@ -68,9 +69,9 @@ export async function resolveReadingSource(
   try {
     allowed = await deps.recordLinkFetch();
   } catch (error) {
-    // Name, code, and message only: a Postgres error's detail can echo a row.
-    const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-    deps.log("recordLinkFetch failed", { name, code, message });
+    // Safe fields only (safe-error-fields.ts): a query error's message can
+    // echo a row.
+    deps.log("recordLinkFetch failed", safeErrorFields(error));
     return { ok: false, errors: { form: SAVE_READING_FAILED_MESSAGE } };
   }
   if (!allowed) {
@@ -90,11 +91,12 @@ export async function resolveReadingSource(
     article = await deps.fetchArticle(data.url);
   } catch (error) {
     const kind = error instanceof FetchArticleError ? error.kind : "http_error";
-    // Kind and host only: no full URL (query strings), IPs, or stacks.
+    // Kind, host, and the safe fields only: no full URL (query strings),
+    // IPs, or stacks.
     deps.log("fetchArticle failed", {
       kind,
       host: error instanceof FetchArticleError ? error.host : undefined,
-      name: error instanceof Error ? error.name : typeof error,
+      ...safeErrorFields(error),
     });
     return {
       ok: false,

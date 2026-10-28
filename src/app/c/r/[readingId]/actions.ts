@@ -11,14 +11,14 @@ import { submitAnswers } from "@/lib/submit-answers";
 import { CHECK_FAILED_MESSAGE, refreshesPage, submitMessage } from "@/lib/submit-answers-core";
 import { withRetryAt } from "@/lib/local-time";
 import { requestRetryClock } from "@/lib/request-time-zone";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { ANSWERS_FIX_MESSAGE, answerEntries } from "@/lib/validate-answers";
 import { TIMED_OUT_STATE, type AnswerFormState, type ChallengeFormState } from "./form-state";
 
-// Name, code, and message only: a Postgres error's detail can echo the
-// row, including a student's answer or name.
+// Safe fields only (safe-error-fields.ts): a query error's message can
+// echo the row, including a student's answer or name.
 function logError(where: string, error: unknown, readingId: string) {
-  const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-  console.error(where, { name, code, message, readingId });
+  console.error(where, { ...safeErrorFields(error), readingId });
 }
 
 // The page and the class home both show the new state.

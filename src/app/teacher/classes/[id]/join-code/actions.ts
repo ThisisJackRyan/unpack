@@ -10,13 +10,13 @@ import {
   JOIN_CODE_SAVE_FAILED_MESSAGE,
   newCodeMessage,
 } from "@/lib/join-code-settings";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import type { JoinCodeState } from "./state";
 
-// Name, code, and message only, as everywhere else.
+// Safe fields only (safe-error-fields.ts), as everywhere else.
 function logError(where: string, error: unknown, classId: string) {
-  const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-  console.error(where, { name, code, message, classId });
+  console.error(where, { ...safeErrorFields(error), classId });
 }
 
 // Turns the code on or off. Sets the value the switch asked for (not a

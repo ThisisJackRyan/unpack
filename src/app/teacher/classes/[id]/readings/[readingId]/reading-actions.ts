@@ -5,13 +5,14 @@ import { redirect } from "next/navigation";
 import { capAlreadyRaisedMessage, capRaisedMessage, CAP_RAISE_FAILED_MESSAGE } from "@/lib/reading-cap";
 import { READING_DELETE_FAILED_MESSAGE, READING_DELETED_FLAG } from "@/lib/reading-delete";
 import { deleteReading, raiseReadingCap } from "@/lib/readings";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { getOrCreateTeacher } from "@/lib/teacher";
 import type { DeleteReadingState, RaiseCapState } from "./reading-state";
 
-// Name, code, and message only: a Postgres error's detail can echo a row.
+// Safe fields only (safe-error-fields.ts): a query error's message can
+// echo a row.
 function logError(where: string, error: unknown, classId: string, readingId: string) {
-  const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
-  console.error(where, { name, code, message, classId, readingId });
+  console.error(where, { ...safeErrorFields(error), classId, readingId });
 }
 
 // Deletes the reading and everything under it. Ownership (the class is the
