@@ -57,7 +57,7 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
       {readingDeleted && (
         <p
           role="status"
-          className="rounded-2xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950"
+          className="rounded-2xl border border-primary-200 bg-primary-50 px-5 py-3 text-lg font-medium text-primary-950"
         >
           {READING_DELETED_MESSAGE}
         </p>
@@ -97,7 +97,7 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
         <div className="flex items-center gap-3">
           <h2
             id="join-code-heading"
-            className="text-base font-semibold text-ink-700"
+            className="text-lg font-semibold text-ink-700"
           >
             Join code
           </h2>
@@ -173,7 +173,7 @@ export default async function ClassDetailPage({ params, searchParams }: Props) {
           <h2 id="class-settings-heading" className="text-2xl font-semibold tracking-tight text-ink-950">
             Class settings
           </h2>
-          <p className="text-base text-ink-700">The class’s name and the grade its questions are written for.</p>
+          <p className="text-lg text-ink-700">The class’s name and the grade its questions are written for.</p>
         </div>
         <ClassSettingsForm
           name={found.name}
@@ -214,7 +214,7 @@ function ToolLink({
             </span>
           )}
         </span>
-        <span className="text-base text-ink-700">{detail}</span>
+        <span className="text-lg text-ink-700">{detail}</span>
       </span>
       <span aria-hidden="true" className="text-xl text-primary-600">
         →
@@ -244,7 +244,7 @@ function ReadingRow({
           </span>
           <MetaLine
             as="span"
-            className="text-base text-ink-700"
+            className="text-lg text-ink-700"
             parts={[questionCountLabel(reading.questionCount), questionModeLabel(reading.questionMode)]}
           />
         </span>
@@ -264,7 +264,7 @@ function ReadingsEmptyState({ href }: { href: string }) {
     >
       <OpenBook className="h-28 w-36" />
       <h3 className="text-xl font-semibold text-ink-950">Add your first reading</h3>
-      <p className="max-w-sm text-base text-ink-700">
+      <p className="max-w-sm text-lg text-ink-700">
         Paste a link or some text. Students read it, then answer questions.
       </p>
       <Link href={href} className={`${primaryButtonLarge} mt-2`}>

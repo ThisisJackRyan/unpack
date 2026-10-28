@@ -112,7 +112,7 @@ function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
     return (
       <span className="flex flex-col items-start gap-1.5">
         <NeedsResetBadge size="sm" />
-        <span className="text-base text-ink-700">{NEEDS_RESET_HELP}</span>
+        <span className="text-lg text-ink-700">{NEEDS_RESET_HELP}</span>
         <ResetTriesButton
           action={target.actions.onReset}
           studentId={target.student.id}
@@ -127,7 +127,7 @@ function Cell({ cell, target }: { cell: ClassStatusCell; target: CellTarget }) {
     <span className="flex flex-col items-start gap-1">
       <StudentReadingStatusBadge audience="teacher" status={cell.status} size="sm" />
       {cell.status !== "not_started" && (
-        <span className="text-base text-ink-700 tabular-nums">{triesLabel(cell)}</span>
+        <span className="text-lg text-ink-700 tabular-nums">{triesLabel(cell)}</span>
       )}
     </span>
   );
@@ -154,7 +154,7 @@ function StudentList({ status, actions }: { status: ClassStatus; actions: Action
       <ul className={`${card} divide-y divide-ink-200`}>
         {status.students.map((s) => (
           <li key={s.id} className="flex items-center justify-between gap-4 px-5 py-2">
-            <StudentLink classId={actions.classId} student={s} className="text-base font-semibold text-ink-950" />
+            <StudentLink classId={actions.classId} student={s} className="text-lg font-semibold text-ink-950" />
             <DeleteStudentButton action={actions.onDelete} studentId={s.id} name={s.name} />
           </li>
         ))}
@@ -170,13 +170,13 @@ function ProgressTable({ status, actions }: { status: ClassStatus; actions: Acti
         <caption className="sr-only">Each student’s status on each reading, with tries used</caption>
         <thead>
           <tr className="border-b border-ink-200 bg-ink-50">
-            <th scope="col" className="sticky left-0 bg-ink-50 px-5 py-3 text-base font-semibold text-ink-700">
+            <th scope="col" className="sticky left-0 bg-ink-50 px-5 py-3 text-lg font-semibold text-ink-700">
               Student
             </th>
             {status.readings.map((r) => (
               <th key={r.id} scope="col" className="min-w-40 px-4 py-3 align-bottom">
-                <span className="line-clamp-2 text-base font-semibold text-ink-900">{r.title}</span>
-                <span className="block text-base font-normal text-ink-700 tabular-nums">{passedSummary(status, r.id)}</span>
+                <span className="line-clamp-2 text-lg font-semibold text-ink-900">{r.title}</span>
+                <span className="block text-lg font-normal text-ink-700 tabular-nums">{passedSummary(status, r.id)}</span>
               </th>
             ))}
             <th scope="col" className="px-4 py-3">
@@ -187,7 +187,7 @@ function ProgressTable({ status, actions }: { status: ClassStatus; actions: Acti
         <tbody className="divide-y divide-ink-200">
           {status.students.map((s) => (
             <tr key={s.id}>
-              <th scope="row" className="sticky left-0 bg-white px-5 py-3 text-base font-semibold whitespace-nowrap text-ink-950">
+              <th scope="row" className="sticky left-0 bg-white px-5 py-3 text-lg font-semibold whitespace-nowrap text-ink-950">
                 <StudentLink classId={actions.classId} student={s} className="" />
               </th>
               {status.readings.map((r) => (

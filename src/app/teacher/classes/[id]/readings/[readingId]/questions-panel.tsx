@@ -135,7 +135,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
             Questions
           </h2>
           <MetaLine
-            className="text-base text-ink-700"
+            className="text-lg text-ink-700"
             parts={[questionCountLabel(questionCount), `Written for ${gradeLabel}`]}
           />
         </div>
@@ -213,7 +213,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
         )
       ) : (
         <div className="flex flex-col gap-4">
-          <p className="text-base text-ink-700">
+          <p className="text-lg text-ink-700">
             Each student gets their own {questionCountLabel(questionCount)} when they first
             open this reading. Their set is saved, so it stays the same if they try again.
           </p>
@@ -227,7 +227,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
           ) : (
             state.sample && (
               <div className="flex flex-col gap-3">
-                <p className="text-base font-semibold text-ink-900">
+                <p className="text-lg font-semibold text-ink-900">
                   Sample only. It isn’t saved, and each student gets their own set.
                 </p>
                 <ol className="flex flex-col gap-3" aria-label="Sample questions">
@@ -251,7 +251,7 @@ export function QuestionsPanel({ action, mode, questionCount, gradeLabel, questi
       )}
 
       <div className="flex flex-col gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p id="publish-hint" className="text-base text-ink-700">
+        <p id="publish-hint" className="text-lg text-ink-700">
           {canPublish
             ? "Publishing shows it to the class and locks the questions."
             : "Write the questions before you publish."}
@@ -369,7 +369,7 @@ function ConfirmButton({
         <h2 id={`${id}-title`} className="text-xl font-semibold text-ink-950">
           {title}
         </h2>
-        <p id={`${id}-body`} className="mt-2 text-base text-ink-700">
+        <p id={`${id}-body`} className="mt-2 text-lg text-ink-700">
           {body}
         </p>
         <IntentForm
@@ -474,10 +474,10 @@ function QuestionCard({
               onKeyDown={onKeyDown}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? errorId : `${fieldId}-count`}
-              className={`block w-full rounded-2xl border-2 border-ink-400 bg-white px-3 py-2 text-base leading-relaxed text-ink-950 aria-invalid:border-danger-600 ${focusRing}`}
+              className={`block w-full rounded-2xl border-2 border-ink-400 bg-white px-3 py-2 text-lg leading-relaxed text-ink-950 aria-invalid:border-danger-600 ${focusRing}`}
             />
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p id={`${fieldId}-count`} className="text-base text-ink-700 tabular-nums">
+              <p id={`${fieldId}-count`} className="text-lg text-ink-700 tabular-nums">
                 {length} / {QUESTION_MAX_LENGTH}
                 <span className="sr-only"> characters</span>
               </p>
@@ -556,8 +556,8 @@ function QuestionCard({
 export function QuestionText({ role, prompt }: { role: QuestionRole; prompt: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-base font-semibold text-primary-700">{ROLE_LABELS[role]}</span>
-      <p className="text-base leading-relaxed break-words text-ink-900">{prompt}</p>
+      <span className="text-lg font-semibold text-primary-700">{ROLE_LABELS[role]}</span>
+      <p className="text-lg leading-relaxed break-words text-ink-900">{prompt}</p>
     </div>
   );
 }
@@ -577,7 +577,7 @@ function EmptyState({ title, body, children }: { title: string; body: string; ch
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-ink-300 bg-ink-50 px-6 py-10 text-center">
       <h3 className="text-lg font-semibold text-ink-950">{title}</h3>
-      <p className="max-w-md text-base text-ink-700">{body}</p>
+      <p className="max-w-md text-lg text-ink-700">{body}</p>
       <div className="mt-2">{children}</div>
     </div>
   );

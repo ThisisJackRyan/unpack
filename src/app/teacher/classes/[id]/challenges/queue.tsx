@@ -39,7 +39,7 @@ export function ChallengeQueue({ action, classId, entries }: { action: Action; c
     <>
       <p
         aria-live="polite"
-        className="rounded-2xl border border-primary-200 bg-primary-50 px-5 py-3 text-base font-medium text-primary-950 empty:hidden"
+        className="rounded-2xl border border-primary-200 bg-primary-50 px-5 py-3 text-lg font-medium text-primary-950 empty:hidden"
       >
         {announcement}
       </p>
@@ -82,8 +82,8 @@ function NoNoteRow({ classId, item }: { classId: string; item: NoNoteItem }) {
             <span aria-hidden="true" className="h-2 w-2 rounded-full bg-warning-500" /> {NO_NOTE_LABEL}
           </span>
         </div>
-        <p className="text-base text-ink-700 tabular-nums">{triesUsedLabel(item.tries, item.triesAllowed)}</p>
-        <p className="text-base text-ink-700">{noNoteHelp(item.studentName)}</p>
+        <p className="text-lg text-ink-700 tabular-nums">{triesUsedLabel(item.tries, item.triesAllowed)}</p>
+        <p className="text-lg text-ink-700">{noNoteHelp(item.studentName)}</p>
       </div>
       <Link href={answersHref} className={`${secondaryButton} self-start`}>
         See answers<span className="sr-only"> from {item.studentName} on {item.readingTitle}</span>
@@ -127,7 +127,7 @@ function ChallengeCard({
         <h2 id={headingId} className="text-xl font-semibold break-words text-ink-950">
           <MetaLine as="span" parts={[item.studentName, item.readingTitle]} spoken={studentOnReading(item.studentName, item.readingTitle)} />
         </h2>
-        <p className="flex flex-wrap items-center gap-2 text-base text-ink-700">
+        <p className="flex flex-wrap items-center gap-2 text-lg text-ink-700">
           <span className={`${pill} bg-ink-100 text-ink-700 text-base tabular-nums`}>
             {triesUsedLabel(item.tries, item.triesAllowed)}
           </span>
@@ -138,23 +138,23 @@ function ChallengeCard({
       </div>
 
       <figure className="flex flex-col gap-1.5 rounded-2xl bg-primary-50/60 px-4 py-3">
-        <figcaption className="text-base font-semibold text-primary-900">Note from {item.studentName}</figcaption>
+        <figcaption className="text-lg font-semibold text-primary-900">Note from {item.studentName}</figcaption>
         <blockquote className="text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">{item.note}</blockquote>
       </figure>
 
       <section aria-label={`${item.studentName}’s answers`} className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold text-ink-700">
+        <h3 className="text-lg font-semibold text-ink-700">
           {noTry ? "No answers were saved. Every check failed on our side." : `Answers from try ${item.lastTry}`}
         </h3>
         <ol className="flex flex-col gap-3">
           {item.questions.map((q) => (
             <li key={q.id} className="flex flex-col gap-2 rounded-2xl border border-ink-200 px-4 py-3">
-              <p className="text-base font-medium break-words text-ink-900">
+              <p className="text-lg font-medium break-words text-ink-900">
                 <span className="text-ink-700">{q.position}.</span> {q.prompt}
               </p>
               {q.answer ? (
                 <>
-                  <p className="rounded-xl bg-ink-50 px-3 py-2 text-base leading-relaxed whitespace-pre-line break-words text-ink-900">
+                  <p className="rounded-xl bg-ink-50 px-3 py-2 text-lg leading-relaxed whitespace-pre-line break-words text-ink-900">
                     {q.answer.text}
                   </p>
                   <div className="flex flex-col items-start gap-1.5">
@@ -168,7 +168,7 @@ function ChallengeCard({
                       </span>
                     )}
                     {!q.answer.pass && q.answer.nudge && (
-                      <p className="text-base text-ink-700">
+                      <p className="text-lg text-ink-700">
                         <span className="font-semibold">Nudge shown: </span>
                         {q.answer.nudge}
                       </p>
@@ -176,7 +176,7 @@ function ChallengeCard({
                   </div>
                 </>
               ) : (
-                !noTry && <p className="text-base text-ink-700">No answer saved.</p>
+                !noTry && <p className="text-lg text-ink-700">No answer saved.</p>
               )}
             </li>
           ))}
@@ -206,7 +206,7 @@ function ChallengeCard({
             <span className="sr-only"> to {item.studentName}</span>
           </button>
         </div>
-        <p id={`${headingId}-extra`} className="text-base text-ink-700">
+        <p id={`${headingId}-extra`} className="text-lg text-ink-700">
           One more try: {item.studentName} gets exactly 1 try back, and can send a new note if it doesn’t pass.
         </p>
         <ErrorMessage>

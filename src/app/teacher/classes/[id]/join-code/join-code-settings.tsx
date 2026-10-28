@@ -52,10 +52,10 @@ export function JoinCodeSettings({
     <div className="flex w-full flex-col divide-y divide-ink-200 border-t border-ink-200 text-left">
       <div className="flex items-center justify-between gap-6 py-5">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <p id="code-switch-label" className="text-base font-semibold text-ink-950">
+          <p id="code-switch-label" className="text-lg font-semibold text-ink-950">
             Join code on
           </p>
-          <p id="code-switch-help" className="text-base text-ink-700">
+          <p id="code-switch-help" className="text-lg text-ink-700">
             Turn it off when everyone’s in. Students who already joined keep their access.
           </p>
         </div>
@@ -85,8 +85,8 @@ export function JoinCodeSettings({
       <div className="flex flex-col gap-4 py-5">
         <div className="flex items-center justify-between gap-6">
           <div className="flex min-w-0 flex-col gap-0.5">
-            <p className="text-base font-semibold text-ink-950">New code</p>
-            <p id="new-code-help" className="text-base text-ink-700">
+            <p className="text-lg font-semibold text-ink-950">New code</p>
+            <p id="new-code-help" className="text-lg text-ink-700">
               For a code that got shared too widely. The old one stops working right away.
             </p>
           </div>
@@ -115,7 +115,7 @@ export function JoinCodeSettings({
             aria-labelledby="new-code-confirm"
             className="flex flex-col gap-4 rounded-2xl border border-ink-200 bg-ink-50 px-4 py-4"
           >
-            <p id="new-code-confirm" className="text-base text-ink-800">
+            <p id="new-code-confirm" className="text-lg text-ink-800">
               Make a new code? <span className="font-mono font-semibold tracking-wider">{code}</span> stops working
               right away. Students who already joined stay in.
             </p>
@@ -136,10 +136,10 @@ export function JoinCodeSettings({
             </div>
           </form>
         )}
-        {newPending && <p className="text-base text-ink-700">Making a new code…</p>}
+        {newPending && <p className="text-lg text-ink-700">Making a new code…</p>}
       </div>
 
-      <div aria-live="polite" className="pt-5 text-base font-medium text-primary-900 empty:hidden">
+      <div aria-live="polite" className="pt-5 text-lg font-medium text-primary-900 empty:hidden">
         {shown.error ? <ErrorBox>{shown.error}</ErrorBox> : (shown.message ?? "")}
       </div>
     </div>

@@ -68,3 +68,17 @@ export const dangerActionButton = actionButton
   .replace("text-ink-900", "text-danger-700")
   .replace("hover:bg-ink-50", "hover:bg-danger-50 hover:text-danger-800")
   .replace(focusRing, dangerFocusRing);
+
+// A radio choice as a card (the reading form's Source and Question mode):
+// the real radio input stays visible at the start, and the chosen card
+// gets a primary border and tint. The focus ring goes on the whole card.
+export const optionCard = `flex min-h-14 cursor-pointer gap-3 rounded-2xl border-2 border-ink-400 bg-white px-4 py-3 text-ink-950 transition-colors hover:border-primary-600 hover:bg-primary-50/50 has-checked:border-primary-600 has-checked:bg-primary-50 has-focus-visible:outline-3 has-focus-visible:outline-offset-2 has-focus-visible:outline-primary-600`;
+
+// The radio inside an optionCard: native, so keyboard and screen readers
+// get a real radio group; the card shows the focus ring instead.
+export const optionRadio = "h-5 w-5 shrink-0 cursor-pointer accent-primary-600 focus-visible:outline-none";
+
+// A quieter second action beside a primary button (the reading form's
+// "Save draft"): a real button that reads as a text link, still a 48px
+// tap target.
+export const quietButton = `inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-lg font-semibold text-primary-700 underline underline-offset-4 hover:bg-primary-50 hover:text-primary-900 disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`;
