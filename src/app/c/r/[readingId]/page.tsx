@@ -5,7 +5,15 @@ import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
 import { backLink, card } from "@/components/ui";
 import { questionCountLabel } from "@/lib/question-modes";
-import { answerStage, stageAnnouncement, stageStatus, stageWaitsForTeacher, type AnswerStage } from "@/lib/reading-progress";
+import {
+  answerStage,
+  SEND_NOTE_LEAD,
+  stageAnnouncement,
+  stageStatus,
+  stageWaitsForTeacher,
+  TEACHER_CAN_GIVE_TRY,
+  type AnswerStage,
+} from "@/lib/reading-progress";
 import { loadReadingProgress } from "@/lib/reading-progress-db";
 import { getStudentSession, requireStudentSession } from "@/lib/student-auth";
 import type { StudentQuestion } from "@/lib/student-questions-core";
@@ -90,12 +98,22 @@ export default async function StudentReadingPage({ params }: Props) {
 
         {view.kind === "questions" && stage && (
           <>
-            {/* The class home's badge, right after the last try or check:
-                the teacher is next, and the note box stays below. */}
-            {stageWaitsForTeacher(stage) && (
-              <div className="self-start">
-                <StudentReadingStatusBadge audience="student" status={stageStatus(stage)} />
+            {/* Right after the last try or check, with no note yet: the
+                note is next (the class home says the same), and the teacher
+                can also give one more try; the note box stays below. Once
+                a note is sent: the class home's badge, Waiting for your
+                teacher. */}
+            {stageStatus(stage) === "waiting" ? (
+              <div className="flex flex-col gap-1">
+                <p className="text-2xl font-bold text-ink-950">{SEND_NOTE_LEAD}</p>
+                <p className="text-lg text-ink-700">{TEACHER_CAN_GIVE_TRY}</p>
               </div>
+            ) : (
+              stageWaitsForTeacher(stage) && (
+                <div className="self-start">
+                  <StudentReadingStatusBadge audience="student" status={stageStatus(stage)} />
+                </div>
+              )
             )}
             <QuestionsStage readingId={reading.id} studentId={session.student.id} questions={view.questions} stage={stage} />
             {stage.kind !== "answer" && (
@@ -192,7 +210,7 @@ function QuestionsStage({
             draft={{ mode: "class", readingId, ownerId: studentId }}
             intro={
               stage.extraTry
-                ? "If you think you did your best, you can send your teacher a new note. They will read your answers and your note."
+                ? "If you think you did your best, you can send your teacher a note. They will read your answers and your note."
                 : `You tried ${MAX_TRIES} times. If you think you did your best, tell your teacher why. They will read your answers and your note.`
             }
           />
@@ -204,9 +222,7 @@ function QuestionsStage({
       return (
         <>
           <Banner tone="info" title="We couldn’t check your answers.">
-            {stage.attempt
-              ? "Send a note to your teacher. They will read your answers and your note."
-              : "Send a note to your teacher. They will read your note."}
+            {stage.attempt ? "Your teacher will read your answers and your note." : "Your teacher will read your note."}
           </Banner>
           {stage.attempt && <AnswerReview questions={questions} answers={stage.attempt.answers} showResults />}
           <ChallengeForm action={sendChallengeAction.bind(null, readingId)} draft={{ mode: "class", readingId, ownerId: studentId }} />

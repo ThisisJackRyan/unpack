@@ -9,8 +9,9 @@ import { pill } from "./ui";
 const TONES: Record<StudentReadingStatus, { pill: string; dot: string }> = {
   not_started: { pill: "bg-ink-100 text-ink-700", dot: "bg-ink-400" },
   in_progress: { pill: "bg-primary-50 text-primary-700", dot: "bg-primary-600" },
-  // Out of tries: amber like Challenged (the teacher is next), with a
-  // hollow dot so the two read apart on the teacher's table.
+  // Out of tries, no note yet: amber like Challenged (a note, or the
+  // teacher's one more try, is next), with a hollow dot so the two read
+  // apart on the teacher's table.
   waiting: { pill: "bg-warning-50 text-warning-900", dot: "border-2 border-warning-600" },
   passed: { pill: "bg-success-50 text-success-800", dot: "" },
   challenged: { pill: "bg-warning-50 text-warning-900", dot: "bg-warning-500" },

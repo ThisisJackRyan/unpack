@@ -25,17 +25,24 @@ export type StudentReadingStatus =
   | "challenged"
   | "challenge_denied";
 
-// What the student sees. Out of tries (waiting) and a sent note
-// (challenged) both read "Waiting for your teacher": either way the next
-// step is the teacher's (the out-of-tries page has the note box).
+// What the student sees. Out of tries with no note yet (waiting): the
+// next step is theirs, a note (the reading page leads with the same words,
+// SEND_NOTE_LEAD). A sent note (challenged): "Waiting for your teacher".
 export const STUDENT_READING_STATUS_LABELS: Record<StudentReadingStatus, string> = {
   not_started: "Not started",
   in_progress: "In progress",
-  waiting: "Waiting for your teacher",
+  waiting: "Send your teacher a note",
   passed: "Passed",
   challenged: "Waiting for your teacher",
   challenge_denied: "Challenge denied",
 };
+
+// The reading page's lead when out of tries (or checks) with no note yet,
+// and the line under it: the teacher can also give one more try without a
+// note (the queue's Give one more try, challenge-grant-core.ts).
+export const SEND_NOTE_LEAD = "Send your teacher a note.";
+export const TEACHER_CAN_GIVE_TRY = "Your teacher can also give you another try.";
+const NO_NOTE_NEXT = `${SEND_NOTE_LEAD} ${TEACHER_CAN_GIVE_TRY}`;
 
 // What the teacher sees: the same statuses, with Challenged (a note in the
 // queue) apart from Waiting for teacher (out of tries, no note yet).
@@ -139,9 +146,10 @@ export function answerStage(progress: ReadingProgress): AnswerStage {
 }
 
 // The class home status (studentReadingStatus) for a reading page stage,
-// so the page and the list agree. The page shows it as a badge only when
-// the next step is the teacher's (Waiting for your teacher): out of tries
-// or every check used, with the note box still there, and a sent note.
+// so the page and the list agree. Out of tries or every check used
+// (waiting, the note box still there): the page leads with
+// SEND_NOTE_LEAD. A sent note (challenged): the "Waiting for your
+// teacher" badge.
 export function stageStatus(stage: AnswerStage): StudentReadingStatus {
   switch (stage.kind) {
     case "answer":
@@ -171,10 +179,10 @@ export function stageAnnouncement(stage: AnswerStage): string {
       return stage.status === "open" ? "Sent. Your teacher will take a look." : "Your teacher read your note.";
     case "out_of_tries":
       return stage.extraTry
-        ? "That was your extra try. Waiting for your teacher. You can still send them a note."
-        : `That was try ${MAX_TRIES} of ${MAX_TRIES}. Waiting for your teacher. You can still send them a note.`;
+        ? `That was your extra try. ${NO_NOTE_NEXT}`
+        : `That was try ${MAX_TRIES} of ${MAX_TRIES}. ${NO_NOTE_NEXT}`;
     case "check_limit":
-      return "We couldn’t check your answers. Waiting for your teacher. You can still send them a note.";
+      return `We couldn’t check your answers. ${NO_NOTE_NEXT}`;
     case "answer":
       if (stage.extraTry) return "Your teacher gave you one more try. You have 1 try left.";
       return stage.previous
