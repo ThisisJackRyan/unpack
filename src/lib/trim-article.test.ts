@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { trimToLimit } from "./trim-article";
+import { dropTrailingHeadings, trimToLimit } from "./trim-article";
 import {
   BODY_TEXT_MAX_LENGTH,
   BODY_TEXT_MIN_LENGTH,
@@ -124,6 +124,36 @@ describe("trimToLimit", () => {
     assert.equal(Array.from(even.text).length, MAX / 2);
   });
 
+  // One unbroken run with the limit falling inside a grapheme: the cut is
+  // before it, never part way.
+  it("never splits a ZWJ emoji sequence", () => {
+    const family = "👨\u200D👩\u200D👧";
+    const result = trimToLimit(`${"a".repeat(MAX - 3)}${family}${"a".repeat(10)}`);
+    assert.equal(result.trimmed, true);
+    assert.equal(result.text, "a".repeat(MAX - 3));
+    const whole = trimToLimit(`${"a".repeat(MAX - family.length)}${family}${"a".repeat(10)}`);
+    assert.ok(whole.text.endsWith(family));
+  });
+
+  it("never splits a flag's two regional indicators", () => {
+    const flag = "🇺🇸";
+    assert.equal(trimToLimit(`${"a".repeat(MAX - 2)}${flag}aaaa`).text, "a".repeat(MAX - 2));
+    // After another flag, the pairs still count from the first indicator.
+    assert.equal(trimToLimit(`${"a".repeat(MAX - 6)}${flag}${flag}aaaa`).text, `${"a".repeat(MAX - 6)}${flag}`);
+  });
+
+  it("never splits a letter from its combining accent", () => {
+    const result = trimToLimit(`${"a".repeat(MAX - 1)}e\u0301${"a".repeat(10)}`);
+    assert.equal(result.text, "a".repeat(MAX - 1));
+    const kept = trimToLimit(`${"a".repeat(MAX - 2)}e\u0301${"a".repeat(10)}`);
+    assert.ok(kept.text.endsWith("e\u0301"));
+  });
+
+  it("cuts at the limit when one grapheme runs past it from the start", () => {
+    const result = trimToLimit(`e${"\u0301".repeat(MAX + 5)}`);
+    assert.equal(result.text.length, MAX);
+  });
+
   it("never splits a surrogate pair at a word break either", () => {
     const text = "🐝🐝 ".repeat(Math.ceil((MAX + 100) / 5));
     const result = trimToLimit(text);
@@ -145,5 +175,27 @@ describe("trimToLimit", () => {
       assert.equal(result.trimmed, true);
       assertSavable(result.text);
     }
+  });
+});
+
+describe("dropTrailingHeadings", () => {
+  const headings = new Set(["Habitat", "Diet", "Section 22"]);
+  const isHeading = (p: string) => headings.has(p);
+
+  it("drops a heading left at the end, and repeats while the end is one", () => {
+    const body = paragraph(400);
+    assert.equal(dropTrailingHeadings(`${body}\n\nSection 22`, isHeading), body);
+    assert.equal(dropTrailingHeadings(`${body}\n\nHabitat\n\nDiet`, isHeading), body);
+  });
+
+  it("keeps text that ends on prose, or a paragraph that only resembles a heading", () => {
+    const body = `Habitat\n\n${paragraph(400)}`;
+    assert.equal(dropTrailingHeadings(body, isHeading), body);
+    assert.equal(dropTrailingHeadings(`${body}\n\nDiet notes`, isHeading), `${body}\n\nDiet notes`);
+  });
+
+  it("never leaves less than the minimum", () => {
+    const short = `${paragraph(MIN - 5)}\n\nDiet`;
+    assert.equal(dropTrailingHeadings(short, isHeading), short);
   });
 });

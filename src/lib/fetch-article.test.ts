@@ -221,6 +221,10 @@ describe("extractArticle: a Wikipedia article", () => {
     assert.doesNotMatch(wiki.text, /^ /m);
     assert.doesNotMatch(wiki.text, /\n{3,}/);
   });
+
+  it("is the stripped text, not the fallback", () => {
+    assert.equal(wiki.stripFallback, undefined);
+  });
 });
 
 // A hand-written blog post with the usual blocks around and inside it.
@@ -275,6 +279,10 @@ describe("extractArticle: a page with chrome around the article", () => {
       /honey\.\d/,
     ]);
   });
+
+  it("is the stripped text, not the fallback", () => {
+    assert.equal(blog.stripFallback, undefined);
+  });
 });
 
 describe("stripNonProse and dropEmptySections", () => {
@@ -317,6 +325,179 @@ describe("stripNonProse and dropEmptySections", () => {
     for (const gone of ["Empty parent", "Empty child", "References", "A source."]) {
       assert.equal(text.includes(gone), false, gone);
     }
+  });
+});
+
+// The reviewer's round 1 probes: layouts stripping used to lose (whole,
+// or silently in part). Each keeps its prose, by the rules in
+// stripNonProse or, failing them, by the fallback to the unstripped page.
+describe("extractArticle: stripping never loses the article", () => {
+  const prose = [
+    "Sea otters float on their backs and use stones to crack open the shells of clams and urchins.",
+    "They have the thickest fur of any animal, with up to a million hairs in a single square inch of skin.",
+    "A group of otters resting together in the water is called a raft, and they often hold paws as they sleep.",
+    "Without sea otters, urchins would eat the kelp forests that shelter fish, seals, and many other animals.",
+  ];
+  const story = prose.join(" ");
+  const page = (body: string) =>
+    `<html><head><title>Sea otters</title></head><body><nav><a href="/">Home</a> <a href="/animals">Animals</a></nav>${body}</body></html>`;
+  const extract = (body: string) => extractArticle(page(body), PAGE);
+  const assertProse = (text: string) => assertInOrder(text, prose);
+
+  it("keeps a layout table whose cell holds the text", () => {
+    const article = extract(`<table><tr><td>MENU</td><td>${story}</td></tr></table>`);
+    assertProse(article.text);
+    assert.equal(article.stripFallback, undefined);
+  });
+
+  it("keeps a layout table whose cell holds the text in lines broken with <br>", () => {
+    const article = extract(`<table><tr><td>${prose.join("<br>")}</td></tr></table>`);
+    assertProse(article.text);
+    assert.match(article.text, /clams and urchins\.\nThey have/);
+    assert.equal(article.stripFallback, undefined);
+  });
+
+  it("keeps a layout table whose cell holds several short paragraphs", () => {
+    const article = extract(`<table><tr><td>${prose.map((p) => `<p>${p}</p>`).join("")}</td></tr></table>`);
+    assertProse(article.text);
+    assert.equal(article.stripFallback, undefined);
+  });
+
+  it("keeps a table with one short paragraph per row, which holds the page's paragraphs", () => {
+    const article = extract(`<table>${prose.map((p) => `<tr><td><p>${p}</p></td></tr>`).join("")}</table>`);
+    assertProse(article.text);
+    assert.equal(article.stripFallback, undefined);
+  });
+
+  it("keeps a table with one short cell per row, and no paragraphs, through the fallback", () => {
+    const article = extract(`<table>${prose.map((p) => `<tr><td>${p}</td></tr>`).join("")}</table>`);
+    assertProse(article.text);
+    assert.equal(article.stripFallback, "strip_failed");
+  });
+
+  it("falls back when stripping leaves less than the minimum", () => {
+    const article = extract(
+      `<article><p>Notes on otters, by row.</p><table>${prose.map((p) => `<tr><td>${p}</td></tr>`).join("")}</table></article>`,
+    );
+    assertProse(article.text);
+    assert.equal(article.stripFallback, "too_short");
+  });
+
+  for (const [where, wrap] of [
+    ["an <aside>", (body: string) => `<aside>${body}</aside>`],
+    ["a site <header>", (body: string) => `<header>${body}</header>`],
+    ["a <footer>", (body: string) => `<footer>${body}</footer>`],
+    ['a <div class="sidebar">', (body: string) => `<div class="sidebar">${body}</div>`],
+    ["main > div.content.sidebar", (body: string) => `<main><div class="content sidebar">${body}</div></main>`],
+    ["[role=contentinfo]", (body: string) => `<div role="contentinfo">${body}</div>`],
+    ["a .metadata box", (body: string) => `<div class="metadata">${body}</div>`],
+  ] as const) {
+    it(`keeps an article that sits inside ${where}`, () => {
+      const article = extract(
+        `<div class="sidebar"><p>Popular: crabs.</p></div>${wrap(prose.map((p) => `<p>${p}</p>`).join(""))}`,
+      );
+      assertProse(article.text);
+      assert.equal(article.text.includes("Popular: crabs."), false);
+      assert.equal(article.stripFallback, undefined);
+    });
+  }
+
+  it("keeps a figure holding a poem or quotation, with its attribution, and drops an image figure", () => {
+    const poem = "The sea is calm tonight.\nThe tide is full, the moon lies fair\nUpon the straits.";
+    const article = extract(
+      `<article><p>${story}</p><figure><blockquote><p>${poem.replaceAll("\n", "<br>")}</p></blockquote>` +
+        `<figcaption>Matthew Arnold, Dover Beach</figcaption></figure>` +
+        `<figure><img src="otter.jpg" alt=""><figcaption>IMAGE_CAPTION</figcaption></figure></article>`,
+    );
+    assertProse(article.text);
+    assert.match(article.text, /The sea is calm tonight\.\nThe tide is full, the moon lies fair\nUpon the straits\./);
+    assert.match(article.text, /Matthew Arnold, Dover Beach/);
+    assert.equal(article.text.includes("IMAGE_CAPTION"), false);
+    assert.equal(article.stripFallback, undefined);
+  });
+
+  // An image figure's caption is dropped with it, unless that loses most
+  // of the text: then the fallback keeps it.
+  const caption = prose.map((p) => p.replace("Sea otters", "Caption otters")).join(" ");
+  it("keeps prose that sits in an image's caption, through the fallback", () => {
+    const article = extract(
+      `<article><p>${story.slice(0, 263)}</p><figure><img src="otter.jpg" alt=""><figcaption>${caption} ${caption}</figcaption></figure></article>`,
+    );
+    assert.match(article.text, /Caption otters float on their backs/);
+    assert.equal(article.stripFallback, "much_shorter");
+  });
+
+  it("keeps an image's caption that holds most of the page's paragraphs", () => {
+    const article = extract(
+      `<article><p>${story.slice(0, 263)}</p><figure><img src="otter.jpg" alt=""><figcaption><p>${caption}</p><p>${caption}</p></figcaption></figure></article>`,
+    );
+    assert.match(article.text, /Caption otters float on their backs/);
+    assert.equal(article.stripFallback, undefined);
+  });
+
+  it("keeps a role=note callout, and still drops a hatnote", () => {
+    const article = extract(
+      `<article><div class="hatnote">HATNOTE_TEXT</div><p>${story}</p><div role="note"><p>Callout: never feed a wild otter, since it learns to beg and may bite.</p></div></article>`,
+    );
+    assertProse(article.text);
+    assert.match(article.text, /Callout: never feed a wild otter/);
+    assert.equal(article.text.includes("HATNOTE_TEXT"), false);
+  });
+
+  it("keeps a list of linked steps, and drops a list of short links", () => {
+    const steps = [
+      "Step one: find a calm cove where otters rest in the kelp at low tide",
+      "Step two: stay at least five boat lengths away so you never disturb them",
+      "Step three: watch through binoculars and count the otters in each raft",
+    ];
+    const article = extract(
+      `<article><p>${story}</p><ol>${steps.map((step, i) => `<li><a href="/step-${i}">${step}</a></li>`).join("")}</ol>` +
+        `<h2>See also</h2><ul><li><a href="/seals">Seals</a></li><li><a href="/kelp">Kelp forests</a></li></ul></article>`,
+    );
+    assertProse(article.text);
+    for (const step of steps) assert.match(article.text, new RegExp(`- ${step}`));
+    assert.equal(article.text.includes("Kelp forests"), false);
+    assert.equal(article.stripFallback, undefined);
+  });
+
+  it("drops citation markers but keeps other bracketed superscripts", () => {
+    const article = extract(
+      `<article><p>${story} The interval<sup>[0,1]</sup> matters.<sup>[12]</sup> Fur<sup>[a]</sup> is dense.<sup>[note 2]</sup>` +
+        ` Kelp grows fast.<sup>[citation needed]</sup> Otters dive<sup><a href="#cite-3">3</a></sup> often.</p></article>`,
+    );
+    assert.match(article.text, /The interval\[0,1\] matters\. Fur is dense\. Kelp grows fast\. Otters dive often\./);
+  });
+
+  it("fails when neither the stripped nor the unstripped page has an article", () => {
+    assert.equal(kindOf(() => extract("<aside><p>Too short.</p></aside>")), "extract_failed");
+  });
+});
+
+describe("extractArticle: a trimmed sectioned article", () => {
+  // h2 and a paragraph, 40 times (like most Wikipedia pages): the cut at
+  // the last paragraph break that fits lands right after a heading.
+  const sections = Array.from({ length: 40 }, (_, i) => ({
+    heading: `Section ${i + 1}`,
+    body: `Section ${i + 1} prose. ${"Bees collect nectar in the summer and store honey to eat in the winter. ".repeat(8)}`.trim(),
+  }));
+  const html = `<html><head><title>Bees</title></head><body><article>${sections
+    .map((s) => `<h2>${s.heading}</h2><p>${s.body}</p>`)
+    .join("")}</article></body></html>`;
+  const article = extractArticle(html, PAGE);
+
+  it("would cut right after a heading", () => {
+    const full = sections.map((s) => `${s.heading}\n\n${s.body}`).join("\n\n");
+    const cut = full.lastIndexOf("\n\n", BODY_TEXT_MAX_LENGTH);
+    assert.match(full.slice(0, cut), /\n\nSection \d+$/);
+  });
+
+  it("ends on the prose before that heading, not the heading", () => {
+    assert.equal(article.trimmed, true);
+    assert.match(article.text, /eat in the winter\.$/);
+    assert.ok(article.text.length <= BODY_TEXT_MAX_LENGTH);
+    const blocks = article.text.split("\n\n");
+    assert.equal(blocks.length % 2, 0);
+    assert.deepEqual(blocks, sections.slice(0, blocks.length / 2).flatMap((s) => [s.heading, s.body]));
   });
 });
 
