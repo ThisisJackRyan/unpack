@@ -110,6 +110,10 @@ export const readings = pgTable(
     title: text("title").notNull(),
     sourceUrl: text("source_url"),
     bodyText: text("body_text").notNull(),
+    // The linked article was over the length limit, so body_text is its
+    // first part (see src/lib/trim-article.ts). Cleared when the teacher
+    // edits the text.
+    bodyTrimmed: boolean("body_trimmed").notNull().default(false),
     // Overrides the class grade level when set.
     gradeLevel: gradeLevelEnum("grade_level"),
     questionCount: integer("question_count").notNull().default(3),
@@ -534,6 +538,8 @@ export const selfReadings = pgTable(
     title: text("title").notNull(),
     sourceUrl: text("source_url"),
     bodyText: text("body_text").notNull(),
+    // As readings.body_trimmed.
+    bodyTrimmed: boolean("body_trimmed").notNull().default(false),
     gradeLevel: gradeLevelEnum("grade_level").notNull(),
     questionCount: integer("question_count").notNull().default(3),
     status: selfReadingStatusEnum("status").notNull().default("in_progress"),

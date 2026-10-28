@@ -9,7 +9,7 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { readingSaveFailedState } from "./create-guard";
 import { withDeadline } from "./deadline";
-import { resolveReadingSource } from "./reading-source";
+import { resolveReadingSource, type FetchedArticle } from "./reading-source";
 import type { ReadingDraft } from "./readings";
 import { safeErrorFields } from "./safe-error-fields";
 import { validateReadingForm, type ReadingFormInput } from "./validate-reading";
@@ -24,7 +24,8 @@ export type TeacherCreateDeps = {
   recordLinkFetch: (teacherId: string) => Promise<boolean>;
   // The note at the link limit, with its retry time (a read).
   linkLimitedMessage: (teacherId: string) => Promise<string>;
-  fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
+  // An article over the length limit comes back trimmed (trim-article.ts).
+  fetchArticle: (url: string) => Promise<FetchedArticle>;
   // The one write that makes the reading (undefined: not this teacher's
   // class, nothing inserted).
   insertReading: (classId: string, teacherId: string, draft: ReadingDraft) => Promise<{ id: string } | undefined>;

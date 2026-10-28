@@ -9,6 +9,7 @@ import { PassCelebration } from "@/components/celebration";
 import { SelfAnswerForm } from "@/components/reading-answer-form";
 import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
+import { TrimmedNote } from "@/components/trimmed-note";
 import { PendingRefresh, RetryButton } from "@/components/refresh";
 import { MetaLine } from "@/components/meta-line";
 import { backLink, card, primaryButtonLarge, secondaryButtonLarge } from "@/components/ui";
@@ -104,6 +105,7 @@ export default async function SelfReadingPage({ params }: Props) {
       </div>
 
       <article aria-labelledby="reading-title" className={`${card} px-6 py-8 sm:px-12 sm:py-12`}>
+        {reading.bodyTrimmed && <TrimmedNote className="mb-6" />}
         <NoCopyText className="flex max-w-[65ch] flex-col gap-7 text-xl leading-[1.85] text-ink-900 sm:text-[1.375rem]">
           {readingParagraphs(reading.bodyText).map((p, i) => (
             <p key={i} className="break-words whitespace-pre-line">

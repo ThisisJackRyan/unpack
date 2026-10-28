@@ -9,7 +9,6 @@ import { FetchArticleError, type FetchArticleErrorKind } from "./fetch-errors";
 import { LINK_FETCH_LIMITED_MESSAGE } from "./link-rate-limit";
 import { withRetryAt } from "./local-time";
 import {
-  BODY_TEXT_MAX_LENGTH,
   resolveLinkTitle,
   type ReadingFormData,
   type ReadingFormErrors,
@@ -24,13 +23,16 @@ export const LINK_ERRORS: Record<FetchArticleErrorKind, string> = {
   not_html: "That link isn’t a web page. It may be a PDF or other file.",
   http_error: "We couldn’t open that page.",
   extract_failed: "We couldn’t find the article text on that page.",
-  too_long: `That article is over ${BODY_TEXT_MAX_LENGTH.toLocaleString("en-US")} characters.`,
 };
 
 export const SAVE_READING_FAILED_MESSAGE = "We couldn’t save the reading. Please try again.";
 export const NO_PAGE_TITLE_MESSAGE = "We couldn’t find a title on that page. Please add one.";
 
-export type ReadingSource = { title: string; bodyText: string; sourceUrl: string | null };
+// bodyTrimmed: a linked article over the length limit, of which bodyText
+// is the first part (see trim-article.ts). Never true for pasted text.
+export type ReadingSource = { title: string; bodyText: string; sourceUrl: string | null; bodyTrimmed: boolean };
+
+export type FetchedArticle = { title: string; text: string; url: string; trimmed: boolean };
 
 export type ReadingSourceResult =
   | { ok: true; source: ReadingSource }
@@ -50,7 +52,7 @@ export type ReadingSourceDeps = {
   // The note at the limit, with when the next link frees up (the action
   // reads the time and the reader's zone). Without it, a relative time.
   limitedMessage?: () => Promise<string>;
-  fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
+  fetchArticle: (url: string) => Promise<FetchedArticle>;
   // Safe fields only (kind, status, error names), never any part of the
   // link (host, path, query) or the text.
   log: (message: string, fields: Record<string, unknown>) => void;
@@ -61,7 +63,7 @@ export async function resolveReadingSource(
   deps: ReadingSourceDeps,
 ): Promise<ReadingSourceResult> {
   if (data.source === "text") {
-    return { ok: true, source: { title: data.title, bodyText: data.bodyText, sourceUrl: null } };
+    return { ok: true, source: { title: data.title, bodyText: data.bodyText, sourceUrl: null, bodyTrimmed: false } };
   }
 
   // Counts this attempt, before fetching, whatever the fetch's outcome.
@@ -87,7 +89,7 @@ export async function resolveReadingSource(
     return { ok: false, errors: {}, limit, suggestText: "Paste the text instead." };
   }
 
-  let article: { title: string; text: string; url: string };
+  let article: FetchedArticle;
   try {
     article = await deps.fetchArticle(data.url);
   } catch (error) {
@@ -99,16 +101,14 @@ export async function resolveReadingSource(
     return {
       ok: false,
       errors: { url: LINK_ERRORS[kind] },
-      suggestText:
-        kind === "invalid_url"
-          ? undefined
-          : kind === "too_long"
-            ? "Paste a shorter section instead."
-            : "Paste the text instead.",
+      suggestText: kind === "invalid_url" ? undefined : "Paste the text instead.",
     };
   }
   const title = resolveLinkTitle(data.title, article.title);
   if (!title) return { ok: false, errors: { title: NO_PAGE_TITLE_MESSAGE } };
   // Where the text really came from, after any redirects.
-  return { ok: true, source: { title, bodyText: article.text, sourceUrl: article.url } };
+  return {
+    ok: true,
+    source: { title, bodyText: article.text, sourceUrl: article.url, bodyTrimmed: article.trimmed },
+  };
 }

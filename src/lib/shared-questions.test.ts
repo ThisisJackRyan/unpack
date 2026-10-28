@@ -177,6 +177,12 @@ describe("editReadingStatements", () => {
     assert.deepEqual(update.params.slice(3), ["body", "5", 4, "shared", "T"]);
   });
 
+  it("keeps a trimmed article's flag only while its text is unchanged (edited text is the teacher's)", () => {
+    // In an UPDATE's SET, r.body_text is the row's text before the update.
+    assert.match(update.text, /\n  body_trimmed = r\.body_trimmed and r\.body_text = \$4::text,\n/);
+    assert.equal(/body_trimmed/.test(titleOnly.text), false);
+  });
+
   it("on a published reading changes only the title, and only if nothing else changed", () => {
     assert.match(titleOnly.text, /^update readings r set title = \$8::text\nfrom classes c/);
     assert.equal(/body_text =\s*\$4::text,|question_count = \$6::int,/.test(titleOnly.text), false);

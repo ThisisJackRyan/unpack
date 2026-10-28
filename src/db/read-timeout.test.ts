@@ -342,7 +342,7 @@ describe("the app's own queries", () => {
   write("setJoinCodeActive", () => m.classes.setJoinCodeActive(U, U, false));
   write("deleteStudent", () => m.classes.deleteStudent(U, U, U));
   write("resetStudentQuestionCalls", () => m.classes.resetStudentQuestionCalls(U, U, U, U));
-  write("insertReading", () => m.readings.insertReading(U, U, { title: "t", bodyText: "b", sourceUrl: null, gradeLevel: "5", questionCount: 3, questionMode: "shared" }));
+  write("insertReading", () => m.readings.insertReading(U, U, { title: "t", bodyText: "b", sourceUrl: null, bodyTrimmed: false, gradeLevel: "5", questionCount: 3, questionMode: "shared" }));
   write("saveReadingEdit", () => m.readings.saveReadingEdit(U, U, U, { title: "t", bodyText: "b", gradeLevel: "5", questionCount: 3, questionMode: "shared" }));
   write("deleteReading", () => m.readings.deleteReading(U, U, U));
   write("raiseReadingCap", () => m.readings.raiseReadingCap(U, U, U));
@@ -358,7 +358,7 @@ describe("the app's own queries", () => {
   cases.push(["joinClass", [WRITE, READ], () => m.join.joinClass({ code: "ABC123", firstName: "A", lastInitials: "B" }, "hash")]);
   write("recordQuestionGeneration", () => m.generations.recordQuestionGeneration(U));
   write("recordLinkFetchAttempt", () => m.linkFetches.recordLinkFetchAttempt(U));
-  write("createSelfReading", () => m.self.createSelfReading(U, { title: "t", bodyText: "b", sourceUrl: null, gradeLevel: "5", questionCount: 3 }));
+  write("createSelfReading", () => m.self.createSelfReading(U, { title: "t", bodyText: "b", sourceUrl: null, bodyTrimmed: false, gradeLevel: "5", questionCount: 3 }));
   write("student questions: claim", () => studentStore().claim(U, U, U, 3));
   write("student questions: takeOverStale", () => studentStore().takeOverStale(U, U, U, 60));
   write("student questions: release", () => studentStore().release(U, U, U, true));
@@ -416,7 +416,7 @@ describe("isReadRequestBody", () => {
     assert.equal(isReadRequestBody(JSON.stringify({ query: read.text, params: read.params })), true);
     const create = createSelfReadingStatements(
       "00000000-0000-0000-0000-000000000001",
-      { title: "t", bodyText: "b", sourceUrl: null, gradeLevel: "5", questionCount: 3 },
+      { title: "t", bodyText: "b", sourceUrl: null, bodyTrimmed: false, gradeLevel: "5", questionCount: 3 },
       allowance,
     );
     assert.equal(isReadRequestBody(JSON.stringify({ queries: create.map((s) => ({ query: s.text, params: s.params })) })), false);

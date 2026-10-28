@@ -72,6 +72,8 @@ export type SelfReadingView = {
   title: string;
   sourceUrl: string | null;
   bodyText: string;
+  // The article was cut to the length limit: the page says so.
+  bodyTrimmed: boolean;
   gradeLevel: GradeLevel;
   questionCount: number;
   status: SelfReadingResult;
@@ -86,7 +88,7 @@ export async function getSelfReading(
   if (!isUuid(readingId)) return undefined;
   const [rows = []] = await execute([
     {
-      text: `select id, title, source_url, body_text, grade_level, question_count, status, created_at
+      text: `select id, title, source_url, body_text, body_trimmed, grade_level, question_count, status, created_at
 from self_readings where id = $2::uuid and account_id = $1::uuid`,
       params: [accountId, readingId],
     },
@@ -98,6 +100,7 @@ from self_readings where id = $2::uuid and account_id = $1::uuid`,
     title: String(row.title),
     sourceUrl: row.source_url == null ? null : String(row.source_url),
     bodyText: String(row.body_text),
+    bodyTrimmed: row.body_trimmed === true,
     gradeLevel: row.grade_level as GradeLevel,
     questionCount: Number(row.question_count),
     status: parseSelfResult(row.status),

@@ -116,6 +116,8 @@ export type SelfReadingDraft = {
   title: string;
   bodyText: string;
   sourceUrl: string | null;
+  // A linked article cut to the length limit (see trim-article.ts).
+  bodyTrimmed: boolean;
   gradeLevel: GradeLevel;
   questionCount: number;
 };
@@ -154,8 +156,8 @@ export function createSelfReadingStatements(
   return [
     { text: "select id from teachers where id = $1::uuid for update", params: [accountId] },
     {
-      text: `insert into self_readings (account_id, title, source_url, body_text, grade_level, question_count)
-select $1::uuid, $2::text, $3::text, $4::text, $5::grade_level, $6::int
+      text: `insert into self_readings (account_id, title, source_url, body_text, grade_level, question_count, body_trimmed)
+select $1::uuid, $2::text, $3::text, $4::text, $5::grade_level, $6::int, $9::boolean
 where exists (select 1 from teachers where id = $1::uuid and role = 'self_learner')
 and ${heldSlotsSql(7)} < $8::int
 returning id`,
@@ -168,6 +170,7 @@ returning id`,
         draft.questionCount,
         allowance.windowDays,
         allowance.readings,
+        draft.bodyTrimmed,
       ],
     },
     {

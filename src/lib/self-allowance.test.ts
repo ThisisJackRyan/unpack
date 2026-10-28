@@ -25,6 +25,7 @@ const DRAFT: SelfReadingDraft = {
   title: "The fox",
   bodyText: "Text ".repeat(50),
   sourceUrl: null,
+  bodyTrimmed: false,
   gradeLevel: "5",
   questionCount: 3,
 };
@@ -127,12 +128,12 @@ describe("createSelfReadingStatements", () => {
   });
 
   it("inserts only for a self-learner under the allowance, counted in the rolling window", () => {
-    assert.match(insert.text, /^insert into self_readings \(account_id, title, source_url, body_text, grade_level, question_count\)/);
+    assert.match(insert.text, /^insert into self_readings \(account_id, title, source_url, body_text, grade_level, question_count, body_trimmed\)/);
     assert.match(insert.text, /where exists \(select 1 from teachers where id = \$1::uuid and role = 'self_learner'\)/);
     // Only readings that hold their slot count (a failed generation gives
     // its slot back).
     assert.match(insert.text, /where account_id = \$1::uuid and slot_released_at is null\n    and created_at > now\(\) - make_interval\(days => \$7::int\)\) < \$8::int/);
-    assert.deepEqual(insert.params, [ID, "The fox", null, DRAFT.bodyText, "5", 3, 7, 5]);
+    assert.deepEqual(insert.params, [ID, "The fox", null, DRAFT.bodyText, "5", 3, 7, 5, false]);
     // Never class or student tables.
     assert.equal(/\b(classes|students|readings r|from readings)\b/.test(insert.text), false);
   });

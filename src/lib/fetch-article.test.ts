@@ -88,12 +88,225 @@ describe("extractArticle", () => {
     assert.equal(kindOf(() => extractArticle("not html at all", PAGE)), "extract_failed");
   });
 
-  it("fails with too_long instead of cutting a long article", () => {
-    const para = `<p>${"A long sentence about the sea, with commas, and more words. ".repeat(20)}</p>`;
-    const html = `<html><head><title>Long</title></head><body><article>${para.repeat(
-      Math.ceil(BODY_TEXT_MAX_LENGTH / 1000) + 5,
-    )}</article></body></html>`;
-    assert.equal(kindOf(() => extractArticle(html, PAGE)), "too_long");
+  it("is not trimmed when it fits", () => {
+    assert.equal(article.trimmed, false);
+  });
+
+  it("keeps the first part of a long article, cut at a paragraph break, instead of refusing it", () => {
+    const paras = Array.from(
+      { length: Math.ceil(BODY_TEXT_MAX_LENGTH / 1000) + 5 },
+      (_, i) => `Paragraph ${i + 1}. ${"A long sentence about the sea, with commas, and more words. ".repeat(16)}`.trim(),
+    );
+    const html = `<html><head><title>Long</title></head><body><article>${paras
+      .map((p) => `<p>${p}</p>`)
+      .join("")}</article></body></html>`;
+    const long = extractArticle(html, PAGE);
+    assert.equal(long.trimmed, true);
+    assert.equal(long.title, "Long");
+    assert.ok(long.text.length <= BODY_TEXT_MAX_LENGTH);
+    assert.ok(long.text.length >= BODY_TEXT_MAX_LENGTH - 1000);
+    // Whole paragraphs, from the first, in order.
+    const kept = long.text.split("\n\n");
+    assert.deepEqual(kept, paras.slice(0, kept.length));
+  });
+});
+
+// Text that must never reach a reading, and prose that must, in order.
+function assertJunkGone(text: string, junk: (string | RegExp)[]) {
+  for (const item of junk) {
+    if (typeof item === "string") assert.equal(text.includes(item), false, item);
+    else assert.doesNotMatch(text, item);
+  }
+}
+function assertInOrder(text: string, sentences: string[]) {
+  let last = -1;
+  for (const sentence of sentences) {
+    const at = text.indexOf(sentence);
+    assert.ok(at > last, `${sentence} (at ${at}, after ${last})`);
+    last = at;
+  }
+}
+
+// A saved copy of https://simple.wikipedia.org/wiki/Honey_bee (see
+// __fixtures__/README.md: fetched October 28, 2026, CC BY-SA 4.0
+// Wikipedia content, used only as a test fixture). Its infobox, edit links,
+// citation markers, reference list, table of contents, and wiki chrome
+// used to land in the reading.
+describe("extractArticle: a Wikipedia article", () => {
+  const wiki = extractArticle(
+    readFileSync(new URL("./__fixtures__/wikipedia-honey-bee-simple.html", import.meta.url), "utf8"),
+    new URL("https://simple.wikipedia.org/wiki/Honey_bee"),
+  );
+
+  it("starts with the article's first paragraph", () => {
+    assert.ok(
+      wiki.text.startsWith(
+        "A honey bee (or honeybee) is any bee that is a member of the genus Apis. They are all eusocial flying insects which live in colonies of various sizes. All honey bees are native to Afro-Eurasia.\n\n",
+      ),
+      wiki.text.slice(0, 200),
+    );
+    assert.equal(wiki.trimmed, false);
+  });
+
+  it("keeps the prose and its section headings, in order", () => {
+    assertInOrder(wiki.text, [
+      "A honey bee (or honeybee) is any bee",
+      "\n\nName\n\n",
+      'The scientific name "Apis" is Latin for "bee"',
+      "\n\nDescription\n\n",
+      "They are only a small fraction of the 20,000 known species of bee.",
+      "Honey bees appear to have originated from South and Southeast Asia",
+      "There are only seven species of honey bee, with a total of 44 subspecies.",
+      "The first Apis bees appear in the European fossil record",
+      "Only one fossil species is known, a single 14-million-year-old specimen from Nevada.",
+      "Nasonov's gland produces a pheromone used to get worker bees together.",
+      "\n\nMating information\n\n",
+      "- Queens are produced by mating between females and drones",
+      "Workers live for a few weeks to several months.",
+    ]);
+    assert.match(wiki.text, /Workers live for a few weeks to several months\.$/);
+  });
+
+  it("leaves out the infobox, its timeline, and the classification table", () => {
+    assertJunkGone(wiki.text, [
+      "Temporal range",
+      "Oligocene–Recent",
+      "PreꞒ",
+      /\bO\s+S\s+D\s+C\s+P\s+T\b/,
+      /^(Ꞓ|O|S|D|C|P|T|J|K|Pg|N)$/m,
+      "Scientific classification",
+      "Kingdom:",
+      "Animalia",
+      "Arthropoda",
+      "Latreille, 1802",
+      "Apis koschevnikovi",
+      "Western honey bee carrying pollen back to the hive",
+    ]);
+  });
+
+  it("leaves out edit links, citation markers, references, the table of contents, and wiki chrome", () => {
+    assertJunkGone(wiki.text, [
+      "[edit]",
+      "[change",
+      "change source",
+      /\[\d+\]/,
+      "↑",
+      "Retrieved",
+      "doi:",
+      "Ask A Biologist",
+      "\nReferences",
+      "Related pages",
+      "Beekeeping",
+      "Contents",
+      "From Simple English Wikipedia",
+      "Buzzing bees on the flowering plum",
+      "Categories",
+      "Jump to content",
+    ]);
+  });
+
+  it("has no headings left with nothing under them, and no stray spaces", () => {
+    const blocks = wiki.text.split("\n\n");
+    for (const [i, block] of blocks.entries()) {
+      if (["Name", "Description", "Distribution", "Species", "Fossil records", "Mating information"].includes(block)) {
+        assert.ok(i + 1 < blocks.length && blocks[i + 1].length > 40, block);
+      }
+    }
+    assert.doesNotMatch(wiki.text, /^ /m);
+    assert.doesNotMatch(wiki.text, /\n{3,}/);
+  });
+});
+
+// A hand-written blog post with the usual blocks around and inside it.
+describe("extractArticle: a page with chrome around the article", () => {
+  const blog = extractArticle(
+    readFileSync(new URL("./__fixtures__/blog-with-chrome.html", import.meta.url), "utf8"),
+    new URL("https://blog.example.com/glaciers"),
+  );
+
+  it("keeps the article's paragraphs and heading, in order, starting with the first", () => {
+    assert.ok(blog.text.startsWith("A glacier looks like it is standing still, but it is always moving downhill, just very slowly. Some glaciers"));
+    assertInOrder(blog.text, [
+      "A glacier looks like it is standing still",
+      "Some glaciers creep only a few centimeters a day",
+      "The ice moves for two main reasons.",
+      "a bit like very thick honey. Second,",
+      "\n\nMeasuring the speed\n\n",
+      "Scientists measure a glacier's speed",
+      "When a glacier moves faster than usual",
+    ]);
+    assert.match(blog.text, /as the climate warms\.$/);
+  });
+
+  it("leaves out the header, nav, asides, figure, table, navigation box, footnotes, and footer", () => {
+    assertJunkGone(blog.text, [
+      "SITE_HEADER_LOGO",
+      "SEARCH_PLACEHOLDER",
+      "NAV_EARTH_LINK",
+      "NAV_OCEANS_LINK",
+      "ASIDE_PULL_QUOTE",
+      "SIDEBAR_HEADING",
+      "SIDEBAR_POPULAR",
+      "FIGURE_CAPTION",
+      "TABLE_CAPTION",
+      "TABLE_HEADER_NAME",
+      "TABLE_CELL_JAKOBSHAVN",
+      "40 m a day",
+      "NAVBOX_TEXT",
+      "SEE_ALSO_ICEBERGS",
+      "See also",
+      "Notes",
+      "FOOTNOTE_ONE",
+      "FOOTNOTE_TWO",
+      "FOOTER_TEXT",
+      "[1]",
+      "[citation needed]",
+      /slowly\.\d/,
+      /honey\.\d/,
+    ]);
+  });
+});
+
+describe("stripNonProse and dropEmptySections", () => {
+  const story = "An octopus has three hearts and blue blood, and it can taste with its arms. ".repeat(4);
+  const extract = (body: string) =>
+    extractArticle(`<html><head><title>T</title></head><body>${body}</body></html>`, PAGE).text;
+
+  it("never removes the article itself, whatever its wrapper's class", () => {
+    assert.match(extract(`<div class="sidebar noprint"><article><p>${story}</p></article></div>`), /^An octopus/);
+    assert.match(extract(`<aside><main><p>${story}</p></main></aside>`), /^An octopus/);
+  });
+
+  it("keeps a table used for layout, with paragraphs of prose in it", () => {
+    assert.match(extract(`<table><tr><td><p>${story}</p></td></tr></table>`), /^An octopus/);
+  });
+
+  it("keeps a header inside the article but drops the site header", () => {
+    const text = extract(
+      `<header>SITE_NAME</header><article><header><p>A dek about octopuses and what they can do.</p></header><p>${story}</p></article>`,
+    );
+    assert.equal(text.includes("SITE_NAME"), false);
+    assert.match(text, /A dek about octopuses/);
+  });
+
+  it("keeps lists with prose in them, and footnote-free superscripts", () => {
+    const text = extract(
+      `<article><p>${story} The tank holds 10<sup>3</sup> liters.</p><ul><li>Hearts: <a href="/h">three</a> of them.</li><li>Blood: blue.</li></ul></article>`,
+    );
+    assert.match(text, /holds 103 liters\./);
+    assert.match(text, /- Hearts: three of them\.\n- Blood: blue\./);
+  });
+
+  it("drops a heading only when nothing is under it before the next heading at its level or higher", () => {
+    const text = extract(
+      `<article><h2>Body</h2><p>${story}</p><h2>Parent</h2><h3>Child</h3><p>Child prose about arms and suckers, long enough to count.</p>` +
+        `<h2>Empty parent</h2><h3>Empty child</h3><h2>References</h2><ol class="references"><li>A source.</li></ol></article>`,
+    );
+    assert.match(text, /\n\nParent\n\nChild\n\nChild prose/);
+    assert.match(text, /long enough to count\.$/);
+    for (const gone of ["Empty parent", "Empty child", "References", "A source."]) {
+      assert.equal(text.includes(gone), false, gone);
+    }
   });
 });
 

@@ -16,7 +16,7 @@
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { withDeadline } from "./deadline";
 import { readingSaveFailedState } from "./create-guard";
-import { resolveReadingSource } from "./reading-source";
+import { resolveReadingSource, type FetchedArticle } from "./reading-source";
 import { safeErrorFields } from "./safe-error-fields";
 import { createOutcomeRedirect, type CreateOutcome, type CreateRedirect, type SelfReadingDraft } from "./self-allowance";
 import { validateSoloReadingForm } from "./self-reading-form";
@@ -30,7 +30,8 @@ export type SelfCreateDeps = {
   recordLinkFetch: (accountId: string) => Promise<boolean>;
   // The note at the link limit, with its retry time (a read).
   linkLimitedMessage: (accountId: string) => Promise<string>;
-  fetchArticle: (url: string) => Promise<{ title: string; text: string; url: string }>;
+  // An article over the length limit comes back trimmed (trim-article.ts).
+  fetchArticle: (url: string) => Promise<FetchedArticle>;
   // The create transaction: the insert and the slot count together.
   createSelfReading: (accountId: string, draft: SelfReadingDraft) => Promise<CreateOutcome>;
   // Safe fields only.

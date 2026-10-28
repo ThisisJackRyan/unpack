@@ -3,18 +3,16 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { FetchArticleError } from "./fetch-errors";
 import { safeFetch, type SafeFetchOptions } from "./safe-fetch";
-import {
-  BODY_TEXT_MAX_LENGTH,
-  BODY_TEXT_MIN_LENGTH,
-  normalizeBodyText,
-  normalizeTitle,
-} from "./validate-reading";
+import { trimToLimit } from "./trim-article";
+import { BODY_TEXT_MIN_LENGTH, normalizeBodyText, normalizeTitle } from "./validate-reading";
 
 // Server-only: turns a web page into a reading's title and plain text.
 // linkedom parses the HTML without running scripts or loading anything, and
 // Readability picks out the article.
 
-export type Article = { title: string; text: string };
+// trimmed: the article was over BODY_TEXT_MAX_LENGTH, and text is its
+// first part (see trim-article.ts).
+export type Article = { title: string; text: string; trimmed: boolean };
 
 // Parsing and Readability are synchronous CPU work that the fetch deadline
 // doesn't cover, so pages over these limits are refused as extract_failed.
@@ -84,6 +82,157 @@ const BLOCKS = new Set([
   "table", "tr", "ul",
 ]);
 const SKIP = new Set(["script", "style", "noscript", "template", "iframe", "svg"]);
+
+// Blocks that aren't the article's prose, removed before Readability:
+// Readability keeps data tables and boxes it scores as content, so an
+// infobox's cells or a reference list would otherwise land in the reading.
+// Generic patterns (ARIA roles, semantic tags, and the class names wikis
+// and blogs commonly use), with Wikipedia as the test case
+// (fetch-article.test.ts).
+const NON_PROSE = [
+  // Data widgets: rows of cells, never sentences.
+  "[role=table]", "[role=grid]", "[role=treegrid]",
+  // Navigation and page chrome.
+  "nav", "aside", "[role=navigation]", "[role=complementary]", "[role=banner]",
+  "[role=contentinfo]", "[role=search]",
+  // Fact boxes, navigation boxes, sidebars, and notices.
+  ".infobox", ".navbox", ".vertical-navbox", ".navbox-styles", ".sidebar",
+  ".metadata", ".ambox", ".mbox-small", ".sistersitebox", ".side-box",
+  ".shortdescription",
+  // Reference lists, footnotes, and the markers that point at them.
+  ".reflist", ".references", ".mw-references-wrap", ".refbegin", ".footnotes",
+  "[role=doc-endnotes]", "[role=doc-footnote]", "[role=doc-bibliography]",
+  "sup.reference", ".mw-ref", "[role=doc-noteref]", ".footnote-ref",
+  ".mw-cite-backlink",
+  // "[edit]" links, hatnotes ("For other uses, see ..."), tables of contents.
+  ".mw-editsection", ".editsection", ".hatnote", "[role=note]",
+  "#toc", ".toc", ".mw-table-of-contents-container", ".vector-toc", "[role=doc-toc]",
+  // Figures: we show no images, so a caption describes something the
+  // reader can't see.
+  "figure", "figcaption", ".thumb", ".thumbcaption", ".gallery",
+  // Print and wiki chrome ("From Wikipedia, the free encyclopedia",
+  // categories, jump links).
+  ".noprint", ".mw-empty-elt", ".printfooter", ".catlinks", "#catlinks",
+  "#siteSub", "#contentSub", ".mw-jump-link", ".navigation-not-searchable",
+  ".mw-indicators",
+].join(", ");
+
+// Never removed whole, whatever their class: a page's own article.
+const ARTICLE = "html, body, main, article, [role=main]";
+
+// A table holding a paragraph this long is laid out with tables (older
+// sites), not data, so it stays.
+const LAYOUT_TABLE_PARAGRAPH = 200;
+
+// A citation marker written as a superscript: "[1]", "[a]", "[note 2]",
+// "[citation needed]".
+const BRACKETED_MARKER = /^\s*\[[^\]]{1,24}\]\s*$/;
+// A bare footnote number ("3", "3,4") linking within the page.
+const NUMBER_MARKER = /^\s*\d+(\s*[,\u2013-]\s*\d+)*\s*$/;
+
+type PageElement = {
+  localName: string;
+  textContent: string | null;
+  parentElement: PageElement | null;
+  children: ArrayLike<PageElement>;
+  matches(selector: string): boolean;
+  closest(selector: string): PageElement | null;
+  querySelector(selector: string): PageElement | null;
+  querySelectorAll(selector: string): Iterable<PageElement>;
+  remove(): void;
+};
+
+function wordsOf(text: string | null): string {
+  return (text ?? "").replace(/\s+/g, "");
+}
+
+// A list where every item is only a link: "Related pages", "See also",
+// "Other websites", lists of more articles.
+function isLinkList(list: PageElement): boolean {
+  const items = Array.from(list.children).filter((el) => el.localName === "li");
+  if (items.length === 0) return false;
+  return items.every((li) => {
+    const text = wordsOf(li.textContent);
+    if (!text) return true;
+    const linked = Array.from(li.querySelectorAll("a"), (a) => wordsOf(a.textContent)).join("");
+    return linked === text;
+  });
+}
+
+function isLayoutTable(table: PageElement): boolean {
+  for (const p of table.querySelectorAll("p")) {
+    if ((p.textContent ?? "").trim().length >= LAYOUT_TABLE_PARAGRAPH) return true;
+  }
+  return false;
+}
+
+// Removes the blocks that aren't prose (see NON_PROSE) from a parsed
+// page, in place. Anything that is or holds the page's article is kept.
+export function stripNonProse(root: PageElement): void {
+  const remove = (el: PageElement) => {
+    if (el.matches(ARTICLE) || el.querySelector(ARTICLE)) return;
+    el.remove();
+  };
+  for (const el of Array.from(root.querySelectorAll(NON_PROSE))) remove(el);
+  // Site headers and footers; one inside the article (a byline, say) is
+  // left to Readability.
+  for (const el of Array.from(root.querySelectorAll("header, footer"))) {
+    if (!el.parentElement?.closest(ARTICLE.replace("html, body, ", ""))) remove(el);
+  }
+  for (const el of Array.from(root.querySelectorAll("table"))) {
+    if (!isLayoutTable(el)) remove(el);
+  }
+  for (const el of Array.from(root.querySelectorAll("sup"))) {
+    const text = el.textContent ?? "";
+    if (BRACKETED_MARKER.test(text) || (NUMBER_MARKER.test(text) && el.querySelector('a[href^="#"]'))) {
+      remove(el);
+    }
+  }
+  for (const el of Array.from(root.querySelectorAll("ul, ol"))) {
+    if (isLinkList(el)) remove(el);
+  }
+}
+
+type ContentNode = DomNode & { remove?: () => void };
+
+// Drops headings left with no prose under them (a "References" heading
+// whose list was stripped, say): no text before the next heading of the
+// same or a higher level, or the end. Text under a kept subheading counts
+// for its parent. Iterative, like htmlToText.
+export function dropEmptySections(root: ContentNode): void {
+  const TEXT = 0;
+  const events: (typeof TEXT | { heading: ContentNode; level: number })[] = [];
+  const stack: ContentNode[] = [root];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (node.nodeType === 3) {
+      if (/\S/.test(node.nodeValue ?? "")) events.push(TEXT);
+      continue;
+    }
+    if (node.nodeType !== 1) continue;
+    const tag = (node.localName ?? "").toLowerCase();
+    if (SKIP.has(tag)) continue;
+    const heading = /^h([1-6])$/.exec(tag);
+    if (heading) {
+      events.push({ heading: node, level: Number(heading[1]) });
+      continue;
+    }
+    const children = node.childNodes;
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+  }
+  // Walking back from the end: hasProse[level] is whether prose follows
+  // before the next heading at that level or higher.
+  const hasProse = [false, false, false, false, false, false, false];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event === TEXT) {
+      hasProse.fill(true);
+      continue;
+    }
+    if (!hasProse[event.level]) event.heading.remove?.();
+    for (let level = event.level; level <= 6; level++) hasProse[level] = false;
+  }
+}
 
 type DomNode = {
   nodeType: number;
@@ -156,9 +305,11 @@ export function htmlToText(root: DomNode): string {
   return normalizeBodyText(parts.join(""));
 }
 
-// Pulls the article out of a page. Throws FetchArticleError: "extract_failed"
-// when there is no usable article (or too little text), "too_long" when the
-// text is over BODY_TEXT_MAX_LENGTH (we never cut it silently).
+// Pulls the article out of a page, without the blocks that aren't prose
+// (stripNonProse, dropEmptySections). Text over BODY_TEXT_MAX_LENGTH is
+// cut to its first part, at a paragraph break when one fits, and flagged
+// trimmed. Throws FetchArticleError "extract_failed" when there is no
+// usable article (or too little text).
 //
 // Everything that walks the page (parsing, Readability, htmlToText) is
 // inside the try, so a parser error, a page over the size limits above, or
@@ -179,6 +330,7 @@ export function extractArticle(html: string, pageUrl: URL): Article {
     )) {
       el.remove();
     }
+    stripNonProse(document.documentElement as unknown as PageElement);
     // Give the document its real URL, so any relative link Readability
     // resolves points at the page, not at our server.
     const head = document.head ?? document.documentElement;
@@ -195,19 +347,22 @@ export function extractArticle(html: string, pageUrl: URL): Article {
       serializer: (el) => el as unknown as DomNode,
     }).parse();
     if (!parsed?.content) throw new FetchArticleError("extract_failed");
+    // Readability can empty a section on its own, so this runs on its
+    // output.
+    dropEmptySections(parsed.content);
     text = htmlToText(parsed.content);
     title = normalizeTitle(parsed.title || pageTitle);
   } catch (error) {
     if (error instanceof FetchArticleError) throw error;
     throw new FetchArticleError("extract_failed", { cause: error });
   }
-  if (text.length < BODY_TEXT_MIN_LENGTH) {
+  // An article over the limit keeps its first part (trimToLimit), with
+  // trimmed set so the reading can say so.
+  const kept = trimToLimit(text);
+  if (kept.text.length < BODY_TEXT_MIN_LENGTH) {
     throw new FetchArticleError("extract_failed");
   }
-  if (text.length > BODY_TEXT_MAX_LENGTH) {
-    throw new FetchArticleError("too_long");
-  }
-  return { title, text };
+  return { title, text: kept.text, trimmed: kept.trimmed };
 }
 
 export async function fetchArticle(

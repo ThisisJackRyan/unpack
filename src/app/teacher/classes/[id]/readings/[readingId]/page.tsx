@@ -13,6 +13,7 @@ import { ReadingStatusBadge } from "@/components/reading-status-badge";
 import { MetaLine } from "@/components/meta-line";
 import { StudentReadingStatusBadge } from "@/components/student-reading-status-badge";
 import { TeacherAnswerList } from "@/components/teacher-answers";
+import { TrimmedNote } from "@/components/trimmed-note";
 import { backLink, card, focusRing, secondaryButton, textLink } from "@/components/ui";
 import { cellKey, NOT_STARTED_CELL, passedSummary, triesLabel, type ClassStatus } from "@/lib/class-status";
 import { loadClassStatus } from "@/lib/class-status-db";
@@ -187,6 +188,7 @@ export default async function ReadingPage({ params, searchParams }: Props) {
           Reading text
         </h2>
         <div className="mx-auto flex max-w-prose flex-col gap-5 text-lg leading-relaxed text-ink-800">
+          {reading.bodyTrimmed && <TrimmedNote />}
           {paragraphs.map((p, i) => (
             <p key={i} className="whitespace-pre-line break-words">
               {p}

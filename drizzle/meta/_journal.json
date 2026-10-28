@@ -71,6 +71,13 @@
       "when": 1793125218729,
       "tag": "0009_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793205813582,
+      "tag": "0010_reading_body_trimmed",
+      "breakpoints": true
     }
   ]
 }

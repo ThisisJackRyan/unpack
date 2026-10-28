@@ -24,7 +24,7 @@ function deps(overrides: Partial<ReadingSourceDeps> = {}) {
     },
     fetchArticle: async (url) => {
       calls.fetch++;
-      return { title: "Page title", text: "Article ".repeat(40), url: `${url}?final` };
+      return { title: "Page title", text: "Article ".repeat(40), url: `${url}?final`, trimmed: false };
     },
     log: (_m, fields) => calls.logs.push(fields),
     ...overrides,
@@ -36,7 +36,10 @@ describe("resolveReadingSource", () => {
   it("takes pasted text as is, with no fetch and no limit", async () => {
     const { d, calls } = deps();
     const result = await resolveReadingSource(TEXT, d);
-    assert.deepEqual(result, { ok: true, source: { title: "A story", bodyText: TEXT.source === "text" ? TEXT.bodyText : "", sourceUrl: null } });
+    assert.deepEqual(result, {
+      ok: true,
+      source: { title: "A story", bodyText: TEXT.source === "text" ? TEXT.bodyText : "", sourceUrl: null, bodyTrimmed: false },
+    });
     assert.deepEqual([calls.record, calls.fetch], [0, 0]);
   });
 
@@ -47,6 +50,7 @@ describe("resolveReadingSource", () => {
     if (result.ok) {
       assert.equal(result.source.title, "Page title");
       assert.equal(result.source.sourceUrl, "https://example.com/story?final");
+      assert.equal(result.source.bodyTrimmed, false);
     }
     assert.deepEqual([calls.record, calls.fetch], [1, 1]);
   });
@@ -111,17 +115,24 @@ describe("resolveReadingSource", () => {
       // A fixed app string (safe-error-fields.ts allows it).
       message: "fetch article failed: not_html",
     });
-    const tooLong = deps({
-      fetchArticle: async () => {
-        throw new FetchArticleError("too_long");
-      },
+  });
+
+  it("passes a trimmed article through as it is, flagged, with no error", async () => {
+    const kept = "The first part of a long article. ".repeat(500).trim();
+    const { d, calls } = deps({ fetchArticle: async (url) => ({ title: "Long", text: kept, url, trimmed: true }) });
+    assert.deepEqual(await resolveReadingSource(LINK, d), {
+      ok: true,
+      source: { title: "Long", bodyText: kept, sourceUrl: LINK.source === "link" ? LINK.url : "", bodyTrimmed: true },
     });
-    const r = await resolveReadingSource(LINK, tooLong.d);
-    assert.equal(!r.ok && r.suggestText, "Paste a shorter section instead.");
+    assert.deepEqual(calls.logs, []);
+  });
+
+  it("has no long-article refusal any more", () => {
+    assert.equal("too_long" in LINK_ERRORS, false);
   });
 
   it("asks for a title when the page has none", async () => {
-    const { d } = deps({ fetchArticle: async (url) => ({ title: "  ", text: "x".repeat(300), url }) });
+    const { d } = deps({ fetchArticle: async (url) => ({ title: "  ", text: "x".repeat(300), url, trimmed: false }) });
     assert.deepEqual(await resolveReadingSource(LINK, d), { ok: false, errors: { title: NO_PAGE_TITLE_MESSAGE } });
   });
 });
