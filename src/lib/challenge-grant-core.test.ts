@@ -275,6 +275,6 @@ describe("Give one more try on the queue", () => {
         "We couldn’t find that student on that reading. The list is up to date.",
       ],
     );
-    for (const r of results) assert.doesNotMatch(grantMessage(r, "Maya Ro"), /'|—/);
+    for (const r of results) assert.doesNotMatch(grantMessage(r, "Maya Ro"), /'|\u2014/);
   });
 });
