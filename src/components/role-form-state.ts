@@ -37,7 +37,7 @@ export async function signOutTo(
 // The age screen shows one note at a time: the neutral hint, or the red
 // error in its place while the error is active. Both selects'
 // aria-describedby point at whichever is shown. The error stays active
-// until a month or year is picked or the form is sent again.
+// until a month, a year, or a role is picked, or the form is sent again.
 export const AGE_HINT_ID = "age-hint";
 export const AGE_ERROR_ID = "age-error";
 
@@ -45,4 +45,14 @@ export function ageNote(activeError: string | undefined): { show: "hint" | "erro
   return activeError
     ? { show: "error", describedBy: AGE_ERROR_ID }
     : { show: "hint", describedBy: AGE_HINT_ID };
+}
+
+// The age error shows only once the form is sent (Continue, or Save and
+// Switch on /settings) with "reading for myself" and a blank month or year:
+// the picker checks that here before sending, so it shows right away with
+// no round trip, and the server checks again. Picking a month, a year, or
+// the other role clears it, so switching back never shows an old error.
+// Only blank or not; the answer itself is never kept.
+export function ageAnswerMissing(form: { role: unknown; month: unknown; year: unknown }): boolean {
+  return form.role === "self_learner" && (!form.month || !form.year);
 }

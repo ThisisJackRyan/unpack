@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { BIRTH_MONTH_FIELD, BIRTH_YEAR_FIELD, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
-import { MONTH_NAMES } from "@/lib/age-screen";
+import { AGE_SCREEN_ERROR, MONTH_NAMES } from "@/lib/age-screen";
 import { ErrorMessage } from "./error-message";
-import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, signOutTo, type RoleFormState } from "./role-form-state";
+import { AGE_ERROR_ID, AGE_HINT_ID, ageAnswerMissing, ageNote, signOutTo, type RoleFormState } from "./role-form-state";
 import { field, primaryButtonLarge, secondaryButtonLarge } from "./ui";
 
 const CHOICES: { role: AccountRole; title: string; line: string }[] = [
@@ -62,8 +62,11 @@ export function RolePicker({
   const [state, formAction, pending] = useActionState(action, {});
   const [role, setRole] = useState<string | null>(state.role ?? initialRole);
   const [asking, setAsking] = useState(state.switchConfirm === "ask");
-  // Picking a month or year clears the age error, so the hint comes back.
+  // Picking a month, a year, or a role clears the age error, so the hint
+  // comes back. ageMissing: sent with a blank month or year (checked here,
+  // see ageAnswerMissing), so the error shows only after a press.
   const [ageErrorCleared, setAgeErrorCleared] = useState(false);
+  const [ageMissing, setAgeMissing] = useState(false);
   // After an error the form is reset to its defaults: follow the kept choice.
   const [shown, setShown] = useState(state);
   if (shown !== state) {
@@ -71,6 +74,7 @@ export function RolePicker({
     if (state.role) setRole(state.role);
     setAsking(state.switchConfirm === "ask");
     setAgeErrorCleared(false);
+    setAgeMissing(false);
   }
   const errors = state.errors ?? {};
   const gated = !ageConfirmed && (ageGated || state.ageGate === true);
@@ -79,7 +83,7 @@ export function RolePicker({
   // Only the class note: nothing left to choose.
   const onlyNote = Boolean(leaving) || (firstRun && gated);
   const gateShown = gated && (role === "self_learner" || onlyNote);
-  const ageError = ageErrorCleared ? undefined : errors.age;
+  const ageError = ageMissing ? AGE_SCREEN_ERROR : ageErrorCleared ? undefined : errors.age;
   const age = ageNote(ageError);
   const confirmed = state.switchConfirm === "confirmed";
   const needsConfirm = confirmSwitch && role === "self_learner" && !confirmed && !gated;
@@ -99,8 +103,21 @@ export function RolePicker({
     if (leaving) void signOutTo(leaving, signOut, (path) => window.location.assign(path));
   }, [leaving, signOut]);
 
+  function clearAgeError() {
+    setAgeErrorCleared(true);
+    setAgeMissing(false);
+  }
+
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     const submitter = (e.nativeEvent as SubmitEvent).submitter;
+    if (askAge && !onlyNote) {
+      const data = new FormData(e.currentTarget);
+      if (ageAnswerMissing({ role: data.get("role"), month: data.get(BIRTH_MONTH_FIELD), year: data.get(BIRTH_YEAR_FIELD) })) {
+        e.preventDefault();
+        setAgeMissing(true);
+        return;
+      }
+    }
     if (needsConfirm && submitter?.getAttribute("name") !== "confirmSwitch") {
       e.preventDefault();
       setAsking(true);
@@ -136,7 +153,10 @@ export function RolePicker({
                   name="role"
                   value={c.role}
                   defaultChecked={(state.role ?? initialRole) === c.role}
-                  onChange={(e) => setRole(e.currentTarget.value)}
+                  onChange={(e) => {
+                    setRole(e.currentTarget.value);
+                    clearAgeError();
+                  }}
                   aria-describedby={`role-${c.role}-line`}
                   className="peer sr-only"
                 />
@@ -175,7 +195,7 @@ export function RolePicker({
                 id={BIRTH_MONTH_FIELD}
                 name={BIRTH_MONTH_FIELD}
                 defaultValue=""
-                onChange={() => setAgeErrorCleared(true)}
+                onChange={clearAgeError}
                 aria-invalid={ageError ? true : undefined}
                 aria-describedby={age.describedBy}
                 className={`${field} cursor-pointer text-lg`}
@@ -198,7 +218,7 @@ export function RolePicker({
                 id={BIRTH_YEAR_FIELD}
                 name={BIRTH_YEAR_FIELD}
                 defaultValue=""
-                onChange={() => setAgeErrorCleared(true)}
+                onChange={clearAgeError}
                 aria-invalid={ageError ? true : undefined}
                 aria-describedby={age.describedBy}
                 className={`${field} cursor-pointer text-lg`}
