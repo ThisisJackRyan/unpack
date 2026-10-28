@@ -21,7 +21,7 @@ export default async function TeacherLayout({
           <div className="flex items-center gap-2">
             <Link
               href="/settings"
-              className={`inline-flex min-h-11 items-center rounded-2xl px-3 text-base font-semibold text-ink-700 transition-colors hover:bg-primary-50 hover:text-primary-800 ${focusRing}`}
+              className={`inline-flex min-h-11 items-center rounded-2xl px-3 text-lg font-semibold text-ink-700 transition-colors hover:bg-primary-50 hover:text-primary-800 ${focusRing}`}
             >
               Settings
             </Link>

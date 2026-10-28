@@ -40,7 +40,7 @@ describe("historyItems", () => {
     const [item] = historyItems([{ id: "r", title: "T", grade_level: "weird", status: "in_progress", created_at: "2026-10-19T12:00:00Z" }], "UTC");
     assert.equal(item.gradeLabel, "");
     assert.deepEqual(metaParts([item.dateLabel, item.gradeLabel]), ["Oct 19, 2026"]);
-    assert.equal(metaSpokenText([item.dateLabel, item.gradeLabel]), "Oct 19, 2026");
+    assert.equal(metaSpokenText([item.dateLabel, item.gradeLabel]), "Oct 19, 2026.");
   });
 
   it("adds X of Y done to in-progress rows only", () => {
@@ -54,7 +54,7 @@ describe("historyItems", () => {
       "UTC",
     );
     assert.deepEqual(items.map((i) => i.doneLabel), ["2 of 3 done", "0 of 4 done", "", ""]);
-    assert.equal(metaSpokenText([items[0].dateLabel, items[0].gradeLabel, items[0].doneLabel]), "Oct 19, 2026, Grade 5, 2 of 3 done");
+    assert.equal(metaSpokenText([items[0].dateLabel, items[0].gradeLabel, items[0].doneLabel]), "Oct 19, 2026. Grade 5. 2 of 3 done.");
   });
 
   it("treats an unknown status as in progress, and an empty list as empty", () => {

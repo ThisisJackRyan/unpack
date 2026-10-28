@@ -54,7 +54,7 @@ export function ResetTriesButton({
         {pending ? "Resetting…" : "Let them try again"}
         <span className="sr-only">
           {" "}
-          ({name}, {readingTitle})
+          for {name} on {readingTitle}
         </span>
       </button>
       <ErrorMessage>

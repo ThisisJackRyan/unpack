@@ -4,8 +4,8 @@
 // "'s logo". Clerk has no prop or localization key for it, so
 // ClerkAvatarAlt (src/components/clerk-avatar-alt.tsx) fixes it in the
 // page: the image is decorative there (the menu button has its own label,
-// "Open user menu", and the menu shows the email next to it), so its alt
-// becomes empty.
+// "Account menu", set in src/lib/clerk-localization.ts, and the menu shows
+// the email next to it), so its alt becomes empty.
 
 // The alt to use instead, or null to leave it alone.
 export function fixedAvatarAlt(alt: string | null): string | null {

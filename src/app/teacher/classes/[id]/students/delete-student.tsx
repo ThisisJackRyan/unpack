@@ -60,13 +60,13 @@ export function DeleteStudentButton({ action, studentId, name }: { action: Actio
           <h2 id={titleId} className="text-xl font-semibold break-words text-ink-950">
             Delete {name}?
           </h2>
-          <div id={bodyId} className="flex flex-col gap-3 text-base text-ink-700">
+          <div id={bodyId} className="flex flex-col gap-3 text-lg text-ink-700">
             <p>
               This deletes {name} and all of their work in this class: answers, tries, notes to you, and their own
               questions. It can’t be undone.
             </p>
             <p>If they open unpack again, they’ll need to join with the class code.</p>
-            <p className="text-base text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
+            <p className="text-lg text-ink-700">Our database backups keep deleted data for a short time, then it’s gone.</p>
           </div>
           <ErrorMessage>
             {state.error ?? ""}

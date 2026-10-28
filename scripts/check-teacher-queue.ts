@@ -19,6 +19,20 @@
 //   one note saves (a failing check), or none (a passing one).
 // - Auto-close: a passing attempt closes an open challenge in the same
 //   transaction, and the queue never lists a passed student.
+// - Out of tries, no note yet (loadTeacherQueue, countTeacherQueue): a
+//   student out of tries (or at the check limit) with no note is listed
+//   with "Out of tries, no note yet" and counted; after their note they
+//   are listed once, as the challenge; one more try takes them off until
+//   it is used too; a passed student is never listed; another teacher
+//   sees nothing.
+// - Give one more try on a no-note row (grantExtraTry): another teacher
+//   (with this class id or their own) and a wrong class are refused with
+//   nothing changed; the grant clears the row and the count, stores the
+//   same limits as "Deny, give one more try" on a denied round with an
+//   empty note, and the student can submit try 4 (no longer waiting); a
+//   second grant before that try is used is refused; --n parallel grants
+//   save one; grants racing a note save exactly one of the two; a later
+//   note is round 2 but the queue calls it note 1.
 // - Another teacher can't decide (not_found, still open) or see the queue.
 // - The class view's statuses (loadClassStatus) match the student's own
 //   (listReadingsWithStatus) and what each case expects.
@@ -42,7 +56,18 @@
 // against production.
 import { getSql } from "@/db";
 import type { EffortCheckInput, EffortVerdict } from "@/lib/ai/effort-check";
-import { decideChallenge, loadChallengeQueue, countOpenChallenges, type DecideResult } from "@/lib/challenge-queue";
+import {
+  countOpenChallenges,
+  countTeacherQueue,
+  decideChallenge,
+  loadChallengeQueue,
+  grantExtraTry,
+  loadTeacherQueue,
+  type DecideResult,
+  type GrantResult,
+  type QueueEntry,
+} from "@/lib/challenge-queue";
+import { NO_NOTE_LABEL } from "@/lib/challenge-queue-core";
 import { sendChallenge, type ChallengeResult } from "@/lib/challenges";
 import { cellKey } from "@/lib/class-status";
 import { loadClassStatus } from "@/lib/class-status-db";
@@ -444,6 +469,184 @@ async function checkAutoClose() {
   expected.set(passedStudent, "passed");
 }
 
+async function checkNoNote() {
+  console.log("\n== OUT OF TRIES, NO NOTE YET ==");
+  const entriesFor = (queue: QueueEntry[], student: string) => queue.filter((e) => e.item.studentId === student);
+
+  // Out of tries, no note: listed with the label, and counted.
+  const student = await newStudent();
+  for (let i = 0; i < MAX_TRIES - 1; i++) await submit(student, "fail", 5);
+  const countBefore = await countTeacherQueue(classId, teacherId, execute);
+  const listedBefore = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student).length;
+  await submit(student, "fail", 5);
+  let queue = await loadTeacherQueue(classId, teacherId, execute);
+  let mine = entriesFor(queue, student);
+  const countOut = await countTeacherQueue(classId, teacherId, execute);
+  const entry = mine[0];
+  check(
+    listedBefore === 0 && mine.length === 1 && entry.kind === "no_note" && entry.item.tries === MAX_TRIES && entry.item.triesAllowed === MAX_TRIES,
+    `out of tries, no note: listed ${mine.length} time(s) as ${entry?.kind} (before the last try: ${listedBefore}), ${NO_NOTE_LABEL}`,
+  );
+  check(countOut === countBefore + 1 && countOut === queue.length, `counted: ${countBefore} -> ${countOut}, list ${queue.length}`);
+  check(
+    queue.every((e, i) => i === 0 || Date.parse(queue[i - 1].at) <= Date.parse(e.at)),
+    `oldest first by when they started waiting (${queue.map((e) => e.kind).join(",")})`,
+  );
+
+  // Another teacher sees nothing.
+  const theirs = await loadTeacherQueue(classId, otherTeacherId, execute);
+  const theirCount = await countTeacherQueue(classId, otherTeacherId, execute);
+  check(theirs.length === 0 && theirCount === 0, `other teacher: list ${theirs.length}, count ${theirCount}`);
+
+  // After the note: once, as the challenge; the count doesn't move.
+  const sent = await send(student);
+  queue = await loadTeacherQueue(classId, teacherId, execute);
+  mine = entriesFor(queue, student);
+  const countNote = await countTeacherQueue(classId, teacherId, execute);
+  check(
+    sent.status === "sent" && mine.length === 1 && mine[0].kind === "challenge" && countNote === countOut,
+    `after the note: ${sent.status}, listed ${mine.length} time(s) as ${mine.map((e) => e.kind).join(",")}, count ${countNote}`,
+  );
+
+  // One more try: off the list until it's used too, then back.
+  const challengeId = mine[0].kind === "challenge" ? mine[0].item.id : "";
+  const granted = await decide(challengeId, "deny", true);
+  const afterGrant = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student).length;
+  await submit(student, "fail", 5);
+  const usedTry = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student);
+  check(
+    granted.status === "denied" && afterGrant === 0 && usedTry.length === 1 && usedTry[0].kind === "no_note",
+    `one more try: listed ${afterGrant} time(s), after using it ${usedTry.map((e) => e.kind).join(",") || "none"}`,
+  );
+  expected.set(student, "waiting");
+
+  // At the check limit with tries left: listed too.
+  const checkLimit = await newStudent();
+  await submit(checkLimit, "fail", 5);
+  for (let i = 1; i < EFFORT_CHECK_LIMIT; i++) await submit(checkLimit, "error", 5);
+  const atLimit = entriesFor(await loadTeacherQueue(classId, teacherId, execute), checkLimit);
+  check(atLimit.length === 1 && atLimit[0].kind === "no_note", `check limit, no note: ${atLimit.map((e) => e.kind).join(",") || "none"}`);
+  expected.set(checkLimit, "waiting");
+
+  // Passed: never listed.
+  const passed = await newStudent();
+  for (let i = 0; i < MAX_TRIES - 1; i++) await submit(passed, "fail", 5);
+  const pass = await submit(passed, "pass", 5);
+  const passedListed = entriesFor(await loadTeacherQueue(classId, teacherId, execute), passed).length;
+  check(pass.status === "checked" && pass.passed && passedListed === 0, `passed on the last try: listed ${passedListed}`);
+  expected.set(passed, "passed");
+
+  // The list matches the class view: every no-note entry is Waiting there.
+  const status = await loadClassStatus(classId, teacherId, execute);
+  queue = await loadTeacherQueue(classId, teacherId, execute);
+  const noNote = queue.filter((e) => e.kind === "no_note");
+  const waiting = Object.values(status.cells).filter((c) => c.status === "waiting").length;
+  check(
+    noNote.length === waiting && noNote.every((e) => status.cells[cellKey(e.item.studentId, e.item.readingId)]?.status === "waiting"),
+    `no-note entries ${noNote.length}, Waiting for teacher in the class view ${waiting}`,
+  );
+}
+
+function grant(studentId: string, teacher = teacherId, klass = classId): Promise<GrantResult> {
+  return grantExtraTry({ classId: klass, teacherId: teacher, studentId, readingId }, execute);
+}
+
+async function checkGiveExtraTry() {
+  console.log("\n== GIVE ONE MORE TRY, NO NOTE ==");
+  const entriesFor = (queue: QueueEntry[], student: string) => queue.filter((e) => e.item.studentId === student);
+  const student = await newStudent();
+  for (let i = 0; i < MAX_TRIES; i++) await submit(student, "fail", 5);
+  const listed = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student);
+  const countBefore = await countTeacherQueue(classId, teacherId, execute);
+  const before = await counts(student);
+  check(listed.length === 1 && listed[0].kind === "no_note" && before.challenges === 0, `out of tries, no note: listed as ${listed.map((e) => e.kind).join(",")}`);
+
+  // Another teacher, with this class id or their own class; a wrong class.
+  const { id: otherClassId } = await one<{ id: string }>(sql`
+    insert into classes (teacher_id, name, grade_level, join_code)
+    values (${otherTeacherId}, 'Grant other class', '3', ${`QG${RUN_ID}`.toUpperCase().slice(0, 8)}) returning id`);
+  const refused = await Promise.all([
+    grant(student, otherTeacherId),
+    grant(student, otherTeacherId, otherClassId),
+    grant(student, teacherId, crypto.randomUUID()),
+  ]);
+  const afterRefused = await counts(student);
+  const stillListed = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student).length;
+  check(
+    refused.every((r) => r.status === "not_found") && afterRefused.challenges === 0 && stillListed === 1 &&
+      (await countTeacherQueue(classId, teacherId, execute)) === countBefore && (await studentStatus(student)) === "waiting",
+    `other teacher / their class / wrong class: ${refused.map((r) => r.status).join(", ")}; rows ${afterRefused.challenges}, still listed ${stillListed}`,
+  );
+
+  // The grant: the row and the count clear, the same limits as Deny with
+  // one more try, on a denied round with an empty note.
+  const given = await grant(student);
+  const rows = await sql`
+    select round, status, note, resolved_by, resolved_at, tries_allowed, checks_allowed
+    from challenges where student_id = ${student} and reading_id = ${readingId}`;
+  const g = rows[0];
+  check(
+    given.status === "granted" && rows.length === 1 && g.round === 1 && g.status === "denied" && g.note === "" &&
+      g.resolved_by === teacherId && g.resolved_at !== null && g.tries_allowed === before.attempts + 1 &&
+      g.checks_allowed === before.checks + EXTRA_TRY_CHECKS,
+    `granted: ${given.status}, round ${g?.round} ${g?.status}, note empty ${g?.note === ""}, tries allowed ${g?.tries_allowed} (want ${before.attempts + 1}), checks ${g?.checks_allowed} (want ${before.checks + EXTRA_TRY_CHECKS})`,
+  );
+  const afterGrant = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student).length;
+  const countAfter = await countTeacherQueue(classId, teacherId, execute);
+  check(afterGrant === 0 && countAfter === countBefore - 1, `row cleared: listed ${afterGrant}, count ${countBefore} -> ${countAfter}`);
+  let stage = answerStage(await loadReadingProgress(student, readingId, execute));
+  check(
+    stage.kind === "answer" && stage.extraTry && stage.tryNumber === MAX_TRIES + 1 && (await studentStatus(student)) === "in_progress",
+    `student page: ${stage.kind}${stage.kind === "answer" ? ` try ${stage.tryNumber}, extra ${stage.extraTry}` : ""}, not waiting`,
+  );
+
+  // The limit: no second grant until that try is used.
+  const second = await grant(student);
+  check(second.status === "not_waiting" && (await counts(student)).challenges === 1, `second grant before the try is used: ${second.status}`);
+
+  // Try 4 is checked; out again, listed again; a note is round 2, note 1.
+  const fourth = await submit(student, "fail", 5);
+  const after4 = await counts(student);
+  const back = entriesFor(await loadTeacherQueue(classId, teacherId, execute), student);
+  check(
+    fourth.status === "checked" && after4.attempts === MAX_TRIES + 1 && back.length === 1 && back[0].kind === "no_note" &&
+      (await studentStatus(student)) === "waiting",
+    `try ${MAX_TRIES + 1}: ${fourth.status}, attempts ${after4.attempts}, listed again as ${back.map((e) => e.kind).join(",")}`,
+  );
+  stage = answerStage(await loadReadingProgress(student, readingId, execute));
+  check(stage.kind === "out_of_tries" && stage.extraTry, `page after the try: ${stage.kind}`);
+  const sent = await send(student);
+  const item = (await loadChallengeQueue(classId, teacherId, execute)).find((q) => q.studentId === student);
+  check(
+    sent.status === "sent" && item?.round === 2 && item.noteNumber === 1 && item.note === "I tried my best.",
+    `note after the grant: ${sent.status}, round ${item?.round}, note number ${item?.noteNumber}`,
+  );
+  expected.set(student, "challenged");
+
+  // --n parallel grants on one student: one.
+  const racer = await newStudent();
+  for (let i = 0; i < MAX_TRIES; i++) await submit(racer, "fail", 5);
+  const settled = await Promise.allSettled(Array.from({ length: N }, () => grant(racer)));
+  const t = tally(settled as PromiseSettledResult<GrantResult>[]);
+  const racerRows = (await counts(racer)).challenges;
+  console.log(`parallel grants ${JSON.stringify(t.statuses)}, threw ${t.thrown.length}`);
+  check(t.statuses.granted === 1 && t.statuses.not_waiting === N - 1 && racerRows === 1, `${N} parallel grants: ${t.statuses.granted ?? 0} granted, rows ${racerRows}`);
+  expected.set(racer, "in_progress");
+
+  // Grants racing the student's note: exactly one of the two saves.
+  const both = await newStudent();
+  for (let i = 0; i < MAX_TRIES; i++) await submit(both, "fail", 5);
+  const mixed = await Promise.allSettled(
+    Array.from({ length: N }, (_, i) => (i % 2 ? grant(both) : send(both, `Race ${i}`)) as Promise<{ status: string }>),
+  );
+  const m = tally(mixed);
+  const bothRows = await sql`select status, note from challenges where student_id = ${both} and reading_id = ${readingId}`;
+  const won = (m.statuses.granted ?? 0) + (m.statuses.sent ?? 0);
+  console.log(`grants vs notes ${JSON.stringify(m.statuses)}, threw ${m.thrown.length}`);
+  check(won === 1 && bothRows.length === 1 && m.thrown.length === 0, `grants racing a note: ${won} saved, rows ${bothRows.length}`);
+  expected.set(both, m.statuses.granted ? "in_progress" : "challenged");
+}
+
 async function checkOwnership() {
   console.log("\n== ANOTHER TEACHER ==");
   const { student, challenge } = await challengedStudent();
@@ -573,6 +776,8 @@ async function main(): Promise<void> {
     await checkExtraTryAtCheckLimit();
     await checkSecondTab();
     await checkAutoClose();
+    await checkNoNote();
+    await checkGiveExtraTry();
     await checkOwnership();
     await checkTeacherAnswers();
     await checkStatusDerivation();

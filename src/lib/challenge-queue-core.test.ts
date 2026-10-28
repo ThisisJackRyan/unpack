@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   decideChallengeWith,
@@ -6,11 +7,20 @@ import {
   decideStatements,
   decisionMessage,
   parseDecisionChoice,
+  NO_NOTE_LABEL,
+  triesUsedLabel,
+  noNoteHelp,
+  noNoteItems,
+  noNoteStatement,
   openCountStatement,
+  queueCount,
   queueItems,
   queueStatements,
+  teacherQueue,
   type DecideInput,
   type DecideResult,
+  type NoNoteItem,
+  type QueueItem,
 } from "./challenge-queue-core";
 import type { Statement } from "./link-rate-limit";
 import { EXTRA_TRY_CHECKS } from "./reading-limits";
@@ -190,6 +200,8 @@ describe("queue", () => {
           tries_allowed: 4,
           checks_allowed: 5,
           last_try: 4,
+          // Round 1 was one more try without a note: this is their first.
+          note_number: 1,
         },
         { id: "ch2", note: "Help", created_at: "2026-10-27", student_id: "s2", first_name: "Keʻala", last_initials: "P", reading_id: "r1", title: "Foxes", tries: 0, checks: 6, last_try: null },
       ],
@@ -202,6 +214,7 @@ describe("queue", () => {
     assert.deepEqual(items[0], {
       id: "ch1",
       round: 2,
+      noteNumber: 1,
       note: "I tried.",
       createdAt: "2026-10-27T10:00:00.000Z",
       studentId: "s1",
@@ -220,9 +233,169 @@ describe("queue", () => {
     });
     assert.equal(items[1].studentName, "Keʻala P");
     assert.equal(items[1].round, 1);
+    assert.equal(items[1].noteNumber, 1);
     assert.equal(items[1].triesAllowed, 3);
     assert.equal(items[1].checksAllowed, 6);
     assert.equal(items[1].lastTry, null);
     assert.deepEqual(items[1].questions, [{ id: "q1", position: 1, prompt: "What?", answer: null }]);
+  });
+});
+
+describe("out of tries, no note yet", () => {
+  // A student out of tries on r1: 3 of 3 tries, no challenge.
+  const ROW = {
+    student_id: "s1",
+    first_name: "Maya",
+    last_initials: "Ro",
+    reading_id: "r1",
+    title: "Foxes",
+    challenge: null,
+    extra_try: null,
+    tries: 3,
+    checks: 3,
+    tries_allowed: 3,
+    checks_allowed: 6,
+    ran_out_at: new Date("2026-10-27T09:00:00Z"),
+  };
+
+  function challenge(id: string, studentId: string, createdAt: string, readingId = "r1"): QueueItem {
+    return {
+      id,
+      round: 1,
+      noteNumber: 1,
+      note: "I tried.",
+      createdAt,
+      studentId,
+      studentName: "Kid",
+      readingId,
+      readingTitle: "Foxes",
+      tries: 3,
+      triesAllowed: 3,
+      checks: 3,
+      checksAllowed: 6,
+      lastTry: 3,
+      questions: [],
+    };
+  }
+
+  function noNote(studentId: string, ranOutAt: string, readingId = "r1"): NoNoteItem {
+    return {
+      studentId,
+      studentName: "Kid",
+      readingId,
+      readingTitle: "Foxes",
+      tries: 3,
+      triesAllowed: 3,
+      checks: 3,
+      checksAllowed: 6,
+      ranOutAt,
+    };
+  }
+
+  it("reads only this teacher's class, its published readings, and its students", () => {
+    const s = noNoteStatement("c1", "t1");
+    assert.deepEqual(s.params, ["c1", "t1"]);
+    assert.match(s.text, /join students s on s\.class_id = c\.id/);
+    assert.match(s.text, /join readings r on r\.class_id = c\.id and r\.status = 'published'/);
+    assert.match(s.text, /where c\.id = \$1::uuid and c\.teacher_id = \$2::uuid/);
+    assert.match(s.text, /not exists \(select 1 from attempts p where p\.student_id = s\.id and p\.reading_id = r\.id and p\.result = 'pass'\)/);
+    assert.match(s.text, /lc\.status not in \('open', 'approved'\)/);
+    assert.match(s.text, /t\.tries >= t\.tries_allowed or t\.checks >= t\.checks_allowed/);
+    // Only counted checks, for the count and for the time they ran out.
+    assert.equal(s.text.match(/outcome is distinct from 'given_back'/g)?.length, 2);
+    const where = s.text.search(/^where /m);
+    assert.ok(where > 0 && !/\bjoin\b/.test(s.text.slice(where)), "no join after where");
+  });
+
+  it("maps a Waiting row to an item, with the time they ran out", () => {
+    assert.deepEqual(noNoteItems([ROW]), [
+      {
+        studentId: "s1",
+        studentName: "Maya Ro",
+        readingId: "r1",
+        readingTitle: "Foxes",
+        tries: 3,
+        triesAllowed: 3,
+        checks: 3,
+        checksAllowed: 6,
+        ranOutAt: "2026-10-27T09:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("lists the check limit and a used one more try too", () => {
+    const checkLimit = { ...ROW, tries: 1, checks: 6 };
+    const usedExtraTry = { ...ROW, challenge: "denied", extra_try: true, tries: 4, tries_allowed: 4, checks: 5, checks_allowed: 5 };
+    assert.equal(noNoteItems([checkLimit, usedExtraTry]).length, 2);
+  });
+
+  it("leaves out a sent note, a decision, one more try not used yet, or tries left", () => {
+    const rows = [
+      { ...ROW, challenge: "open" },
+      { ...ROW, challenge: "approved" },
+      { ...ROW, challenge: "denied", extra_try: false },
+      { ...ROW, challenge: "denied", extra_try: true, tries_allowed: 4, checks_allowed: 8 },
+      { ...ROW, tries: 2, checks: 2 },
+    ];
+    assert.deepEqual(noNoteItems(rows), []);
+  });
+
+  it("merges with the challenges, oldest first by when they started waiting", () => {
+    const entries = teacherQueue(
+      [challenge("ch1", "s1", "2026-10-27T10:00:00.000Z"), challenge("ch2", "s2", "2026-10-27T08:00:00.000Z")],
+      [noNote("s3", "2026-10-27T09:00:00.000Z"), noNote("s4", "2026-10-27T11:00:00.000Z")],
+    );
+    assert.deepEqual(
+      entries.map((e) => [e.kind, e.key, e.at]),
+      [
+        ["challenge", "ch2", "2026-10-27T08:00:00.000Z"],
+        ["no_note", "s3:r1", "2026-10-27T09:00:00.000Z"],
+        ["challenge", "ch1", "2026-10-27T10:00:00.000Z"],
+        ["no_note", "s4:r1", "2026-10-27T11:00:00.000Z"],
+      ],
+    );
+  });
+
+  it("lists a student with a sent note once, as the challenge", () => {
+    const entries = teacherQueue(
+      [challenge("ch1", "s1", "2026-10-27T10:00:00.000Z")],
+      [noNote("s1", "2026-10-27T09:00:00.000Z"), noNote("s1", "2026-10-27T09:00:00.000Z", "r2")],
+    );
+    assert.deepEqual(entries.map((e) => [e.kind, e.key]), [["no_note", "s1:r2"], ["challenge", "ch1"]]);
+    assert.equal(queueCount([challenge("ch1", "s1", "2026-10-27T10:00:00.000Z")], [noNote("s1", "2026-10-27T09:00:00.000Z")]), 1);
+  });
+
+  it("counts both kinds, the same as the list", () => {
+    assert.equal(queueCount([], []), 0);
+    assert.equal(queueCount([challenge("ch1", "s1", "2026-10-27T10:00:00.000Z")], [noNote("s2", "2026-10-27T09:00:00.000Z")]), 2);
+  });
+
+  it("breaks ties by key and puts a missing time last", () => {
+    const entries = teacherQueue(
+      [challenge("ch9", "s9", "")],
+      [noNote("s2", "2026-10-27T09:00:00.000Z"), noNote("s1", "2026-10-27T09:00:00.000Z")],
+    );
+    assert.deepEqual(entries.map((e) => e.key), ["s1:r1", "s2:r1", "ch9"]);
+  });
+
+  it("has a plain label and helper line", () => {
+    assert.equal(NO_NOTE_LABEL, "Out of tries, no note yet");
+    assert.equal(noNoteHelp("Maya Ro"), "Maya Ro can still send you a note.");
+  });
+});
+
+// C2: the teacher's queue cards show tries, not "checks used".
+describe("queue card counts", () => {
+  it("says tries used, singular for 1", () => {
+    assert.equal(triesUsedLabel(3, 3), "3 of 3 tries used");
+    assert.equal(triesUsedLabel(4, 4), "4 of 4 tries used");
+    assert.equal(triesUsedLabel(1, 1), "1 of 1 try used");
+    assert.equal(triesUsedLabel(0, 3), "0 of 3 tries used");
+  });
+
+  it("neither the challenge card nor the out of tries row shows checks", () => {
+    const queue = readFileSync(new URL("../app/teacher/classes/[id]/challenges/queue.tsx", import.meta.url), "utf8");
+    assert.doesNotMatch(queue, /checks used|item\.checks/);
+    assert.equal(queue.match(/triesUsedLabel\(item\.tries, item\.triesAllowed\)/g)?.length, 2);
   });
 });
