@@ -15,8 +15,9 @@
 
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { withDeadline } from "./deadline";
-import { readingSaveFailedState, safeErrorFields } from "./create-guard";
+import { readingSaveFailedState } from "./create-guard";
 import { resolveReadingSource } from "./reading-source";
+import { safeErrorFields } from "./safe-error-fields";
 import { createOutcomeRedirect, type CreateOutcome, type CreateRedirect, type SelfReadingDraft } from "./self-allowance";
 import { validateSoloReadingForm } from "./self-reading-form";
 import type { ReadingFormInput } from "./validate-reading";

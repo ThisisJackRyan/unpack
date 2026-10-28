@@ -8,7 +8,6 @@ import {
   guardCreate,
   PRE_WRITE_DEADLINE_MS,
   readingSaveFailedState,
-  safeErrorFields,
   withDeadline,
 } from "./create-guard";
 import { SAVE_READING_FAILED_MESSAGE } from "./reading-source";
@@ -101,12 +100,6 @@ describe("guardCreate", () => {
     const values = { source: "text", url: "", title: "Bees", bodyText: "A long text.", gradeLevel: "5", questionCount: "4", questionMode: "" };
     assert.deepEqual(readingSaveFailedState(values), { errors: { form: SAVE_READING_FAILED_MESSAGE }, values });
     assert.equal(SAVE_READING_FAILED_MESSAGE, "We couldn’t save the reading. Please try again.");
-  });
-
-  it("logs the error's name, code and message only", () => {
-    const error = Object.assign(new Error("duplicate key"), { code: "23505", detail: "Key (body_text)=(the reading) exists", where: "x" });
-    assert.deepEqual(safeErrorFields(error), { name: "Error", code: "23505", message: "duplicate key" });
-    assert.deepEqual(safeErrorFields(undefined), { name: undefined, code: undefined, message: undefined });
   });
 });
 

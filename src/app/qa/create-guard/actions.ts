@@ -4,6 +4,7 @@ import { notFound, redirect, RedirectType, unstable_rethrow } from "next/navigat
 import type { ReadingFormState } from "@/components/reading-form-state";
 import { guardCreate, readingSaveFailedState } from "@/lib/create-guard";
 import { qaRoutesEnabled } from "@/lib/qa-routes";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { createSelfReadingWith } from "@/lib/self-reading-create";
 import { readingFormInput, readingFormValues } from "@/lib/validate-reading";
 
@@ -48,7 +49,7 @@ export async function qaCreateAction(options: QaCreateOptions, _prev: ReadingFor
     () => ({ state: readingSaveFailedState(readingFormValues(input)) }),
     {
       rethrow: unstable_rethrow,
-      onError: (error) => console.error("qa-create-action failed", (error as { name?: unknown }).name),
+      onError: (error) => console.error("qa-create-action failed", safeErrorFields(error)),
       deadlineMs: Math.min(Math.max(Number(options.precheckMs) || 0, 0), 30_000),
     },
   );

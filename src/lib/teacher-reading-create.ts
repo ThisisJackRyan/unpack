@@ -7,10 +7,11 @@
 // an insert that fails, writes no reading (teacher-reading-create.test.ts).
 
 import type { ReadingFormState } from "@/components/reading-form-state";
-import { readingSaveFailedState, safeErrorFields } from "./create-guard";
+import { readingSaveFailedState } from "./create-guard";
 import { withDeadline } from "./deadline";
 import { resolveReadingSource } from "./reading-source";
 import type { ReadingDraft } from "./readings";
+import { safeErrorFields } from "./safe-error-fields";
 import { validateReadingForm, type ReadingFormInput } from "./validate-reading";
 
 export const CLASS_NOT_FOUND_MESSAGE = "We couldn’t find this class.";

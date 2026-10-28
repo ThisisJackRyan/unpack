@@ -57,6 +57,7 @@
 // driver at a local Neon proxy (as in the db checks).
 
 import { neonConfig } from "@neondatabase/serverless";
+import { safeErrorFields } from "@/lib/safe-error-fields";
 import { ClerkListError } from "./lib/pending-clerk-deletes";
 import { parseOptions, runSweep, USAGE } from "./lib/roleless-clerk-sweep";
 import { sweepDbDeps } from "./lib/roleless-clerk-sweep-db";
@@ -96,12 +97,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  // Name and code only (a driver message can name the database user or
-  // host); our own Clerk errors carry just an HTTP status.
+  // Safe fields only (safe-error-fields.ts: a driver message can name the
+  // database user or host); our own Clerk errors carry just an HTTP status.
   if (error instanceof ClerkListError) console.error("sweep-roleless-clerk-users failed:", error.message);
-  else {
-    const { name, code } = error as { name?: unknown; code?: unknown };
-    console.error("sweep-roleless-clerk-users failed:", name, code);
-  }
+  else console.error("sweep-roleless-clerk-users failed:", safeErrorFields(error));
   process.exit(1);
 });

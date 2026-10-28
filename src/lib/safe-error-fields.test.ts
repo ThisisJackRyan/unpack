@@ -4,13 +4,17 @@ import { after, describe, it } from "node:test";
 import { neon, neonConfig, NeonDbError } from "@neondatabase/serverless";
 import { DrizzleQueryError, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
+import { DbReadTimeoutError, withReadTimeout } from "@/db/read-timeout";
 import { readings, teachers } from "@/db/schema";
 import { ClerkUserNoEmailError } from "./clerk-user-errors";
+import { guardCreate } from "./create-guard";
 import { DeadlineError } from "./deadline";
 import { FetchArticleError } from "./fetch-errors";
 import { JoinCodeExhaustedError } from "./join-code";
 import { resolveReadingSource } from "./reading-source";
 import { MAX_CAUSES, safeErrorFields } from "./safe-error-fields";
+import { createSelfReadingWith } from "./self-reading-create";
+import { createTeacherReadingWith } from "./teacher-reading-create";
 import { deleteUnder13Account } from "./under-13-account";
 import type { ReadingFormData } from "./validate-reading";
 
@@ -190,6 +194,38 @@ describe("safeErrorFields timedOut", () => {
     assert.equal(safeErrorFields(Object.assign(new Error("x"), { code: "57014" })).timedOut, true);
   });
 
+  it("is true for a DbReadTimeoutError, at the top or anywhere in the chain", () => {
+    const timeout = new DbReadTimeoutError(15_000);
+    assert.deepEqual(safeErrorFields(timeout), {
+      name: "DbReadTimeoutError",
+      causes: [],
+      timedOut: true,
+      message: "database read timed out",
+    });
+    // As the Neon driver wraps it (sourceError), and drizzle again (cause).
+    const neonLike = Object.assign(new Error("Error connecting to database"), { name: "NeonDbError", sourceError: timeout });
+    assert.deepEqual(safeErrorFields(neonLike), { name: "NeonDbError", causes: [{ name: "DbReadTimeoutError" }], timedOut: true });
+    const wrapped = new Error(`Failed query: select ${CLERK_ID}`, { cause: neonLike });
+    assert.deepEqual(safeErrorFields(wrapped), {
+      name: "Error",
+      causes: [{ name: "NeonDbError" }, { name: "DbReadTimeoutError" }],
+      timedOut: true,
+    });
+    assertSafe(safeErrorFields(wrapped));
+  });
+
+  it("is true for a real drizzle read past the read timeout (src/db/read-timeout.ts)", async () => {
+    neonConfig.fetchFunction = withReadTimeout(() => new Promise<Response>(() => {}), 20);
+    const error = await caught(() => db.select().from(teachers).where(eq(teachers.clerkUserId, CLERK_ID)));
+    assert.ok(error instanceof DrizzleQueryError);
+    const fields = safeErrorFields(error);
+    assert.equal(fields.name, "DrizzleQueryError");
+    assert.equal(fields.timedOut, true);
+    assert.ok(fields.causes.some((level) => level.name === "DbReadTimeoutError"), JSON.stringify(fields));
+    assert.equal("message" in fields, false);
+    assertSafe(fields);
+  });
+
   it("is false otherwise", () => {
     assert.equal(safeErrorFields(new Error("boom")).timedOut, false);
     assert.equal(safeErrorFields(Object.assign(new Error("x"), { code: "23505" })).timedOut, false);
@@ -205,6 +241,11 @@ describe("safeErrorFields message", () => {
     assert.equal(safeErrorFields(new DeadlineError()).message, "pre-check deadline passed");
     assert.equal(safeErrorFields(new FetchArticleError("not_html")).message, "fetch article failed: not_html");
     assert.equal(safeErrorFields(new ClerkUserNoEmailError()).message, "Clerk user has no email address");
+    assert.equal(safeErrorFields(new DbReadTimeoutError(15_000)).message, "database read timed out");
+  });
+
+  it("never holds the read timeout's limit", () => {
+    for (const ms of [1, 20, 15_000]) assert.equal(new DbReadTimeoutError(ms).message, "database read timed out");
   });
 
   it("is dropped for everything else", () => {
@@ -275,6 +316,66 @@ describe("call sites log only safe fields", () => {
       timedOut: false,
       status: undefined,
     });
+    assertSafe(logs);
+  });
+
+  const BODY = `${READING_TEXT}. `.repeat(8);
+  const TEXT = { source: "text", url: "", title: "FAKE TITLE", bodyText: BODY, gradeLevel: "5", questionCount: "4" };
+  const failing = (error: unknown) => async (): Promise<never> => {
+    throw error;
+  };
+
+  it("createSelfReadingWith: a failed create transaction", async () => {
+    const logs: [string, Record<string, unknown>][] = [];
+    const error = await failedInsert();
+    await createSelfReadingWith({ ...TEXT, questionMode: null }, new AbortController().signal, {
+      requireAccount: async () => ({ id: "account-1" }),
+      getAllowance: async () => ({ remaining: 5 }),
+      recordLinkFetch: async () => true,
+      linkLimitedMessage: async () => "",
+      fetchArticle: failing(new Error("no fetch")),
+      createSelfReading: failing(error),
+      log: (message, fields) => logs.push([message, fields]),
+    });
+    assert.deepEqual(logs, [
+      ["createSelfReading failed", { name: "DrizzleQueryError", causes: [{ name: "NeonDbError", code: "23503" }], timedOut: false }],
+    ]);
+    assertSafe(logs);
+  });
+
+  it("createTeacherReadingWith: a failed insert", async () => {
+    const logs: [string, Record<string, unknown>][] = [];
+    const error = await failedInsert();
+    await createTeacherReadingWith("class-1", { ...TEXT, questionMode: "shared" }, new AbortController().signal, {
+      requireTeacher: async () => ({ id: "teacher-1" }),
+      ownsClass: async () => true,
+      recordLinkFetch: async () => true,
+      linkLimitedMessage: async () => "",
+      fetchArticle: failing(new Error("no fetch")),
+      insertReading: failing(error),
+      log: (message, fields) => logs.push([message, fields]),
+    });
+    assert.deepEqual(logs, [
+      ["insertReading failed", { name: "DrizzleQueryError", causes: [{ name: "NeonDbError", code: "23503" }], timedOut: false }],
+    ]);
+    // The fields only: the fixed label itself says "insert".
+    assertSafe(logs.map(([, fields]) => fields));
+  });
+
+  it("guardCreate's onError (the create and publish actions): a read past the read timeout", async () => {
+    const logs: unknown[] = [];
+    neonConfig.fetchFunction = withReadTimeout(() => new Promise<Response>(() => {}), 20);
+    const out = await guardCreate<string>(
+      async () => {
+        await db.select().from(teachers).where(eq(teachers.clerkUserId, CLERK_ID));
+        return "ok";
+      },
+      (kind) => kind,
+      { rethrow: () => {}, onError: (e) => logs.push(safeErrorFields(e)) },
+    );
+    assert.equal(out, "timed_out");
+    assert.equal(logs.length, 1);
+    assert.equal((logs[0] as { timedOut: boolean }).timedOut, true);
     assertSafe(logs);
   });
 });

@@ -41,8 +41,9 @@
 //   walking each WITH list, so only a name in CTE position counts). The
 //   same shape elsewhere, "dblink(...) as (n int)" in FROM, is a function
 //   call with a column definition list, so not a read.
-// A "--" comment ends at "\n" or "\r", as in Postgres. Dollar quoting, E'' and U& strings, $ inside a name, non-ASCII names
-// and unterminated strings or comments are left unparsed: not a read.
+// A "--" comment ends at "\n" or "\r", as in Postgres. Dollar quoting,
+// E'' and U& strings, $ inside a name, non-ASCII names and unterminated
+// strings or comments are left unparsed: not a read.
 //
 // So there is no list of functions with side effects (nextval, advisory
 // locks, set_config, ...): the allow-list leaves them all out. SAFE_FUNCTIONS
@@ -56,10 +57,15 @@
 
 export const DB_READ_TIMEOUT_MS = 15_000;
 
+// A fixed message (safe-error-fields.ts logs it): the limit is on
+// timeoutMs, never in the text.
 export class DbReadTimeoutError extends Error {
-  constructor(ms: number) {
-    super(`database read took over ${ms} ms`);
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super("database read timed out");
     this.name = "DbReadTimeoutError";
+    this.timeoutMs = timeoutMs;
   }
 }
 

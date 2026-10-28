@@ -31,8 +31,14 @@ export function withRejectionFallback<S>(
       return await action(state, formData);
     } catch (error) {
       rethrow(error);
-      // The error only: never the form data.
-      console.error(error);
+      // The kind and the error's name only: never the form data, the
+      // error's message, or its stack. This runs in the browser, where
+      // safe-error-fields.ts (server only: drizzle, node:crypto) isn't
+      // bundled.
+      console.error("form action rejected", {
+        kind: rejectionKind(error),
+        name: error instanceof Error ? error.name : typeof error,
+      });
       return fallback(rejectionKind(error), formData, state);
     }
   };

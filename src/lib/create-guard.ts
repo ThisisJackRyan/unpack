@@ -80,10 +80,3 @@ export async function guardCreate<S>(
 export function readingSaveFailedState(values: ReadingFormValues): ReadingFormState {
   return { errors: { form: SAVE_READING_FAILED_MESSAGE }, values };
 }
-
-// Name, code and message only: a Postgres error's detail can echo the row,
-// including the reading text. Never the form's values.
-export function safeErrorFields(error: unknown): { name: unknown; code: unknown; message: unknown } {
-  const { name, code, message } = (error ?? {}) as { name?: unknown; code?: unknown; message?: unknown };
-  return { name, code, message };
-}
