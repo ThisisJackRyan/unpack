@@ -37,6 +37,14 @@
 //   (counted per table) and another teacher's rows are all intact. A
 //   repeat delete is already_gone, and a late user.updated after it
 //   brings no row back.
+// - Under-13 delete (the /welcome under-13 answer's local delete,
+//   deleteRolelessAccountStatements): an account with a role is refused
+//   (has_role) and keeps every row, with no hash listed; a role-less
+//   account with a class tree, a self-learner reading and its own logs is
+//   deleted (0 rows in every table) and its hash listed once; the later
+//   webhook user.deleted for the same id is already_gone and lists
+//   nothing new; a first visit can't bring it back; and the two deletes
+//   run at the same moment on a fresh role-less id leave no row, one hash.
 //
 //   ALLOW_DB_WRITES=1 DATABASE_URL=... pnpm db:check-teacher-gaps [flags]
 //
@@ -49,7 +57,8 @@
 // Same database guard, connection cap, and NEON_FETCH_ENDPOINT handling as
 // every check (scripts/lib/db-check.ts). Writes
 // teachers named test_gaps_<run>, test_gaps_other_<run>,
-// test_gaps_gone_<run> and test_gaps_kept_<run> and deletes them (and
+// test_gaps_gone_<run>, test_gaps_kept_<run> and test_gaps_u13*_<run>
+// and deletes them (and
 // everything under them) at the end. Never run against production.
 import { getSql } from "@/db";
 import { countDraftsClearedByGradeChange, updateClassSettings } from "@/lib/classes";
@@ -61,6 +70,7 @@ import { deleteReading, getClassCapBadges, getReadingCap, listReadings, raiseRea
 import { getOrCreateStudentQuestions, postgresStudentQuestionStore } from "@/lib/student-questions";
 import { STUDENT_SETS_PER_READING_LIMIT, STUDENT_SETS_RAISED_LIMIT } from "@/lib/student-questions-core";
 import { createAccountStatements, hashClerkUserId } from "@/lib/deleted-accounts";
+import { deleteRolelessAccountStatements, rolelessDeleteOutcome } from "@/lib/under-13-account";
 import { prepareDbCheck, throttledExecutor } from "./lib/db-check";
 
 const { fetchEndpoint, concurrency: DB_CHECK_CONCURRENCY } = prepareDbCheck();
@@ -663,13 +673,91 @@ async function checkTeacherDelete() {
 }
 
 // ---------------------------------------------------------------------------
+// Under-13 delete (the /welcome under-13 answer, under-13-account.ts)
+
+async function selfReadingCount(teacherId: string): Promise<number> {
+  return (await one<{ n: number }>(sql`select count(*)::int as n from self_readings where account_id = ${teacherId}`)).n;
+}
+
+async function listedCount(clerkUserId: string): Promise<number> {
+  return (
+    await one<{ n: number }>(
+      sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${hashClerkUserId(clerkUserId)}`,
+    )
+  ).n;
+}
+
+async function checkUnder13Delete() {
+  console.log("\n== UNDER-13 DELETE (role-less account, local delete) ==");
+  const childId = `test_gaps_u13_${RUN_ID}`;
+  const holderId = `test_gaps_u13role_${RUN_ID}`;
+  const racedId = `test_gaps_u13race_${RUN_ID}`;
+  // A role-less row never has classes or readings through the app; given
+  // some here, so the check proves the delete reaches everything under it.
+  const child = await fullTeacher(childId, "Child");
+  await sql`
+    insert into self_readings (account_id, title, body_text, grade_level, question_count)
+    values (${child.teacherId}, 'Child self reading', ${BODY}, '5', ${PROMPTS.length})`;
+  const holder = await fullTeacher(holderId, "Holder");
+  await sql`update teachers set role = 'teacher' where id = ${holder.teacherId}`;
+
+  const childBefore = await teacherCounts(child);
+  const holderBefore = await teacherCounts(holder);
+  check(TEACHER_TABLES.every((t) => childBefore[t] > 0), "the role-less account has rows in every table");
+  check((await selfReadingCount(child.teacherId)) === 1, "...and a self-learner reading");
+
+  const refused = rolelessDeleteOutcome(await neonExecutor(deleteRolelessAccountStatements(holderId)));
+  check(refused === "has_role", `an account with a role is refused: ${refused}`);
+  check(JSON.stringify(await teacherCounts(holder)) === JSON.stringify(holderBefore), "...and keeps every row");
+  check((await listedCount(holderId)) === 0, "...and its hash is not listed");
+
+  const outcome = rolelessDeleteOutcome(await neonExecutor(deleteRolelessAccountStatements(childId)));
+  check(outcome === "deleted", `the role-less account: ${outcome}`);
+  const childAfter = await teacherCounts(child);
+  for (const t of TEACHER_TABLES) {
+    check(childAfter[t] === 0, `${t}: the role-less account's ${childBefore[t]} rows are gone (now ${childAfter[t]})`);
+  }
+  check((await selfReadingCount(child.teacherId)) === 0, "self_readings: its reading is gone");
+  check((await listedCount(childId)) === 1, "its hash is listed once");
+  const raw = await one<{ n: number }>(sql`select count(*)::int as n from deleted_clerk_users where clerk_user_hash = ${childId}`);
+  check(raw.n === 0, "...and never the raw id");
+  check(JSON.stringify(await teacherCounts(holder)) === JSON.stringify(holderBefore), "the role holder is still intact");
+
+  const webhook = await handleClerkEvent({ type: "user.deleted", data: { id: childId, deleted: true } }, neonExecutor);
+  check(webhook === "already_gone", `the webhook's user.deleted afterwards is a no-op: ${webhook}`);
+  check((await listedCount(childId)) === 1, "...and lists nothing new");
+  const [, firstVisit = []] = await neonExecutor(createAccountStatements(childId, "Child", "child@example.invalid"));
+  check(firstVisit.length === 0, `a first visit afterwards creates nothing (${firstVisit.length} rows)`);
+
+  await sql`insert into teachers (clerk_user_id, email) values (${racedId}, 'raced@example.invalid')`;
+  const raced = await Promise.all([
+    neonExecutor(deleteRolelessAccountStatements(racedId)).then(rolelessDeleteOutcome),
+    handleClerkEvent({ type: "user.deleted", data: { id: racedId, deleted: true } }, neonExecutor),
+  ]);
+  const racedRows = await one<{ n: number }>(sql`select count(*)::int as n from teachers where clerk_user_id = ${racedId}`);
+  check(
+    racedRows.n === 0 && (await listedCount(racedId)) === 1 && raced.filter((r) => r === "deleted").length === 1,
+    `the local delete and the webhook at the same moment: no row, one hash (${raced.join(", ")})`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 // Through the webhook's delete (classes first), so a resolved challenge
 // left by a failed run can't block it.
 async function cleanup(): Promise<void> {
   let deleted = 0;
   const raced = Array.from({ length: RACE_ROUNDS }, (_, round) => `test_gaps_raced_${RUN_ID}_${round}`);
-  const prefixes = ["test_gaps", "test_gaps_other", "test_gaps_gone", "test_gaps_kept", "test_gaps_fresh"];
+  const prefixes = [
+    "test_gaps",
+    "test_gaps_other",
+    "test_gaps_gone",
+    "test_gaps_kept",
+    "test_gaps_fresh",
+    "test_gaps_u13",
+    "test_gaps_u13role",
+    "test_gaps_u13race",
+  ];
   for (const prefix of prefixes) {
     const results = await neonExecutor(deleteTeacherStatements(`${prefix}_${RUN_ID}`));
     deleted += deletedAccountRows(results);
@@ -692,6 +780,7 @@ async function main(): Promise<void> {
     await checkClassSettings();
     await checkCap();
     await checkTeacherDelete();
+    await checkUnder13Delete();
   } finally {
     await cleanup();
   }
