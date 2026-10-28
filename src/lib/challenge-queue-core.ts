@@ -25,7 +25,8 @@
 
 import type { Statement, StatementExecutor } from "./link-rate-limit";
 import { studentDisplayName } from "./class-status";
-import { checksAllowedSql, countedCheckSql, effortLockSql, EXTRA_TRY_CHECKS, limitsFromRow, triesAllowedSql } from "./reading-limits";
+import { checksAllowedSql, countedCheckSql, effortLockSql, EXTRA_TRY_CHECKS, latestChallengeSql, limitsFromRow, triesAllowedSql } from "./reading-limits";
+import { latestChallenge, studentReadingStatus } from "./reading-progress";
 
 export const CHALLENGE_DECISIONS = ["accept", "deny"] as const;
 export type ChallengeDecision = (typeof CHALLENGE_DECISIONS)[number];
@@ -229,12 +230,11 @@ export function queueItems(results: Record<string, unknown>[][]): QueueItem[] {
   }
   return (results[0] ?? []).map((row) => {
     const limits = limitsFromRow(row);
-    const created = row.created_at;
     return {
       id: String(row.id),
       round: Number(row.round ?? 1),
       note: String(row.note ?? ""),
-      createdAt: created instanceof Date ? created.toISOString() : String(created ?? ""),
+      createdAt: isoTime(row.created_at),
       studentId: String(row.student_id),
       studentName: studentDisplayName(row.first_name, row.last_initials),
       readingId: String(row.reading_id),
@@ -249,10 +249,134 @@ export function queueItems(results: Record<string, unknown>[][]): QueueItem[] {
   });
 }
 
-// The count badge on the class page. $1 class, $2 teacher.
+// Open challenges only. $1 class, $2 teacher.
 export function openCountStatement(classId: string, teacherId: string): Statement {
   return {
     text: `select count(*)::int as open ${OPEN_IN_CLASS}`,
     params: [classId, teacherId],
   };
+}
+
+// Out of tries, no note yet: students in the Waiting status
+// (studentReadingStatus) on one of the class's published readings, the
+// ones the class progress table shows as "Waiting for teacher". Every try
+// or every check used, no pass, and no note since: no challenge at all,
+// or the latest was denied with one more try and that try is used too.
+// They are listed in the queue so the teacher sees them before a note
+// comes. Nothing is stored: they leave the list by themselves once the
+// student sends a note (then it's an open challenge, listed as one), passes,
+// or gets more tries.
+
+export type NoNoteItem = {
+  studentId: string;
+  studentName: string;
+  readingId: string;
+  readingTitle: string;
+  tries: number;
+  triesAllowed: number;
+  checks: number;
+  checksAllowed: number;
+  // When they ran out: their last try or last counted check, whichever is
+  // later.
+  ranOutAt: string;
+};
+
+// $1 class, $2 teacher. The where clause narrows to the Waiting candidates
+// with the same columns studentReadingStatus reads; noNoteItems applies it.
+export function noNoteStatement(classId: string, teacherId: string): Statement {
+  return {
+    text: `select s.id as student_id, s.first_name, s.last_initials, r.id as reading_id, r.title,
+  lc.status as challenge, lc.extra_try, t.tries, t.checks, t.tries_allowed, t.checks_allowed,
+  greatest(
+    (select max(a.created_at) from attempts a where a.student_id = s.id and a.reading_id = r.id),
+    (select max(e.created_at) from effort_checks e where e.student_id = s.id and e.reading_id = r.id and ${countedCheckSql("e")})
+  ) as ran_out_at
+from classes c
+join students s on s.class_id = c.id
+join readings r on r.class_id = c.id and r.status = 'published'
+left join lateral ${latestChallengeSql("s.id", "r.id")} lc on true
+cross join lateral (select
+  (select count(*)::int from attempts a where a.student_id = s.id and a.reading_id = r.id) as tries,
+  (select count(*)::int from effort_checks e where e.student_id = s.id and e.reading_id = r.id and ${countedCheckSql("e")}) as checks,
+  ${triesAllowedSql("s.id", "r.id")} as tries_allowed,
+  ${checksAllowedSql("s.id", "r.id")} as checks_allowed
+) t
+where c.id = $1::uuid and c.teacher_id = $2::uuid
+  and not exists (select 1 from attempts p where p.student_id = s.id and p.reading_id = r.id and p.result = 'pass')
+  and (lc.status is null or lc.status not in ('open', 'approved'))
+  and (t.tries >= t.tries_allowed or t.checks >= t.checks_allowed)`,
+    params: [classId, teacherId],
+  };
+}
+
+function isoTime(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value ?? "");
+}
+
+// The Waiting rows, by the same rule the student and the class view use.
+export function noNoteItems(rows: Record<string, unknown>[]): NoNoteItem[] {
+  return rows.flatMap((row) => {
+    const limits = limitsFromRow(row);
+    const tries = Number(row.tries ?? 0);
+    const checks = Number(row.checks ?? 0);
+    const status = studentReadingStatus({
+      passed: false,
+      tries,
+      checks,
+      challenge: latestChallenge(row.challenge, row.extra_try),
+      limits,
+    });
+    if (status !== "waiting") return [];
+    return [
+      {
+        studentId: String(row.student_id),
+        studentName: studentDisplayName(row.first_name, row.last_initials),
+        readingId: String(row.reading_id),
+        readingTitle: String(row.title),
+        tries,
+        triesAllowed: limits.tries,
+        checks,
+        checksAllowed: limits.checks,
+        ranOutAt: isoTime(row.ran_out_at),
+      },
+    ];
+  });
+}
+
+// The pill on a no-note item.
+export const NO_NOTE_LABEL = "Out of tries, no note yet";
+
+// Under the no-note item's title.
+export function noNoteHelp(name: string): string {
+  return `${name} can still send you a note.`;
+}
+
+// The whole queue, one list. `at` is when the student started waiting on
+// the teacher: the note's time for a challenge, the time they ran out for
+// a no-note item. Oldest first, like the challenges alone: whoever has
+// waited longest is on top, note or not.
+export type QueueEntry =
+  | { kind: "challenge"; key: string; at: string; item: QueueItem }
+  | { kind: "no_note"; key: string; at: string; item: NoNoteItem };
+
+// A (student, reading) with an open challenge is listed once, as the
+// challenge, even if both reads raced a note being sent.
+export function teacherQueue(challenges: QueueItem[], noNote: NoNoteItem[]): QueueEntry[] {
+  const challenged = new Set(challenges.map((c) => `${c.studentId}:${c.readingId}`));
+  const entries: QueueEntry[] = [
+    ...challenges.map((item): QueueEntry => ({ kind: "challenge", key: item.id, at: item.createdAt, item })),
+    ...noNote
+      .filter((item) => !challenged.has(`${item.studentId}:${item.readingId}`))
+      .map((item): QueueEntry => ({ kind: "no_note", key: `${item.studentId}:${item.readingId}`, at: item.ranOutAt, item })),
+  ];
+  const time = (e: QueueEntry) => {
+    const t = Date.parse(e.at);
+    return Number.isNaN(t) ? Infinity : t;
+  };
+  return entries.sort((a, b) => time(a) - time(b) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
+// The count on the class page: every entry the queue lists.
+export function queueCount(challenges: QueueItem[], noNote: NoNoteItem[]): number {
+  return teacherQueue(challenges, noNote).length;
 }
