@@ -237,6 +237,30 @@ describe("draft expiry", () => {
     assert.equal(s.map.size, 0);
   });
 
+  it("a draft saved in the future counts as saved now: it loads, and the prune re-stamps it so it still expires", () => {
+    const s = memoryStorage();
+    const ahead = T0 + 365 * DAY;
+    saveDraft(s, scope(1), Q1, "clock was ahead", ahead);
+    saveNoteDraft(s, owner, "note from the future", ahead);
+    assert.deepEqual(loadDrafts(s, scope(1), [Q1], T0), { [Q1]: "clock was ahead" });
+    assert.equal(loadNoteDraft(s, owner, T0), "note from the future");
+    assert.equal(pruneDrafts(s, T0), 0);
+    assert.deepEqual(decodeDraft(s.getItem(draftKey(scope(1), Q1)) ?? ""), { text: "clock was ahead", savedAt: T0 });
+    assert.deepEqual(decodeDraft(s.getItem(noteDraftKey(owner)) ?? ""), { text: "note from the future", savedAt: T0 });
+    assert.deepEqual(loadDrafts(s, scope(1), [Q1], T0 + 7 * DAY), { [Q1]: "clock was ahead" });
+    assert.deepEqual(loadDrafts(s, scope(1), [Q1], T0 + 7 * DAY + 1), {});
+    assert.equal(pruneDrafts(s, T0 + 7 * DAY + 1), 2);
+    assert.equal(s.map.size, 0);
+  });
+
+  it("a draft saved now is not re-stamped by the prune", () => {
+    const s = memoryStorage();
+    saveDraft(s, scope(1), Q1, "now", T0);
+    const before = s.getItem(draftKey(scope(1), Q1));
+    assert.equal(pruneDrafts(s, T0), 0);
+    assert.equal(s.getItem(draftKey(scope(1), Q1)), before);
+  });
+
   it("text that only looks like JSON is still text", () => {
     assert.deepEqual(decodeDraft("{not json"), { text: "{not json", savedAt: null });
     assert.deepEqual(decodeDraft('{"text":"x"}'), { text: '{"text":"x"}', savedAt: null });

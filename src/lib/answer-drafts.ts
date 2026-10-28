@@ -34,7 +34,10 @@ const DRAFT_TTL_MS = DRAFT_TTL_DAYS * 24 * 60 * 60 * 1000;
 // The stored value: {"savedAt": epoch ms, "text": the text}. A value in
 // the earlier format (the bare text, no time) still loads, as if saved
 // now; pruneDrafts stamps it with the time it first sees it, so it
-// expires DRAFT_TTL_DAYS after that.
+// expires DRAFT_TTL_DAYS after that. A savedAt in the future (the clock
+// was ahead when it was saved, or someone edited it) is read as saved
+// now, and pruneDrafts re-stamps it with now, so a wrong clock can't keep
+// a draft fresh for good.
 export function encodeDraft(text: string, now: number): string {
   return JSON.stringify({ savedAt: now, text });
 }
@@ -56,8 +59,13 @@ export function decodeDraft(raw: string): DecodedDraft {
   return { text: raw, savedAt: null };
 }
 
+// savedAt clamped to now: a future time counts as saved now.
+function savedAtOrNow(draft: DecodedDraft, now: number): number {
+  return draft.savedAt === null ? now : Math.min(draft.savedAt, now);
+}
+
 function isExpired(draft: DecodedDraft, now: number): boolean {
-  return draft.savedAt !== null && now - draft.savedAt > DRAFT_TTL_MS;
+  return now - savedAtOrNow(draft, now) > DRAFT_TTL_MS;
 }
 
 // The draft's text, or null when there is none or it has expired.
@@ -152,8 +160,8 @@ export function clearDrafts(storage: DraftStorage | null, owner: DraftOwner, kee
 }
 
 // Removes every expired answer and note draft on this device (any reading,
-// any owner), and stamps earlier-format drafts with `now`. Returns how many
-// were removed.
+// any owner), and stamps earlier-format drafts, and drafts saved "in the
+// future", with `now`. Returns how many were removed.
 export function pruneDrafts(storage: DraftStorage | null, now: number = Date.now()): number {
   if (!storage) return 0;
   try {
@@ -166,7 +174,7 @@ export function pruneDrafts(storage: DraftStorage | null, now: number = Date.now
       if (raw === null) continue;
       const draft = decodeDraft(raw);
       if (isExpired(draft, now)) expired.push(key);
-      else if (draft.savedAt === null) unstamped.push([key, draft.text]);
+      else if (draft.savedAt === null || draft.savedAt > now) unstamped.push([key, draft.text]);
     }
     for (const key of expired) storage.removeItem(key);
     for (const [key, text] of unstamped) storage.setItem(key, encodeDraft(text, now));
