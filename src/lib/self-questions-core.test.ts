@@ -131,7 +131,7 @@ describe("getOrCreateSelfQuestionsWith", () => {
       store,
       write: failing,
       newToken,
-      onError: (f) => logs.push(f),
+      onErrorFields: (f) => logs.push(f),
     });
     assert.deepEqual(result, { status: "error", kind: "busy" });
     assert.equal(state.token, null);

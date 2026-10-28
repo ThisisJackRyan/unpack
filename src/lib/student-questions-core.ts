@@ -232,7 +232,7 @@ export type StudentQuestionDeps = {
   // the model.
   configured?: boolean;
   // Logs safe fields only (never the text, prompts, or names).
-  onError?: (fields: Record<string, unknown>) => void;
+  onErrorFields?: (fields: Record<string, unknown>) => void;
 };
 
 // Whether a failed write counts toward the lifetime "Try again" limit
@@ -305,7 +305,7 @@ export async function getOrCreateStudentQuestionsWith(
   } catch (error) {
     const kind = questionErrorKind(error);
     const counted = failureCounts(error, modelResponded);
-    deps.onError?.({ ...questionErrorLogFields(error), counted });
+    deps.onErrorFields?.({ ...questionErrorLogFields(error), counted });
     await store.release(readingId, studentId, token, !counted);
     return { status: "error", kind, message: QUESTION_ERROR_MESSAGES[kind] };
   }

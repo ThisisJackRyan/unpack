@@ -20,7 +20,7 @@ export async function joinClassAction(_prev: JoinState, formData: FormData): Pro
     verifyBotCheck: (token) =>
       verifyJoinBotCheck(
         { token },
-        { onFailure: (fields) => console.error("joinClassAction: bot check refused", fields) },
+        { onFailureFields: (fields) => console.error("joinClassAction: bot check refused", fields) },
       ),
     requestHeaders: async () => {
       const requestHeaders = await headers();

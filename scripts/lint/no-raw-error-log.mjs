@@ -8,9 +8,13 @@
 // - the first parameter of a promise's rejection handler:
 //   p.catch((e) => ...) and p.then(onOk, (e) => ...);
 // - the first parameter of an onError or onFailure callback (an object
-//   property or a JSX attribute), unless it is named `fields` or ends in
-//   `Fields`: this repo's deps hand those callbacks safe fields already
-//   (student-questions-core.ts, join-bot-check.ts);
+//   property, also with a quoted or computed literal key, or a JSX
+//   attribute), whatever the parameter is called. A callback that gets
+//   safe fields from its producer is named onErrorFields or
+//   onFailureFields instead (student-questions-core.ts,
+//   self-questions-core.ts, join-bot-check.ts), and isn't tracked: the
+//   producer's name for it says what it passes, not the consumer's
+//   parameter name;
 // - the first parameter of an "error", "uncaughtException", or
 //   "unhandledRejection" listener (.on, .once, .addListener,
 //   .addEventListener).
@@ -54,8 +58,11 @@
 // (p.catch(handle)), a callback parameter not listed above, a method on a
 // class or object, a value stored in a module-level structure and read
 // elsewhere, array methods on a list holding the error ([e].map(...)),
-// or computed property names. The runtime guard is the console wrapper
-// in src/lib/safe-console.ts, which every server log line goes through.
+// computed property names other than a string literal, a rejection read
+// from Promise.allSettled's results (r.reason), or a log call made through
+// Reflect.apply(console.error, console, [e]). The runtime guard is the
+// console wrapper in src/lib/safe-console.ts, which every server log line
+// goes through.
 
 const SENSITIVE_FIELDS = new Set([
   "message",
@@ -441,10 +448,13 @@ function paramLabel(param) {
   return "error";
 }
 
-// A safe-fields parameter, by this repo's naming (see the top).
-function isFieldsParam(param) {
-  const name = paramLabel(param);
-  return name === "fields" || /Fields$/.test(name);
+// An onError or onFailure key: { onError }, { "onError" }, { ["onError"] }.
+function isCallbackKey(property) {
+  const { key } = property;
+  if (!property.computed && key.type === "Identifier") return CALLBACK_KEYS.has(key.name);
+  if (key.type === "Literal" && typeof key.value === "string") return CALLBACK_KEYS.has(key.value);
+  if (key.type === "TemplateLiteral" && key.expressions.length === 0) return CALLBACK_KEYS.has(key.quasis[0].value.cooked);
+  return false;
 }
 
 /** @type {import("eslint").Rule.RuleModule} */
@@ -583,14 +593,12 @@ const rule = {
         }
       },
       Property(node) {
-        if (node.computed || node.key.type !== "Identifier" || !CALLBACK_KEYS.has(node.key.name)) return;
-        const fn = node.value;
-        if (isFunction(fn) && !isFieldsParam(fn.params[0])) trackParam(fn);
+        if (isCallbackKey(node)) trackParam(node.value);
       },
       JSXAttribute(node) {
         if (node.name.type !== "JSXIdentifier" || !CALLBACK_KEYS.has(node.name.name)) return;
         const fn = node.value?.type === "JSXExpressionContainer" ? node.value.expression : null;
-        if (isFunction(fn) && !isFieldsParam(fn.params[0])) trackParam(fn);
+        trackParam(fn);
       },
     };
   },

@@ -171,7 +171,7 @@ export type JoinBotCheckDeps = {
   // A refused token: safe fields only (the reason and Turnstile's error
   // codes), never the token or the secret. Not called for
   // "misconfigured", which goes to logError instead.
-  onFailure?: (fields: Record<string, unknown>) => void;
+  onFailureFields?: (fields: Record<string, unknown>) => void;
   // The loud server log for a misconfigured deploy (default
   // console.error, called as logJoinBlockedConfig does: the
   // "join_blocked_config" tag, then the missing names and the message)
@@ -195,7 +195,7 @@ export async function verifyJoinBotCheck(
 ): Promise<JoinBotCheckResult> {
   const config = botCheckConfig(deps.env ?? process.env);
   const fail = (reason: JoinBotCheckFailure, extra: Record<string, unknown> = {}): JoinBotCheckResult => {
-    deps.onFailure?.({ reason, ...extra });
+    deps.onFailureFields?.({ reason, ...extra });
     return { ok: false, reason };
   };
   if (config.status === "off") {

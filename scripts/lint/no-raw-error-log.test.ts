@@ -32,9 +32,13 @@ tester.run("no-raw-error-log", rule, {
     `p.then((value) => console.log(value));`,
     `run({ onError: (error) => console.error("x", safeErrorFields(error)) });`,
     `run({ onFailure(error) { console.error("x", { kind: error.kind }); } });`,
-    // This repo's deps pass safe fields to callbacks named so.
-    `run({ onError: (fields) => logModelError("x", { ...fields, readingId }) });`,
-    `run({ onFailure: (refusalFields) => console.error("x", refusalFields) });`,
+    // A producer that passes safe fields names its callback so.
+    `run({ onErrorFields: (fields) => logModelError("x", { ...fields, readingId }) });`,
+    `run({ onFailureFields: (fields) => console.error("x", fields) });`,
+    `run({ "onErrorFields": (e) => console.error("x", e) });`,
+    { code: `<Check onFailureFields={(f) => console.error(f)} />`, languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } } },
+    // Not a callback key.
+    `run({ [onError]: (e) => console.error(e) });`,
     `process.on("uncaughtException", (err) => console.error("x", safeErrorFields(err)));`,
     `emitter.on("data", (chunk) => console.log(chunk));`,
     // A local helper that makes it safe, or reads a safe field.
@@ -94,7 +98,16 @@ tester.run("no-raw-error-log", rule, {
     // onError and onFailure callbacks, as properties, methods, and JSX.
     { code: `run({ onError: (error) => console.error("x", error) });`, errors: raw() },
     { code: `run({ onFailure(e) { console.error(e.stack); } });`, errors: raw() },
-    { code: `run({ onError: (fields, extra) => console.error(fields), onFailure: (cause) => console.error(cause) });`, errors: raw() },
+    { code: `run({ onError: (fields, extra) => console.error(fields), onFailure: (cause) => console.error(cause) });`, errors: raw(2) },
+    // Whatever the parameter is called: the producer decides what it gets.
+    { code: `run({ onError: (fields) => console.error("x", fields) });`, errors: raw() },
+    { code: `run({ onFailure: (errFields) => console.error("x", errFields) });`, errors: raw() },
+    { code: `run({ onError: (fields) => logModelError("x", { ...fields, readingId }) });`, errors: raw() },
+    // Quoted and computed literal keys.
+    { code: `run({ "onError": (e) => console.error(e) });`, errors: raw() },
+    { code: `run({ 'onFailure': function (e) { console.warn(e.message); } });`, errors: raw() },
+    { code: `run({ ["onError"]: (e) => console.error(e) });`, errors: raw() },
+    { code: "run({ [`onFailure`]: (e) => console.error(e) });", errors: raw() },
     { code: `<Script onError={(e) => console.error(e)} />`, errors: raw(), languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } } },
     // Error event listeners.
     { code: `process.on("unhandledRejection", (reason) => console.error(reason));`, errors: raw() },

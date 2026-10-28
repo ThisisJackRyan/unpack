@@ -140,7 +140,7 @@ export async function getOrCreateStudentQuestions(
     newToken: randomUUID,
     // An injected writer (the DB checks) needs no key.
     configured: options.write ? true : isQuestionWritingConfigured(),
-    onError: (fields) =>
+    onErrorFields: (fields) =>
       logModelError("getOrCreateStudentQuestions: write failed", { ...fields, readingId }),
   });
 }
