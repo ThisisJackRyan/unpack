@@ -86,9 +86,9 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
   // drafts once committed.
   const [carried, setCarried] = useState<{ tryNumber: number; values: Record<string, string> } | null>(null);
   // A new try (the page re-renders after a check): start from its answers,
-  // unless the student has typed since the last result landed (a check
-  // that landed after the form gave up): then keep what they typed. The
-  // old try's message goes.
+  // unless the student has typed since the boxes were last checked (a
+  // check that landed after the form gave up): then keep what they typed.
+  // A "couldn’t hear back" message goes.
   if (view.tryNumber !== tryNumber) {
     const next = newTryView(view, tryNumber, prefill(questions, previous));
     setView(next.view);
@@ -147,7 +147,7 @@ export function AnswerForm({ action, questions, tryNumber, maxTries, extraTry, p
       },
       // Only this submit's result (an older one's is dropped), shown even
       // if a newer try was saved meanwhile: a refusal as out of date must
-      // say why, over the boxes the student still has.
+      // say why, over the boxes the student still has (see landedResult).
       result: (result) => {
         setView((v) => landedResult(v, result));
         setPending(false);

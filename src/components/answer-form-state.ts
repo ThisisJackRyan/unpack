@@ -160,14 +160,14 @@ export async function submitCheck(
 // the answers just checked. But a check can land after the form stopped
 // waiting, while the student is already changing their answers: then
 // replacing the boxes would throw that typing away. So if they edited
-// since the last result landed, the boxes keep what they typed
+// since the boxes were last checked, the boxes keep what they typed
 // (`current`); the new try's results and tips still show around them.
 export function valuesForNewTry(
   prefilled: Record<string, string>,
   current: Record<string, string>,
-  editedSinceLanded: boolean,
+  edited: boolean,
 ): Record<string, string> {
-  return editedSinceLanded ? { ...prefilled, ...current } : prefilled;
+  return edited ? { ...prefilled, ...current } : prefilled;
 }
 
 // What the answer form keeps between renders: the boxes, the message line,
@@ -179,10 +179,11 @@ export type AnswerFormView = {
   values: Record<string, string>;
   // The last result that landed (the form's own no-reply included).
   result: AnswerFormState;
-  // Typed since the last result landed. Not reset by a submit: a student
-  // can only type once the form stopped waiting (the boxes are read-only
-  // while a check runs), and a check the form gave up on can still land
-  // later, while a newer submit runs, and must not replace that typing.
+  // Typed since the boxes were last checked (a result landed that saved
+  // them as a try). Not reset by a submit: a check the form gave up on can
+  // still land later, while a newer submit runs, and must not replace that
+  // typing. Not reset by a refusal or a no-reply either: those didn't
+  // check what is in the boxes.
   edited: boolean;
 };
 
@@ -201,26 +202,46 @@ export function startedCheck(view: AnswerFormView): AnswerFormView {
   return { ...view, result: {} };
 }
 
+// A saved check: no message, no errors, no limit. The page moves to the
+// new try, whose answers are what the boxes held.
+export function isSavedCheck(result: AnswerFormState): boolean {
+  return !result.message && !result.errors && !result.limit;
+}
+
 // The current submit's result landed (submitCheck drops older ones): show
-// it, whatever try the page is on now. A submit refused because a newer
-// try was saved while it waited (the server's "stale", or the page moved
-// on: shown as ANSWERS_STALE_MESSAGE and the like) lands after that try's
-// re-render, and its message must show: the boxes still hold what the
-// student sent, and the message says why it wasn't checked. Typing up to
-// now has been answered, so `edited` resets.
+// it, whatever try the page is on now. Only a saved check resets `edited`.
+//
+// The case this is for: the form gave up on check 1, the student edited
+// and sent check 2, check 1 lands as a new try, and check 2 is refused as
+// out of date (the server's "stale": its answers were for the old try),
+// shown as ANSWERS_STALE_MESSAGE. In the browser the refusal lands FIRST:
+// Next's router applies check 1's re-render in a transition, which React
+// holds until the pending check 2 settles, while this result is plain
+// state (see submitCheck). So the refusal must not reset `edited` (the
+// new try that follows must keep the edits), and the new try must not
+// clear it (see newTryView). scripts/browser-check-answer-timeout.ts
+// (the stale case) runs it in Chrome.
 export function landedResult(view: AnswerFormView, result: AnswerFormState): AnswerFormView {
-  return { ...view, result, edited: false };
+  return { ...view, result, edited: isSavedCheck(result) ? false : view.edited };
+}
+
+// The form's own messages for a request it got no answer to. A new try
+// answers them (the check did land), so they go when it arrives; the
+// server's own messages stay (they are about the submit that got them).
+function isNoAnswerMessage(result: AnswerFormState): boolean {
+  return result.message === CHECK_NO_REPLY_MESSAGE || result.message === APP_UPDATED_MESSAGE;
 }
 
 // The page re-rendered with a new try (a check was saved): the boxes per
-// valuesForNewTry, and the old try's message cleared (a no-reply message
-// for the check that just landed no longer applies). `carried` is set
-// when typing was kept, so the form saves it as the new try's drafts.
+// valuesForNewTry, and a no-reply message for the check that just landed
+// cleared. `carried` is set when typing was kept, so the form saves it as
+// the new try's drafts.
 export function newTryView(
   view: AnswerFormView,
   tryNumber: number,
   prefilled: Record<string, string>,
 ): { view: AnswerFormView; carried: Record<string, string> | null } {
   const values = valuesForNewTry(prefilled, view.values, view.edited);
-  return { view: { ...view, tryNumber, values, result: {} }, carried: view.edited ? values : null };
+  const result = isNoAnswerMessage(view.result) ? {} : view.result;
+  return { view: { ...view, tryNumber, values, result }, carried: view.edited ? values : null };
 }

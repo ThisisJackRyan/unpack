@@ -50,10 +50,12 @@ export async function qaAnswerAction(
   const bounded = options.precheckMs !== null;
   return guardAnswerCheck(
     async (preCheck) => {
+      // Refused before any wait, as the reading pages refuse it at the
+      // claim, before the check.
+      if (options.stale && qaLastTry(options.run)) return { message: ANSWERS_STALE_MESSAGE };
       const wait = new Promise((resolve) => setTimeout(resolve, ms));
       await (bounded ? withDeadline(wait, preCheck) : wait);
       if (options.redirect) redirect("/qa/answer-timeout/landed");
-      if (options.stale && qaLastTry(options.run)) return { message: ANSWERS_STALE_MESSAGE };
       if (options.advance) saveQaTry(options.run, answerTexts(form[1]));
       revalidatePath("/qa/answer-timeout");
       const answers = [...form[1].keys()].length;
