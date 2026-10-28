@@ -17,16 +17,15 @@
 //
 // When it settles with no answer, the reading may or may not have been
 // saved (a 504 can come after the commit), so a create says exactly that
-// and asks to check the readings first (CREATE_NO_REPLY_MESSAGE, pending
-// approval). An edit is safe to repeat, so it says "Something went wrong.
+// and asks to check the readings first (CREATE_NO_REPLY_MESSAGE, with
+// "Check your readings" a link to the list: noReplyParts). An edit is safe to repeat, so it says "Something went wrong.
 // Try again." A deploy since the page loaded means the action never ran:
 // APP_UPDATED_MESSAGE.
 
 import type { RejectionKind } from "./action-fallback";
 import { APP_UPDATED_MESSAGE } from "./answer-form-state";
-import type { ReadingFormState } from "./reading-form-state";
+import { CREATE_NO_REPLY_MESSAGE, type ReadingFormState } from "./reading-form-state";
 import { SUBMIT_FAILED_MESSAGE } from "@/lib/answer-check-guard";
-import { CREATE_NO_REPLY_MESSAGE } from "@/lib/pending-copy";
 import { readingFormInput, readingFormValues } from "@/lib/validate-reading";
 
 export type ReadingFormMode = "create" | "edit" | "title" | "solo";
@@ -35,4 +34,32 @@ export function readingFormFallback(mode: ReadingFormMode, kind: RejectionKind, 
   const creates = mode === "create" || mode === "solo";
   const message = kind === "app_updated" ? APP_UPDATED_MESSAGE : creates ? CREATE_NO_REPLY_MESSAGE : SUBMIT_FAILED_MESSAGE;
   return { errors: { form: message }, values: readingFormValues(readingFormInput(formData)) };
+}
+
+// Where a create's readings are listed: a self-learner's on /learn, a
+// teacher's on the class page. Null for an edit (no no-reply link there).
+export function readingsListHref(mode: ReadingFormMode, classId?: string): string | null {
+  if (mode === "solo") return "/learn";
+  if (mode === "create" && classId) return `/teacher/classes/${classId}`;
+  return null;
+}
+
+export const CHECK_READINGS_LINK_TEXT = "Check your readings";
+
+export type NoReplyParts = { before: string; linkText: string; after: string; href: string };
+
+// The form error stays a plain string; at display time the no-reply message
+// is split around "Check your readings" so those words can be a link. The
+// three parts joined are the message, word for word. Null for any other
+// message, or with nowhere to link.
+export function noReplyParts(message: string | undefined, href: string | null): NoReplyParts | null {
+  if (message !== CREATE_NO_REPLY_MESSAGE || !href) return null;
+  const at = message.indexOf(CHECK_READINGS_LINK_TEXT);
+  if (at < 0) return null;
+  return {
+    before: message.slice(0, at),
+    linkText: CHECK_READINGS_LINK_TEXT,
+    after: message.slice(at + CHECK_READINGS_LINK_TEXT.length),
+    href,
+  };
 }

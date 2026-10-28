@@ -39,6 +39,7 @@ export default async function NewReadingPage({ params }: Props) {
           mode="create"
           action={createReading.bind(null, found.id)}
           classGradeLabel={gradeLevelLabel(found.gradeLevel)}
+          classId={found.id}
           cancelHref={classHref}
         />
       </div>

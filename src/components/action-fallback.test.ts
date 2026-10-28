@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { questionPanelFallback } from "@/app/teacher/classes/[id]/readings/[readingId]/question-state";
 import { SUBMIT_FAILED_MESSAGE } from "@/lib/answer-check-guard";
-import { CREATE_NO_REPLY_MESSAGE } from "@/lib/pending-copy";
 import { withRejectionFallback } from "./action-fallback";
 import { APP_UPDATED_MESSAGE } from "./answer-form-state";
-import { readingFormFallback } from "./reading-form-fallback";
-import type { ReadingFormState } from "./reading-form-state";
+import { CHECK_READINGS_LINK_TEXT, noReplyParts, readingFormFallback, readingsListHref } from "./reading-form-fallback";
+import { CREATE_NO_REPLY_MESSAGE, type ReadingFormState } from "./reading-form-state";
 
 function rethrowNext(error: unknown) {
   const digest = (error as { digest?: unknown } | null)?.digest;
@@ -67,7 +66,7 @@ describe("withRejectionFallback", () => {
 });
 
 describe("readingFormFallback", () => {
-  it("a create with no reply: the pending no-reply message, every value back in the fields", async () => {
+  it("a create with no reply: the no-reply message, every value back in the fields", async () => {
     for (const mode of ["solo", "create"] as const) {
       const action = withRejectionFallback<ReadingFormState>(
         async () => Promise.reject(new TypeError("Failed to fetch")),
@@ -104,6 +103,39 @@ describe("readingFormFallback", () => {
     for (const text of [CREATE_NO_REPLY_MESSAGE, APP_UPDATED_MESSAGE, SUBMIT_FAILED_MESSAGE]) {
       assert.doesNotMatch(text, /'|\u2014/);
     }
+  });
+});
+
+describe("noReplyParts", () => {
+  it("the approved wording, word for word", () => {
+    assert.equal(
+      CREATE_NO_REPLY_MESSAGE,
+      "We couldn\u2019t hear back. Your reading may have saved anyway. What you typed is still here. Check your readings before you try again.",
+    );
+  });
+
+  it("links \"Check your readings\" to the list for each create form, the sentence unchanged", () => {
+    for (const [mode, classId, href] of [
+      ["solo", undefined, "/learn"],
+      ["create", "c1", "/teacher/classes/c1"],
+    ] as const) {
+      assert.equal(readingsListHref(mode, classId), href);
+      const parts = noReplyParts(CREATE_NO_REPLY_MESSAGE, readingsListHref(mode, classId));
+      assert.ok(parts, mode);
+      assert.equal(parts.href, href);
+      assert.equal(parts.linkText, CHECK_READINGS_LINK_TEXT);
+      assert.equal(parts.before + parts.linkText + parts.after, CREATE_NO_REPLY_MESSAGE);
+      assert.equal(parts.after, " before you try again.");
+    }
+  });
+
+  it("no link for other messages, an edit, or a teacher form without its class", () => {
+    assert.equal(noReplyParts(SUBMIT_FAILED_MESSAGE, "/learn"), null);
+    assert.equal(noReplyParts(undefined, "/learn"), null);
+    assert.equal(readingsListHref("edit", "c1"), null);
+    assert.equal(readingsListHref("title", "c1"), null);
+    assert.equal(readingsListHref("create"), null);
+    assert.equal(noReplyParts(CREATE_NO_REPLY_MESSAGE, null), null);
   });
 });
 

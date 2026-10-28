@@ -23,14 +23,15 @@
 //   network   the POST fails in the browser (Fetch.failRequest: TimedOut,
 //             InternetDisconnected, ConnectionReset), and answers 504 or
 //             401 (as Clerk's middleware answers a lapsed session):
-//             CREATE_NO_REPLY_MESSAGE, and the server never saw it. Then,
+//             CREATE_NO_REPLY_MESSAGE, with "Check your readings" a link
+//             to /learn, and the server never saw it. Then,
 //             with the network back, the same click creates (the kept
 //             values are valid as they are) and the redirect lands.
 //   ok        a create that works redirects through the form's fallback.
 //   gate      without UNPACK_QA_ROUTES the routes are a 404.
 // Prints PASS/FAIL lines and exits non-zero on any failure.
 import { existsSync } from "node:fs";
-import { CREATE_NO_REPLY_MESSAGE } from "@/lib/pending-copy";
+import { CREATE_NO_REPLY_MESSAGE } from "@/components/reading-form-state";
 import { SAVE_READING_FAILED_MESSAGE } from "@/lib/reading-source";
 import {
   buildUnlessSkipped,
@@ -63,6 +64,7 @@ type Snapshot = {
   gradeLevel: string | null;
   questionCount: string | null;
   alert: string;
+  alertLinks: { name: string; href: string }[];
   button: string;
   disabled: boolean;
 };
@@ -81,6 +83,7 @@ const SNAPSHOT = `(() => {
     gradeLevel: value("#gradeLevel"),
     questionCount: value("#questionCount"),
     alert: form ? [...form.querySelectorAll('[role="alert"]')].map((e) => e.textContent ?? "").join("") : "",
+    alertLinks: form ? [...form.querySelectorAll('[role="alert"] a')].map((a) => ({ name: (a.textContent ?? "").trim(), href: a.getAttribute("href") ?? "" })) : [],
     button: button?.textContent ?? "",
     disabled: !!button?.disabled,
   };
@@ -210,7 +213,14 @@ async function networkCase(cdp: Cdp, base: string) {
       await submit(cdp);
       const s = await errorShown(cdp, CREATE_NO_REPLY_MESSAGE, 5_000);
       check(!!s, `${label}: the no-reply message shows`, s ? "" : JSON.stringify({ ...(await snapshot(cdp)), bodyText: undefined }));
-      if (s) checkKept(label, s, CREATE_NO_REPLY_MESSAGE);
+      if (s) {
+        checkKept(label, s, CREATE_NO_REPLY_MESSAGE);
+        check(
+          s.alertLinks.length === 1 && s.alertLinks[0].name === "Check your readings" && s.alertLinks[0].href === "/learn",
+          `${label}: "Check your readings" is a link to /learn`,
+          JSON.stringify(s.alertLinks),
+        );
+      }
       check(!serverSaw(run), `${label}: the request never reached the server`);
     } finally {
       await cdp.send("Fetch.disable");
