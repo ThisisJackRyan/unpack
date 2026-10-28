@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useRef, useState, type FormEvent } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { useActionState, useMemo, useRef, useState, type FormEvent } from "react";
 import { GRADE_LEVELS, gradeLevelLabel } from "@/lib/grade-levels";
 import {
   QUESTION_MODES,
@@ -11,6 +12,8 @@ import {
 import { ErrorMessage } from "@/components/error-message";
 import { LimitNotice } from "@/components/limit-notice";
 import { MaxLengthNote } from "@/components/max-length-note";
+import { withRejectionFallback } from "@/components/action-fallback";
+import { readingFormFallback } from "@/components/reading-form-fallback";
 import { field, optionCard, optionRadio, primaryButton, quietButton, secondaryButton } from "@/components/ui";
 import {
   BODY_TEXT_MAX_LENGTH,
@@ -84,7 +87,15 @@ export function ReadingForm({
   initialValues = EMPTY_READING_VALUES,
   sourceHost,
 }: Props) {
-  const [state, formAction, pending] = useActionState(action, {
+  // A request that fails outright (no answer, a 504, a lapsed session, a
+  // deploy) is a message in this form with every value kept, never the
+  // page's error boundary (see reading-form-fallback.ts, which also says
+  // why there is no client time limit here).
+  const guarded = useMemo(
+    () => withRejectionFallback(action, (kind, formData) => readingFormFallback(mode, kind, formData), unstable_rethrow),
+    [action, mode],
+  );
+  const [state, formAction, pending] = useActionState(guarded, {
     values: initialValues,
   });
   const values = state.values ?? initialValues;
@@ -414,7 +425,7 @@ export function ReadingForm({
         </div>
       )}
 
-      <ErrorMessage>
+      <ErrorMessage alert>
         {errors.form}
       </ErrorMessage>
 

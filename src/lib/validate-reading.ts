@@ -157,7 +157,7 @@ function bodyTextError(text: string): string | undefined {
 //
 // Only the chosen source's field is read: in link mode the text box is
 // ignored, and in text mode the link is ignored.
-export function validateReadingForm(input: {
+export type ReadingFormInput = {
   source: unknown;
   url: unknown;
   title: unknown;
@@ -165,8 +165,27 @@ export function validateReadingForm(input: {
   gradeLevel: unknown;
   questionCount: unknown;
   questionMode: unknown;
-}): ReadingFormValidation {
-  const values: ReadingFormValues = {
+};
+
+// The form's fields from a submitted FormData (a field the form doesn't
+// have, such as the question mode on the self-learner's form, is null).
+export function readingFormInput(formData: { get(name: string): unknown }): ReadingFormInput {
+  return {
+    source: formData.get("source"),
+    url: formData.get("url"),
+    title: formData.get("title"),
+    bodyText: formData.get("bodyText"),
+    gradeLevel: formData.get("gradeLevel"),
+    questionCount: formData.get("questionCount"),
+    questionMode: formData.get("questionMode"),
+  };
+}
+
+// What the form shows again, as sent (the link and title trimmed). Also
+// what a failed or unanswered submit puts back (create-guard.ts, and the
+// form's own fallback), so the text is never lost.
+export function readingFormValues(input: ReadingFormInput): ReadingFormValues {
+  return {
     source: asString(input.source),
     url: asString(input.url).trim(),
     title: asString(input.title).trim(),
@@ -175,6 +194,10 @@ export function validateReadingForm(input: {
     questionCount: asString(input.questionCount),
     questionMode: asString(input.questionMode),
   };
+}
+
+export function validateReadingForm(input: ReadingFormInput): ReadingFormValidation {
+  const values = readingFormValues(input);
   const errors: ReadingFormErrors = {};
 
   const source = values.source;

@@ -1,6 +1,9 @@
 // Shared by the question actions and panel. Kept out of the actions file
 // because a "use server" file may only export async functions.
 import { QUESTION_MAX_LENGTH } from "@/lib/ai/prompts";
+import type { RejectionKind } from "@/components/action-fallback";
+import { APP_UPDATED_MESSAGE } from "@/components/answer-form-state";
+import { SUBMIT_FAILED_MESSAGE } from "@/lib/answer-check-guard";
 
 export { QUESTION_MAX_LENGTH };
 
@@ -51,4 +54,20 @@ export function shouldAutoGenerate(input: {
   questionCount: number;
 }): boolean {
   return input.flag === "1" && input.status === "draft" && input.mode === "shared" && input.questionCount === 0;
+}
+
+// The panel's state when its request got no usable answer (see
+// withRejectionFallback): on the card or the panel that sent it. Every
+// panel action is safe to repeat (a second publish, generate, save or
+// delete after the first one landed is refused with its own message, or
+// writes the same thing again), so a lost answer is "Something went
+// wrong. Try again."; a deploy since the page loaded, APP_UPDATED_MESSAGE. No client time limit, as for the reading forms
+// (see reading-form-fallback.ts).
+export function questionPanelFallback(kind: RejectionKind, formData: FormData): QuestionActionState {
+  const intent = formData.get("intent");
+  return {
+    intent: isQuestionIntent(intent) ? intent : undefined,
+    questionId: String(formData.get("questionId") ?? "") || undefined,
+    error: kind === "app_updated" ? APP_UPDATED_MESSAGE : SUBMIT_FAILED_MESSAGE,
+  };
 }
