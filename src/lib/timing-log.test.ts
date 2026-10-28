@@ -95,6 +95,11 @@ describe("pageRequestKind", () => {
     assert.equal(pageRequestKind(new Headers({ rsc: "1" })), "rsc");
     assert.equal(pageRequestKind(new Headers({ rsc: "1", "next-router-prefetch": "1" })), "prefetch");
   });
+
+  it("tells a server action's re-render apart, before the other kinds", () => {
+    assert.equal(pageRequestKind(new Headers({ "next-action": "7f3a", accept: "text/x-component" })), "action");
+    assert.equal(pageRequestKind(new Headers({ "next-action": "7f3a", rsc: "1" })), "action");
+  });
 });
 
 describe("logPageReady", () => {
@@ -132,6 +137,13 @@ describe("logPageReady", () => {
     const { parsed, write } = lines();
     logPageReady({ path: "self", source: "not_found", questionsMs: 0, totalMs: 12, request: "rsc" }, write);
     assert.deepEqual(Object.keys(parsed()[0]), ["event", "path", "source", "questionsMs", "totalMs", "request"]);
+  });
+
+  it("drops a property it doesn't know", () => {
+    const { parsed, write } = lines();
+    const fields = { path: "self" as const, source: "cached" as const, questionsMs: 3, totalMs: 9, request: "action" as const };
+    logPageReady({ ...fields, ...{ generated: true, studentId: "s-1" } } as typeof fields, write);
+    assert.deepEqual(parsed(), [{ event: "questions.page_ready", ...fields }]);
   });
 });
 

@@ -29,8 +29,8 @@ export function logEvent(event: string, fields: Record<string, LogValue>, write:
   }
 }
 
-// "shared": a teacher's set (or a per-student reading's sample, with
-// intent "sample"); "per_student": a student's own set; "self": a
+// "shared": a teacher's set; "per_student": a student's own set, or a
+// per-student reading's sample (intent "sample"); "self": a
 // self-learner's set.
 export type GenerateMode = QuestionMode | "self";
 
@@ -84,12 +84,16 @@ export function pageReadySource(view: StudentReadingView, mode: GenerateMode | u
   }
 }
 
-// How the request reached the page: a full page load, or a client
+// How the request reached the page: a full page load, a client
 // navigation or router.refresh (the pending view's refreshes; an RSC
-// request), from Next's own request headers.
-export type PageRequestKind = "document" | "rsc" | "prefetch";
+// request), a server action's re-render (Next-Action, with no RSC
+// header), or a prefetch, from Next's own request headers. Both pages
+// have a loading.tsx, so a prefetch stops at the loading boundary and
+// rarely renders the page: "prefetch" will seldom appear, which is fine.
+export type PageRequestKind = "document" | "rsc" | "action" | "prefetch";
 
 export function pageRequestKind(headers: Pick<Headers, "get">): PageRequestKind {
+  if (headers.get("next-action")) return "action";
   if (headers.get("next-router-prefetch")) return "prefetch";
   return headers.get("rsc") === "1" ? "rsc" : "document";
 }
@@ -106,6 +110,7 @@ export function instanceAgeMs(): number | undefined {
 // read, or the per-student lookup and any write); totalMs covers the
 // page's server data from its start (session, reading, questions,
 // progress). readingId only when it is a uuid (it comes from the URL).
+// Fields are picked by name, so an extra property is never logged.
 export function logPageReady(
   fields: {
     readingId?: string;
@@ -119,5 +124,18 @@ export function logPageReady(
   },
   write?: LineWriter,
 ): void {
-  logEvent("questions.page_ready", fields, write);
+  logEvent(
+    "questions.page_ready",
+    {
+      readingId: fields.readingId,
+      mode: fields.mode,
+      path: fields.path,
+      source: fields.source,
+      questionsMs: fields.questionsMs,
+      totalMs: fields.totalMs,
+      request: fields.request,
+      instanceAgeMs: fields.instanceAgeMs,
+    },
+    write,
+  );
 }

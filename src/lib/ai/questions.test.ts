@@ -19,6 +19,7 @@ import {
 } from "./questions";
 import { QUESTION_EFFORT, QUESTION_MAX_TOKENS, QUESTION_WRITE_DEADLINE_MS } from "./settings";
 import { gatewayErrors, retried } from "./test-fixtures";
+import { questionsGenerateReporter } from "../timing-log";
 
 const BODY = "Mia found a fox in the snow. ".repeat(20);
 
@@ -518,6 +519,48 @@ describe("write report (the questions.generate log)", () => {
     const { reports, options } = collect();
     await writeQuestionSet(model, input, options);
     assert.equal(reports[0].httpRequests, 2);
+  });
+
+  it("a throwing reporter doesn't fail a good write or report it twice", async () => {
+    const { model } = fakeModel([message([toolUse({ questions: THREE })])]);
+    const outcomes: string[] = [];
+    const onReport = (r: WriteReport) => {
+      outcomes.push(r.outcome);
+      throw new Error("reporter broke");
+    };
+    assert.deepEqual(await writeQuestionSet(model, input, { onReport }), THREE);
+    assert.deepEqual(outcomes, ["ok"]);
+  });
+
+  it("a throwing reporter doesn't replace the write's own error", async () => {
+    const { model } = fakeModel([retried(gatewayErrors.rateLimited())]);
+    const outcomes: string[] = [];
+    const onReport = (r: WriteReport) => {
+      outcomes.push(r.outcome);
+      throw new Error("reporter broke");
+    };
+    await assert.rejects(writeQuestionSet(model, input, { onReport }), (error) => questionErrorKind(error) === "busy");
+    assert.deepEqual(outcomes, ["busy"]);
+  });
+
+  it("the real reporter's line never carries an error's text, only the allowed keys", async () => {
+    const { model } = fakeModel([new Error(`upstream echoed the request: ${BODY}`)]);
+    const lines: string[] = [];
+    const onReport = questionsGenerateReporter(
+      { readingId: "6f1c2a52-3c0e-4b8e-9b7a-2f0d1e4c5a6b", mode: "per_student" },
+      (line) => lines.push(line),
+    );
+    await assert.rejects(writeQuestionSet(model, input, { onReport, now: steppingClock() }));
+    assert.equal(lines.length, 1);
+    assert.ok(!lines[0].includes("Mia found a fox"));
+    assert.deepEqual(Object.keys(JSON.parse(lines[0])).sort(), [
+      "attempts",
+      "durationMs",
+      "event",
+      "mode",
+      "outcome",
+      "readingId",
+    ]);
   });
 
   describe("timeout", () => {

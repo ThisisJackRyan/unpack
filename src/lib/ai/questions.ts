@@ -200,8 +200,14 @@ async function writeValidated(
   const started = now();
   let attempts = 0;
   let httpRequests = 0;
-  const report = (outcome: WriteOutcome) =>
-    options.onReport?.({ outcome, durationMs: Math.round(now() - started), attempts, httpRequests });
+  // A throwing reporter must not fail a good write or replace its error.
+  const report = (outcome: WriteOutcome) => {
+    try {
+      options.onReport?.({ outcome, durationMs: Math.round(now() - started), attempts, httpRequests });
+    } catch {
+      // The report is lost; the write's result stands.
+    }
+  };
   const signal = AbortSignal.timeout(options.deadlineMs ?? QUESTION_WRITE_DEADLINE_MS);
   let problem: string | undefined;
   try {

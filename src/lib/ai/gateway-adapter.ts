@@ -65,9 +65,10 @@ export function createGatewayCall(options: GatewayCallOptions): ModelCall {
   const fetch = withRequestTimeout(options.timeoutMs, options.fetch);
   const shared = createGateway({ apiKey: options.apiKey ?? "", fetch });
   return async (request, { signal, onRequest }): Promise<ModelReply> => {
-    // A provider of its own when the caller counts requests, so concurrent
-    // calls never share a counter. Building one is cheap: no request is
-    // made until the call.
+    // A provider of its own when the caller counts requests: the counting
+    // fetch is fixed when a provider is built, so a shared provider would
+    // add every concurrent call's requests to one counter. Building one is
+    // cheap: no request is made until the call.
     const provider = onRequest
       ? createGateway({ apiKey: options.apiKey ?? "", fetch: countingFetch(onRequest, fetch) })
       : shared;
