@@ -53,7 +53,7 @@ SaaS teacher subscription.
 
 ## Risks
 - False rejections frustrating struggling readers (handled by 3 tries plus a teacher challenge).
-- Child privacy (COPPA/FERPA) because users are young. Self-learner accounts are 13+ only (a confirmation checkbox; no birthdate stored); younger readers use a class code. What we store and for how long: [Student data and privacy](privacy.md). Teachers can delete a student and all of their work.
+- Child privacy (COPPA/FERPA) because users are young. Self-learner accounts are 13+ only (a neutral birth month and year screen; the answer is never stored); younger readers use a class code. What we store and for how long: [Student data and privacy](privacy.md). Teachers can delete a student and all of their work.
 - AI cost per retry.
 - Incumbents adding a gate.
 - Pasted AI answers (lower priority for now; copy-paste blocked, which is a speed bump, not security).
