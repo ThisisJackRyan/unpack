@@ -127,15 +127,21 @@ describe("the month and year never leave the action", () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 
   it("both actions set the cookie on an under-13 answer and check it on every send", () => {
-    for (const path of ["../app/welcome/actions.ts", "../app/settings/actions.ts"]) {
-      const source = read(path);
-      assert.match(source, /ageGated: await readAgeGate\(\)/, path);
-      assert.match(source, /if \(choice\.ageGate === "set"\) await setAgeGate\(\);/, path);
+    // /welcome's steps are in welcome-core.ts (the action passes the cookie in).
+    assert.match(read("../app/welcome/actions.ts"), /ageGated: await readAgeGate\(\),\n\s+now: new Date\(\),\n\s+setAgeGate,/);
+    const welcome = read("../app/welcome/welcome-core.ts");
+    assert.match(welcome, /ageGated: deps\.ageGated/);
+    assert.match(welcome, /await deps\.setAgeGate\(\);\n\s+const deleted = await deps\.deleteUnder13\(account\.clerkUserId\);/);
+    const settings = read("../app/settings/actions.ts");
+    assert.match(settings, /ageGated: await readAgeGate\(\)/);
+    assert.match(settings, /if \(choice\.ageGate === "set"\) await setAgeGate\(\);/);
+    for (const [path, source] of [["welcome-core.ts", welcome], ["settings/actions.ts", settings]]) {
       // Read only inside the parse call: never logged, kept, or returned.
       assert.equal(source.match(/BIRTH_(MONTH|YEAR)_FIELD/g)?.length, 4, path);
-      assert.doesNotMatch(source, /console\.[a-z]+\([^)]*birth/i, path);
+      assert.doesNotMatch(source, /(console\.[a-z]+|logError)\([^)]*birth/i, path);
       assert.doesNotMatch(source, /birthMonth:(?!\s*formData)|birthYear:(?!\s*formData)/, path);
     }
+    assert.doesNotMatch(read("../app/welcome/actions.ts"), /BIRTH_|birth/i);
   });
 
   it("the cookie holds only the gate value", () => {

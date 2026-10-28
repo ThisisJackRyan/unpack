@@ -24,7 +24,7 @@ const CHOICES: { role: AccountRole; title: string; line: string }[] = [
 // answer is for. The server checks it. When it says no (now, or the
 // cookie from before), the class note with a link to /join takes its
 // place, with no way to send self-learner again. On /welcome a fresh
-// under-13 answer has deleted the account (state.signOutTo): the note
+// "no" from the server has deleted the account (state.signOutTo): the note
 // stays while the form signs the user out to /join. firstRun (/welcome):
 // with the cookie, an account with no role gets only the class note, no
 // choices at all (the action refuses teacher too).
