@@ -51,12 +51,15 @@ export async function chooseRoleCore(formData: FormData, deps: ChooseRoleDeps): 
       if (choice.ageGate === "kept") return { state: { role: kept, ageGate: true } };
       // A fresh under-13 answer: the cookie first (it holds no id, so it
       // stays whatever happens next), then the account is deleted, and the
-      // form signs the user out to UNDER_13_EXIT_PATH. A role saved by
-      // another tab first keeps the account (has_role): the class note only.
+      // action redirects to UNDER_13_EXIT_PATH. Not a returned state: a
+      // cookie set in an action makes Next render the current page again
+      // in the same response, and /welcome can't load a deleted account.
+      // A redirect renders the target instead. A role saved by another
+      // tab first keeps the account (has_role): the class note only.
       await deps.setAgeGate();
       const deleted = await deps.deleteUnder13(account.clerkUserId);
       if (deleted === "has_role") return { state: { role: kept, ageGate: true } };
-      return { state: { ageGate: true, signOutTo: UNDER_13_EXIT_PATH } };
+      return { redirect: UNDER_13_EXIT_PATH };
     }
     return { state: { errors: choice.errors, role: kept } };
   }
@@ -72,4 +75,12 @@ export async function chooseRoleCore(formData: FormData, deps: ChooseRoleDeps): 
   if (outcome.status === "saved" || outcome.status === "already_chosen") return { redirect: homeFor(outcome.role) };
   if (outcome.status === "age_required") return { state: { errors: { age: AGE_REQUIRED_MESSAGE }, role: kept } };
   return { state: { errors: { form: ROLE_SAVE_FAILED_MESSAGE }, role: kept } };
+}
+
+// The action's last step: redirect (Next's redirect() throws, so the
+// action never returns) or hand back the form's state. Passed redirect so
+// tests can check the path without Next.
+export function finishChooseRole(result: ChooseRoleResult, redirect: (path: string) => never): RoleFormState {
+  if ("redirect" in result) redirect(result.redirect);
+  return result.state;
 }

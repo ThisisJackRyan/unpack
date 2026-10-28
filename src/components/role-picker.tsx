@@ -1,12 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useClerk } from "@clerk/nextjs";
 import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { BIRTH_MONTH_FIELD, BIRTH_YEAR_FIELD, SWITCH_CONFIRM_VALUE, type AccountRole } from "@/lib/account-role";
 import { MONTH_NAMES } from "@/lib/age-screen";
 import { ErrorMessage } from "./error-message";
-import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, signOutTo, type RoleFormState } from "./role-form-state";
+import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, type RoleFormState } from "./role-form-state";
 import { field, primaryButtonLarge, secondaryButtonLarge } from "./ui";
 
 const CHOICES: { role: AccountRole; title: string; line: string }[] = [
@@ -24,8 +23,8 @@ const CHOICES: { role: AccountRole; title: string; line: string }[] = [
 // answer is for. The server checks it. When it says no (now, or the
 // cookie from before), the class note with a link to /join takes its
 // place, with no way to send self-learner again. On /welcome a fresh
-// "no" from the server has deleted the account (state.signOutTo): the note
-// stays while the form signs the user out to /join. firstRun (/welcome):
+// "no" from the server deletes the account and the action redirects to
+// /join, so the form never sees it. firstRun (/welcome):
 // with the cookie, an account with no role gets only the class note, no
 // choices at all (the action refuses teacher too).
 //
@@ -75,9 +74,8 @@ export function RolePicker({
   const errors = state.errors ?? {};
   const gated = !ageConfirmed && (ageGated || state.ageGate === true);
   const askAge = !ageConfirmed && !gated;
-  const leaving = state.signOutTo;
   // Only the class note: nothing left to choose.
-  const onlyNote = Boolean(leaving) || (firstRun && gated);
+  const onlyNote = firstRun && gated;
   const gateShown = gated && (role === "self_learner" || onlyNote);
   const ageError = ageErrorCleared ? undefined : errors.age;
   const age = ageNote(ageError);
@@ -92,12 +90,6 @@ export function RolePicker({
   useEffect(() => {
     if (warning) warningHeading.current?.focus();
   }, [warning]);
-
-  // The account is gone: sign out, then /join.
-  const { signOut } = useClerk();
-  useEffect(() => {
-    if (leaving) void signOutTo(leaving, signOut, (path) => window.location.assign(path));
-  }, [leaving, signOut]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     const submitter = (e.nativeEvent as SubmitEvent).submitter;
@@ -241,15 +233,9 @@ export function RolePicker({
               Ask your teacher for a class code, then join their class to read and answer questions. You don’t need an
               account for that.
             </p>
-            {leaving ? (
-              <p role="status" className="text-base font-semibold text-ink-950">
-                Taking you there…
-              </p>
-            ) : (
-              <Link href="/join" className={`${primaryButtonLarge} sm:self-start`}>
-                Join with a code
-              </Link>
-            )}
+            <Link href="/join" className={`${primaryButtonLarge} sm:self-start`}>
+              Join with a code
+            </Link>
           </section>
         )}
       </div>

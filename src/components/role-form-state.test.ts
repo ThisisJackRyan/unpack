@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { AGE_REQUIRED_MESSAGE } from "@/lib/account-role";
-import { AGE_ERROR_ID, AGE_HINT_ID, ageNote, signOutTo } from "./role-form-state";
+import { AGE_ERROR_ID, AGE_HINT_ID, ageNote } from "./role-form-state";
 
 describe("ageNote", () => {
   it("shows the hint, described by the hint, with no error", () => {
@@ -28,31 +28,10 @@ describe("ageNote", () => {
   });
 });
 
-describe("signOutTo", () => {
-  it("signs out with Clerk's redirect to the path", async () => {
-    const calls: unknown[] = [];
-    const navigated: string[] = [];
-    await signOutTo("/join", async (options) => calls.push(options), (path) => navigated.push(path));
-    assert.deepEqual(calls, [{ redirectUrl: "/join" }]);
-    assert.deepEqual(navigated, []);
-  });
-
-  it("goes to the path anyway when Clerk's sign-out throws", async () => {
-    const navigated: string[] = [];
-    await signOutTo(
-      "/join",
-      async () => {
-        throw new Error("session gone");
-      },
-      (path) => navigated.push(path),
-    );
-    assert.deepEqual(navigated, ["/join"]);
-  });
-
-  it("the role picker signs out to state.signOutTo, and shows only the class note while it does", () => {
+describe("the under-13 exit", () => {
+  it("the role picker has no sign-out path: the action redirects to /join instead", () => {
     const source = readFileSync(new URL("./role-picker.tsx", import.meta.url), "utf8");
-    assert.match(source, /const leaving = state\.signOutTo;/);
-    assert.match(source, /if \(leaving\) void signOutTo\(leaving, signOut, \(path\) => window\.location\.assign\(path\)\)/);
+    assert.doesNotMatch(source, /useClerk|signOut/);
     assert.match(source, /\{!onlyNote && \(\n\s+<fieldset/);
   });
 });
@@ -60,7 +39,7 @@ describe("signOutTo", () => {
 describe("the teacher pick with the age gate cookie (no role yet)", () => {
   it("/welcome shows only the class note: no role choices, no submit button", () => {
     const picker = readFileSync(new URL("./role-picker.tsx", import.meta.url), "utf8");
-    assert.match(picker, /const onlyNote = Boolean\(leaving\) \|\| \(firstRun && gated\);/);
+    assert.match(picker, /const onlyNote = firstRun && gated;/);
     assert.match(picker, /const gateShown = gated && \(role === "self_learner" \|\| onlyNote\);/);
     assert.match(picker, /\{!warning && !gateShown && \(/);
     const welcome = readFileSync(new URL("../app/welcome/page.tsx", import.meta.url), "utf8");
