@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
-import { ACCOUNT_ROUTE_PATTERNS, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
+import { ACCOUNT_ROUTE_PATTERNS, clerkAuthorizedParties, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/auth-routes";
 import { isQaPath, qaRoutesEnabled } from "@/lib/qa-routes";
 
 // Account routes require a Clerk session: the teacher area, the
@@ -26,7 +26,9 @@ const clerk = clerkMiddleware(
   },
   // A signed-out visit to an account route goes to our own /sign-in page,
   // even if NEXT_PUBLIC_CLERK_SIGN_IN_URL isn't set on the deploy.
-  { signInUrl: SIGN_IN_PATH, signUpUrl: SIGN_UP_PATH },
+  // authorizedParties (Production only) rejects session tokens issued for
+  // another origin; previews and local dev pass none (see auth-routes.ts).
+  { signInUrl: SIGN_IN_PATH, signUpUrl: SIGN_UP_PATH, authorizedParties: clerkAuthorizedParties() },
 );
 
 // The test-only /qa routes skip Clerk, and only while UNPACK_QA_ROUTES=1

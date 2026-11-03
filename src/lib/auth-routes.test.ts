@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ACCOUNT_ROUTE_PATTERNS, AFTER_AUTH_PATH, AFTER_SIGN_OUT_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "./auth-routes";
+import { ACCOUNT_ROUTE_PATTERNS, AFTER_AUTH_PATH, clerkAuthorizedParties, AFTER_SIGN_OUT_PATH, SIGN_IN_PATH, SIGN_UP_PATH } from "./auth-routes";
 
 // Every pattern is a plain prefix followed by "(.*)".
 function isProtected(path: string): boolean {
@@ -59,4 +59,29 @@ test("the root layout turns Clerk telemetry off and tolerates extension attribut
   assert.match(layout, /<body [^>]*suppressHydrationWarning/);
   // Only those two: nothing else hides a hydration mismatch.
   assert.equal(layout.match(/suppressHydrationWarning/g)?.length, 3); // two props + the comment
+});
+
+test("Clerk's authorizedParties is the production origin in Vercel Production only", () => {
+  assert.deepEqual(clerkAuthorizedParties({ VERCEL_ENV: "production", NODE_ENV: "production" }), ["https://unpackreading.com"]);
+  assert.deepEqual(clerkAuthorizedParties({ VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "unpackreading.com" }), [
+    "https://unpackreading.com",
+  ]);
+  assert.deepEqual(clerkAuthorizedParties({ VERCEL_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "unpack.vercel.app" }), [
+    "https://unpackreading.com",
+    "https://unpack.vercel.app",
+  ]);
+  for (const env of [
+    { VERCEL_ENV: "preview", NODE_ENV: "production", VERCEL_PROJECT_PRODUCTION_URL: "unpackreading.com" },
+    { VERCEL_ENV: "development" },
+    { NODE_ENV: "production" },
+    { NODE_ENV: "development" },
+    {},
+  ]) {
+    assert.equal(clerkAuthorizedParties(env), undefined, JSON.stringify(env));
+  }
+});
+
+test("the proxy passes clerkAuthorizedParties to clerkMiddleware", () => {
+  const proxy = readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
+  assert.match(proxy, /signInUrl: SIGN_IN_PATH, signUpUrl: SIGN_UP_PATH, authorizedParties: clerkAuthorizedParties\(\)/);
 });

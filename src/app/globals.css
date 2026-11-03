@@ -186,3 +186,11 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
+
+/* The student reading page's Go to questions and Back to reading anchors
+   scroll smoothly, unless reduced motion is asked for. */
+@media (prefers-reduced-motion: no-preference) {
+  html:has(#student-reading-page) {
+    scroll-behavior: smooth;
+  }
+}
