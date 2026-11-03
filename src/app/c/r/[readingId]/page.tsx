@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LimitNotice } from "@/components/limit-notice";
 import { NoCopyText } from "@/components/no-copy";
-import { backLink, card } from "@/components/ui";
+import { backLink, card, focusRing, secondaryButton } from "@/components/ui";
 import { questionCountLabel } from "@/lib/question-modes";
 import {
   answerStage,
@@ -58,6 +58,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // the questions: answer boxes and one check for all of them, up to 3 tries
 // (and EFFORT_CHECK_LIMIT checks), then a note to the teacher. A passed
 // reading shows its passing answers.
+//
+// On lg+ screens the passage and the questions sit side by side, the page
+// widening past the student column (StudentShell's max-w-2xl) and the
+// passage scrolling on its own, so the answer boxes stay in reach. Narrow
+// screens keep them stacked, with "Go to questions" and "Back to reading"
+// anchors between the two: plain links, so they work without JS, and their
+// targets take focus (tabIndex) with a visible ring while targeted.
+const jumpTargetFocus = "scroll-mt-6 target:focus:outline-3 target:focus:outline-offset-2 target:focus:outline-primary-600";
+
 export default async function StudentReadingPage({ params }: Props) {
   const started = monotonicNow();
   const { readingId } = await params;
@@ -84,7 +93,10 @@ export default async function StudentReadingPage({ params }: Props) {
   await logReady();
 
   return (
-    <div className="flex flex-col gap-8">
+    <div
+      id="student-reading-page"
+      className="flex flex-col gap-8 lg:ml-[calc(50%-min(40rem,50vw-1.5rem))] lg:w-[min(80rem,100vw-3rem)]"
+    >
       <Link href="/c" className={`${backLink} self-start text-lg`}>
         <span aria-hidden="true">←</span> <span className="break-words">Back to {session.class.name}</span>
       </Link>
@@ -96,91 +108,114 @@ export default async function StudentReadingPage({ params }: Props) {
         </h1>
       </div>
 
-      <article aria-labelledby="reading-title" className={`${card} px-6 py-8 sm:px-12 sm:py-12`}>
-        <NoCopyText className="flex max-w-[65ch] flex-col gap-7 text-xl leading-[1.85] text-ink-900 sm:text-[1.375rem]">
-          {readingParagraphs(reading.bodyText).map((p, i) => (
-            <p key={i} className="break-words whitespace-pre-line">
-              {p}
-            </p>
-          ))}
-        </NoCopyText>
-      </article>
+      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
+        {/* On lg+, its own scroll box beside the questions: focusable, so the
+            keyboard can scroll it too. */}
+        <article
+          id="reading"
+          aria-labelledby="reading-title"
+          tabIndex={0}
+          className={`${card} px-6 py-8 sm:px-12 sm:py-12 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto lg:px-10 ${focusRing} ${jumpTargetFocus}`}
+        >
+          <a href="#questions-heading" className={`${secondaryButton} mb-7 lg:hidden`}>
+            Go to questions <span aria-hidden="true">↓</span>
+          </a>
+          <NoCopyText className="flex max-w-[65ch] flex-col gap-7 text-xl leading-[1.85] text-ink-900 sm:text-[1.375rem]">
+            {readingParagraphs(reading.bodyText).map((p, i) => (
+              <p key={i} className="break-words whitespace-pre-line">
+                {p}
+              </p>
+            ))}
+          </NoCopyText>
+        </article>
 
-      {/* Stays mounted while the stage changes, so a screen reader hears the
-          result of a check or a sent note. */}
-      <p aria-live="polite" className="sr-only">
-        {stage ? stageAnnouncement(stage) : ""}
-      </p>
+        <div className="flex flex-col gap-8">
+          {/* Stays mounted while the stage changes, so a screen reader hears the
+              result of a check or a sent note. */}
+          <p aria-live="polite" className="sr-only">
+            {stage ? stageAnnouncement(stage) : ""}
+          </p>
 
-      <section aria-labelledby="questions-heading" className="flex flex-col gap-5">
-        <h2 id="questions-heading" className="text-2xl font-bold tracking-tight text-ink-950">
-          Your questions
-        </h2>
+          <section aria-labelledby="questions-heading" className="flex flex-col gap-5">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <h2
+                id="questions-heading"
+                tabIndex={-1}
+                className={`rounded-lg text-2xl font-bold tracking-tight text-ink-950 ${jumpTargetFocus}`}
+              >
+                Your questions
+              </h2>
+              <a href="#reading" className={`${backLink} lg:hidden`}>
+                <span aria-hidden="true">↑</span> Back to reading
+              </a>
+            </div>
 
-        {view.kind === "questions" && stage && (
-          <>
-            {/* Right after the last try or check, with no note yet: the
-                note is next (the class home says the same), and the teacher
-                can also give one more try; the note box stays below. Once
-                a note is sent: the class home's badge, Waiting for your
-                teacher. */}
-            {stageStatus(stage) === "waiting" ? (
-              <div className="flex flex-col gap-1">
-                <p className="text-2xl font-bold text-ink-950">{SEND_NOTE_LEAD}</p>
-                <p className="text-lg text-ink-700">{TEACHER_CAN_GIVE_TRY}</p>
+            {view.kind === "questions" && stage && (
+              <>
+                {/* Right after the last try or check, with no note yet: the
+                    note is next (the class home says the same), and the teacher
+                    can also give one more try; the note box stays below. Once
+                    a note is sent: the class home's badge, Waiting for your
+                    teacher. */}
+                {stageStatus(stage) === "waiting" ? (
+                  <div className="flex flex-col gap-1">
+                    <p className="text-2xl font-bold text-ink-950">{SEND_NOTE_LEAD}</p>
+                    <p className="text-lg text-ink-700">{TEACHER_CAN_GIVE_TRY}</p>
+                  </div>
+                ) : (
+                  stageWaitsForTeacher(stage) && (
+                    <div className="self-start">
+                      <StudentReadingStatusBadge audience="student" status={stageStatus(stage)} />
+                    </div>
+                  )
+                )}
+                <QuestionsStage readingId={reading.id} studentId={session.student.id} questions={view.questions} stage={stage} />
+                {stage.kind !== "answer" && (
+                  <ClearAnswerDrafts
+                    mode="class"
+                    readingId={reading.id}
+                    ownerId={session.student.id}
+                    keepNote={stage.kind === "out_of_tries" || stage.kind === "check_limit"}
+                  />
+                )}
+              </>
+            )}
+
+            {view.kind === "pending" && (
+              <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES} />
+            )}
+
+            {/* Limits, not errors: amber notes. */}
+            {view.kind === "limit_reached" && <LimitNotice large>{view.message}</LimitNotice>}
+
+            {(view.kind === "calls_used_up" || view.kind === "throttled") && (
+              <div className="flex flex-col items-start gap-5">
+                <LimitNotice large>{view.message}</LimitNotice>
+                <RetryButton />
               </div>
-            ) : (
-              stageWaitsForTeacher(stage) && (
-                <div className="self-start">
-                  <StudentReadingStatusBadge audience="student" status={stageStatus(stage)} />
-                </div>
-              )
             )}
-            <QuestionsStage readingId={reading.id} studentId={session.student.id} questions={view.questions} stage={stage} />
-            {stage.kind !== "answer" && (
-              <ClearAnswerDrafts
-                mode="class"
-                readingId={reading.id}
-                ownerId={session.student.id}
-                keepNote={stage.kind === "out_of_tries" || stage.kind === "check_limit"}
-              />
+
+            {view.kind === "error" && (
+              <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+                <p aria-live="polite" className="text-lg text-ink-700">
+                  {view.message}
+                </p>
+                <RetryButton />
+              </div>
             )}
-          </>
-        )}
 
-        {view.kind === "pending" && (
-          <PendingRefresh retryAfterMs={view.retryAfterMs} maxTries={PENDING_MAX_REFRESHES} />
-        )}
-
-        {/* Limits, not errors: amber notes. */}
-        {view.kind === "limit_reached" && <LimitNotice large>{view.message}</LimitNotice>}
-
-        {(view.kind === "calls_used_up" || view.kind === "throttled") && (
-          <div className="flex flex-col items-start gap-5">
-            <LimitNotice large>{view.message}</LimitNotice>
-            <RetryButton />
-          </div>
-        )}
-
-        {view.kind === "error" && (
-          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
-            <p aria-live="polite" className="text-lg text-ink-700">
-              {view.message}
-            </p>
-            <RetryButton />
-          </div>
-        )}
-
-        {/* Question writing is unavailable: coming back later is the fix,
-            so no Try again. */}
-        {view.kind === "unavailable" && (
-          <div className={`${card} flex flex-col items-start gap-5 p-6`}>
-            <p role="status" className="text-lg text-ink-700">
-              {view.message}
-            </p>
-          </div>
-        )}
-      </section>
+            {/* Question writing is unavailable: coming back later is the fix,
+                so no Try again. */}
+            {view.kind === "unavailable" && (
+              <div className={`${card} flex flex-col items-start gap-5 p-6`}>
+                <p role="status" className="text-lg text-ink-700">
+                  {view.message}
+                </p>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
