@@ -1,3 +1,5 @@
+import { isVercelProduction, type Env } from "./env";
+
 // The in-app Clerk pages and the routes that need a Clerk session. Pure
 // data, shared by src/proxy.ts, the root layout's ClerkProvider, and the
 // landing page, so tests can check that the sign-in and sign-up pages stay
@@ -31,3 +33,27 @@ export const ACCOUNT_ROUTE_PATTERNS = [
   "/settings(.*)",
   "/home(.*)",
 ];
+
+// The production app's origin.
+export const PRODUCTION_ORIGIN = "https://unpackreading.com";
+
+// clerkMiddleware's authorizedParties: in Vercel Production only, a session
+// token is accepted only if it was issued for our own origin (its azp
+// claim), so a token minted on another site isn't honored here. The literal
+// is always listed; Vercel's production domain (VERCEL_PROJECT_PRODUCTION_URL)
+// is added if it differs, so a change on Vercel can't lock everyone out.
+// Previews (their URLs change per deploy) and local dev get none at all.
+export function clerkAuthorizedParties(env: Env = process.env): string[] | undefined {
+  if (!isVercelProduction(env)) return undefined;
+  const parties = [PRODUCTION_ORIGIN];
+  const vercel = env.VERCEL_PROJECT_PRODUCTION_URL?.trim().toLowerCase();
+  if (vercel) {
+    try {
+      const origin = new URL(vercel.includes("://") ? vercel : `https://${vercel}`).origin;
+      if (!parties.includes(origin)) parties.push(origin);
+    } catch {
+      // Not a URL: the literal alone.
+    }
+  }
+  return parties;
+}

@@ -13,3 +13,11 @@ export type Env = Partial<Record<string, string | undefined>>;
 export function isProduction(env: Env = process.env): boolean {
   return env.NODE_ENV === "production" || env.VERCEL_ENV === "production";
 }
+
+// Whether this is Vercel's Production environment only (VERCEL_ENV), not
+// a preview and not local dev. Unlike isProduction, Preview is false here:
+// for settings tied to the production domain (see clerkAuthorizedParties
+// in auth-routes.ts).
+export function isVercelProduction(env: Env = process.env): boolean {
+  return env.VERCEL_ENV === "production";
+}
