@@ -111,6 +111,6 @@ Flags: `--expect-db=<host>/<dbname>` and `--expect-instance=<ins_id>` (always re
 ## Deploy (Vercel)
 
 1. **Enable AI Gateway on the Vercel project** (Vercel dashboard, the project, AI Gateway) before the first deploy. Deployments authenticate to the gateway with the project's OIDC token, but OIDC alone, without the gateway enabled for the project, gets 401s: every question write and effort check then fails as unavailable ("Question writing isn’t available right now.") (and checks are given back). No `AI_GATEWAY_API_KEY` is needed on Vercel. Calls are pinned to Anthropic as the only provider. If the gateway runs out of credits, the server logs "AI Gateway is out of credits (402)" and failed calls are given back.
-2. Set the env vars from `.env.example` for Production and Preview: the Clerk keys, `DATABASE_URL`, `JOIN_IP_HASH_SECRET` (required in production), both Turnstile keys (required in production), and `CLERK_WEBHOOK_SIGNING_SECRET`.
+2. Set the env vars from `.env.example` for Production and Preview: the Clerk keys, `DATABASE_URL`, `JOIN_IP_HASH_SECRET` (required in production), and both Turnstile keys (required in production). Also set `CLERK_WEBHOOK_SIGNING_SECRET`: each Clerk instance has its own signing secret, so Production uses the prod instance’s secret, and Preview and Development use the dev instance’s secret.
 3. Apply any new migrations, through `drizzle/0009_hardening.sql`, to the production database by hand (see Migrations below).
 4. Set up the Clerk webhook (below) for the production Clerk instance.
